@@ -1089,6 +1089,9 @@ static RPCHelpMan gettxoutsetinfo()
         ret.pushKV("disk_size", stats.nDiskSize);
         ret.pushKV("total_amount", ValueFromAmount(stats.nTotalAmount));
     } else {
+        if (g_coin_stats_index && (g_coin_stats_index->GetSummary().synced == false)) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to read UTXO set. Coinstatsindex is still syncing.");
+        }
         throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to read UTXO set");
     }
     return ret;
