@@ -7,6 +7,8 @@
 #define BITCOIN_NODE_COINSTATS_H
 
 #include <amount.h>
+#include <chain.h>
+#include <coins.h>
 #include <streams.h>
 #include <uint256.h>
 
@@ -36,12 +38,14 @@ struct CCoinsStats
     //! The number of coins contained.
     uint64_t coins_count{0};
 
+    bool from_index{false};
+
     CCoinsStats(CoinStatsHashType hash_type) : m_hash_type(hash_type) {}
     CCoinsStats() : m_hash_type(CoinStatsHashType::HASH_SERIALIZED) {}
 };
 
 //! Calculate statistics about the unspent transaction output set
-bool GetUTXOStats(CCoinsView* view, CCoinsStats& stats, const std::function<void()>& interruption_point = {});
+bool GetUTXOStats(CCoinsView* view, CCoinsStats& stats, const std::function<void()>& interruption_point = {}, const CBlockIndex* pindex = nullptr);
 
 uint64_t GetBogoSize(const CScript& scriptPubKey);
 
