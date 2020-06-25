@@ -20,7 +20,7 @@
 namespace {
 class TestConditionChecker : public ThresholdConditionChecker
 {
-private:
+public:
     mutable ThresholdConditionCache m_cache;
 
 public:
@@ -48,22 +48,10 @@ FUZZ_TARGET_INIT(versionbits, initialize)
 
     const size_t n_blocks = period * 23;
 
-    // pick the timestamp to switch based on a block
-    // note states will change *after* these blocks because mediantime lags
-    int start_block = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * 20);
-    int end_block = fuzzed_data_provider.ConsumeIntegralInRange<int>(start_block, period * 20);
-
-    // between genesis and 2100-01-01
-    const uint32_t block_start_time = fuzzed_data_provider.ConsumeIntegralInRange<uint32_t>(1231006505, 4102444800);
-
-    // otherwise 10min blocks might cause uint32_t time to overflow if
-    // block_start_time is at the end of the region
-    assert(n_blocks < 320000);
-
     Consensus::VBitsDeployment dep;
     dep.bit = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, VERSIONBITS_NUM_BITS-1);
-    dep.nStartTime = block_start_time + start_block*600;
-    dep.nTimeout = block_start_time + end_block*600;
+    dep.startheight = fuzzed_data_provider.ConsumeIntegralInRange<int>(0, period * 20);
+    dep.timeoutheight = fuzzed_data_provider.ConsumeIntegralInRange<int>(dep.startheight, period * 20);
     dep.threshold = threshold;
 
     TestConditionChecker checker(dep, period);
@@ -172,10 +160,10 @@ FUZZ_TARGET_INIT(versionbits, initialize)
             }
 
             if (prev != nullptr && block_offset == 0) {
-                int64_t prev_mtp = prev->GetMedianTimePast();
-                if (prev_mtp >= dep.nTimeout) {
+                int height = prev->nHeight + 1;
+                if (height >= dep.timeoutheight) {
                     assert(state == ThresholdState::ACTIVE || state == ThresholdState::FAILED);
-                } else if (prev_mtp >= dep.nStartTime) {
+                } else if (height >= dep.startheight) {
                     assert(state != ThresholdState::DEFINED);
                 }
             }
@@ -218,7 +206,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
 
         CBlockHeader header;
         header.nVersion = signal ? ver_signal : ver_nosignal;
-        header.nTime = block_start_time + blocks.size() * 600;
+        header.nTime = 1231006505 + blocks.size() * 600;
         header.nBits = 0x1d00ffff;
 
         CBlockIndex* current_block = new CBlockIndex{header};
