@@ -1839,7 +1839,7 @@ private:
 public:
     explicit WarningBitsConditionChecker(const Consensus::Params& params, int bitIn) :
         ThresholdConditionChecker(m_dep_storage, params.nMinerConfirmationWindow),
-        m_min_height{params.MinBIP9WarningHeight},
+        m_min_height{params.MinVBitsWarningHeight},
         m_params{params}
     {
         m_dep_storage.bit = bitIn;
