@@ -22,6 +22,7 @@ enum class CoinStatsHashType {
 
 struct CCoinsStats
 {
+    CoinStatsHashType m_hash_type;
     int nHeight{0};
     uint256 hashBlock{};
     uint64_t nTransactions{0};
@@ -33,9 +34,12 @@ struct CCoinsStats
 
     //! The number of coins contained.
     uint64_t coins_count{0};
+
+    CCoinsStats(CoinStatsHashType hash_type) : m_hash_type(hash_type) {}
+    CCoinsStats() : m_hash_type(CoinStatsHashType::HASH_SERIALIZED) {}
 };
 
 //! Calculate statistics about the unspent transaction output set
-bool GetUTXOStats(CCoinsView* view, CCoinsStats& stats, const CoinStatsHashType hash_type, const std::function<void()>& interruption_point = {});
+bool GetUTXOStats(CCoinsView* view, CCoinsStats& stats, const std::function<void()>& interruption_point = {});
 
 #endif // BITCOIN_NODE_COINSTATS_H

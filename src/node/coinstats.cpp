@@ -126,9 +126,9 @@ static bool GetUTXOStats(CCoinsView* view, CCoinsStats& stats, T hash_obj, const
     return true;
 }
 
-bool GetUTXOStats(CCoinsView* view, CCoinsStats& stats, CoinStatsHashType hash_type, const std::function<void()>& interruption_point)
+bool GetUTXOStats(CCoinsView* view, CCoinsStats& stats, const std::function<void()>& interruption_point)
 {
-    switch (hash_type) {
+    switch (stats.m_hash_type) {
     case(CoinStatsHashType::HASH_SERIALIZED): {
         CHashWriter ss(SER_GETHASH, PROTOCOL_VERSION);
         return GetUTXOStats(view, stats, ss, interruption_point);

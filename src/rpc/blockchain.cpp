@@ -1068,14 +1068,13 @@ static RPCHelpMan gettxoutsetinfo()
 {
     UniValue ret(UniValue::VOBJ);
 
-    CCoinsStats stats;
-    ::ChainstateActive().ForceFlushStateToDisk();
-
     const CoinStatsHashType hash_type{request.params[0].isNull() ? CoinStatsHashType::HASH_SERIALIZED : ParseHashType(request.params[0].get_str())};
+    CCoinsStats stats{hash_type};
+    ::ChainstateActive().ForceFlushStateToDisk();
 
     CCoinsView* coins_view = WITH_LOCK(cs_main, return &ChainstateActive().CoinsDB());
     NodeContext& node = EnsureNodeContext(request.context);
-    if (GetUTXOStats(coins_view, stats, hash_type, node.rpc_interruption_point)) {
+    if (GetUTXOStats(coins_view, stats, node.rpc_interruption_point)) {
         ret.pushKV("height", (int64_t)stats.nHeight);
         ret.pushKV("bestblock", stats.hashBlock.GetHex());
         ret.pushKV("transactions", (int64_t)stats.nTransactions);
@@ -2424,7 +2423,7 @@ static RPCHelpMan dumptxoutset()
 UniValue CreateUTXOSnapshot(NodeContext& node, CChainState& chainstate, CAutoFile& afile)
 {
     std::unique_ptr<CCoinsViewCursor> pcursor;
-    CCoinsStats stats;
+    CCoinsStats stats{CoinStatsHashType::NONE};
     CBlockIndex* tip;
 
     {
@@ -2444,7 +2443,7 @@ UniValue CreateUTXOSnapshot(NodeContext& node, CChainState& chainstate, CAutoFil
 
         chainstate.ForceFlushStateToDisk();
 
-        if (!GetUTXOStats(&chainstate.CoinsDB(), stats, CoinStatsHashType::NONE, node.rpc_interruption_point)) {
+        if (!GetUTXOStats(&chainstate.CoinsDB(), stats, node.rpc_interruption_point)) {
             throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to read UTXO set");
         }
 
