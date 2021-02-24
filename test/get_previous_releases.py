@@ -62,6 +62,16 @@ SHA256_SUMS = {
 "930b96e774f5fe4795b9a3c0d4fd1da278d2b0777c9401dea3ba7453f8bbe14c":  "bitcoin-0.20.1-win64-setup.exe",
 "e59fba67afce011d32b5d723a3a0be12da1b8a34f5d7966e504520c48d64716d":  "bitcoin-0.20.1-win64.zip",
 "376194f06596ecfa40331167c39bc70c355f960280bd2a645fdbf18f66527397":  "bitcoin-0.20.1-x86_64-linux-gnu.tar.gz",
+
+"43416854330914992bbba2d0e9adf2a6fff4130be9af8ae2ef1186e743d9a3fe": "bitcoin-0.21.0-aarch64-linux-gnu.tar.gz",
+"f028af308eda45a3c4c90f9332f96b075bf21e3495c945ebce48597151808176": "bitcoin-0.21.0-arm-linux-gnueabihf.tar.gz",
+"695fb624fa6423f5da4f443b60763dd1d77488bfe5ef63760904a7b54e91298d": "bitcoin-0.21.0-osx64.tar.gz",
+"6223fd23d07133a6bfa2aa3d2554a09dc1d790d28ce67b0085d3fdcc1c126e05": "bitcoin-0.21.0-osx.dmg",
+"f8b2adfeae021a672effbc7bd40d5c48d6b94e53b2dd660f787340bf1a52e4e9": "bitcoin-0.21.0-riscv64-linux-gnu.tar.gz",
+"1a91202c62ee49fb64d57a52b8d6d01cd392fffcbef257b573800f9289655f37": "bitcoin-0.21.0.tar.gz",
+"54050748ef4d4f000ea1ece472491b3e5fd546efc74ed52119354b2893f6624b": "bitcoin-0.21.0-win64-setup.exe",
+"1d0052c4ce80227fb6d0bc1c4e673ba21033e219c1f935d25f130ef7f43360d4": "bitcoin-0.21.0-win64.zip",
+"da7766775e3f9c98d7a9145429f2be8297c2672fe5b118fd3dc2411fb48e0032": "bitcoin-0.21.0-x86_64-linux-gnu.tar.gz",
 }
 
 @contextlib.contextmanager

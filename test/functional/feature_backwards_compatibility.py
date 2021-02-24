@@ -33,11 +33,12 @@ from test_framework.util import (
 class BackwardsCompatibilityTest(BitcoinTestFramework):
     def set_test_params(self):
         self.setup_clean_chain = True
-        self.num_nodes = 7
+        self.num_nodes = 8
         # Add new version after each release:
         self.extra_args = [
             ["-addresstype=bech32"], # Pre-release: use to mine blocks
             ["-nowallet", "-walletrbf=1", "-addresstype=bech32"], # Pre-release: use to receive coins, swap wallets, etc
+            ["-nowallet", "-walletrbf=1", "-addresstype=bech32"], # v0.21.0
             ["-nowallet", "-walletrbf=1", "-addresstype=bech32"], # v0.20.1
             ["-nowallet", "-walletrbf=1", "-addresstype=bech32"], # v0.19.1
             ["-nowallet", "-walletrbf=1", "-addresstype=bech32"], # v0.18.1
@@ -54,6 +55,7 @@ class BackwardsCompatibilityTest(BitcoinTestFramework):
         self.add_nodes(self.num_nodes, extra_args=self.extra_args, versions=[
             None,
             None,
+            210000,
             200100,
             190100,
             180100,
@@ -203,9 +205,10 @@ class BackwardsCompatibilityTest(BitcoinTestFramework):
                     assert info['keypoolsize'] == 0
         else:
             # Descriptor wallets appear to be corrupted wallets to old software
-            for node in self.nodes[2:]:
-              for wallet_name in ["w1", "w2", "w3"]:
-                assert_raises_rpc_error(-4, "Wallet file verification failed: wallet.dat corrupt, salvage failed", node.loadwallet, wallet_name)
+            # and loadwallet is introduced in v0.17.0
+            if node.version >= 170000 and node.version < 210000:
+                for wallet_name in ["w1", "w2", "w3"]:
+                    assert_raises_rpc_error(-4, "Wallet file verification failed: wallet.dat corrupt, salvage failed", node.loadwallet, wallet_name)
 
         # RPC loadwallet failure causes bitcoind to exit, in addition to the RPC
         # call failure, so the following test won't work:
@@ -213,7 +216,6 @@ class BackwardsCompatibilityTest(BitcoinTestFramework):
 
         # Instead, we stop node and try to launch it with the wallet:
         self.stop_node(-2)
-        node_v17.assert_start_raises_init_error(["-wallet=w3"], "Error: Error loading w3: Wallet requires newer version of Bitcoin Core")
         if self.options.descriptors:
             # Descriptor wallets appear to be corrupted wallets to old software
             node_v17.assert_start_raises_init_error(["-wallet=w1"], "Error: wallet.dat corrupt, salvage failed")
