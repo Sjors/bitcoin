@@ -104,10 +104,10 @@ static bool GetUTXOStats(CCoinsView* view, CCoinsStats& stats, T hash_obj, const
     stats.nHeight = pindex->nHeight;
 
     // Use CoinStatsIndex if it is available and hash_type none was requested
-    if ((stats.m_hash_type == CoinStatsHashType::MUHASH || stats.m_hash_type == CoinStatsHashType::NONE) && g_coin_stats_index) {
-        stats.from_index = true;
+    if ((stats.m_hash_type == CoinStatsHashType::MUHASH || stats.m_hash_type == CoinStatsHashType::NONE) && g_coin_stats_index && stats.from_index) {
         return g_coin_stats_index->LookupStats(pindex, stats);
     }
+    stats.from_index = false;
 
     PrepareHash(hash_obj, stats);
 

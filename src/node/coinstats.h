@@ -38,7 +38,10 @@ struct CCoinsStats
     //! The number of coins contained.
     uint64_t coins_count{0};
 
-    bool from_index{false};
+    //! Initially signals if the index should be used (when available) for
+    //! catching the values for this Coinstats object. After the values
+    //! are added it signals if the index was actually used or not.
+    bool from_index{true};
 
     // Following values are only available from coinstats index
     CAmount total_subsidy{0};

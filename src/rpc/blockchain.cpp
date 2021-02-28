@@ -1077,6 +1077,7 @@ static RPCHelpMan gettxoutsetinfo()
                 {
                     {"hash_type", RPCArg::Type::STR, /* default */ "hash_serialized_2", "Which UTXO set hash should be calculated. Options: 'hash_serialized_2' (the legacy algorithm), 'muhash', 'none'."},
                     {"hash_or_height", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "The block hash or height of the target height (only available with coinstatsindex)", "", {"", "string or numeric"}},
+                    {"use_index", RPCArg::Type::BOOL, /* default */ "true", "Use Coinstatsindex even when it is available."},
                 },
                 RPCResult{
                     RPCResult::Type::OBJ, "", "",
@@ -1126,6 +1127,7 @@ static RPCHelpMan gettxoutsetinfo()
 
     const CoinStatsHashType hash_type{request.params[0].isNull() ? CoinStatsHashType::HASH_SERIALIZED : ParseHashType(request.params[0].get_str())};
     CCoinsStats stats{hash_type};
+    stats.from_index = request.params[2].isNull() || request.params[2].get_bool();
     ::ChainstateActive().ForceFlushStateToDisk();
 
     if (!request.params[1].isNull()) {
