@@ -52,6 +52,7 @@ class CoinStatsIndexTest(BitcoinTestFramework):
         self._test_coin_stats_index()
         self._test_use_index_option()
         self._test_reorg_index()
+        self._test_index_rejects_hash_serialized()
 
     def block_sanity_check(self, block_info):
         block_subsidy = 50
@@ -280,6 +281,12 @@ class CoinStatsIndexTest(BitcoinTestFramework):
         self.wait_until(lambda: not try_rpc(-32603, "Unable to read UTXO set", index_node.gettxoutsetinfo, 'muhash'))
         res3 = index_node.gettxoutsetinfo('muhash', 111)
         assert_equal(res2, res3)
+
+    def _test_index_rejects_hash_serialized(self):
+        self.log.info("Test that the rpc rejects trying to use the legacy hash with the index")
+
+        assert_raises_rpc_error(-8, "hash_serialized_2 hash type can not be queried for a specific block", self.nodes[1].gettxoutsetinfo, 'hash_serialized_2', 111)
+        assert_raises_rpc_error(-8, "hash_serialized_2 hash type can not be queried for a specific block", self.nodes[1].gettxoutsetinfo, 'hash_serialized_2', 111, False)
 
 if __name__ == '__main__':
     CoinStatsIndexTest().main()
