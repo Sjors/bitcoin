@@ -261,7 +261,7 @@ class CoinStatsIndexTest(BitcoinTestFramework):
         assert_equal(index_node.gettxoutsetinfo('muhash')['height'], 110)
 
         # Add two new blocks
-        block = index_node.generate(1)
+        block = index_node.generate(1)[0]
         self.wait_until(lambda: not try_rpc(-32603, "Unable to read UTXO set", index_node.gettxoutsetinfo, 'muhash'))
         res = index_node.gettxoutsetinfo('muhash', None, False)
         index_node.generate(1)
@@ -269,9 +269,14 @@ class CoinStatsIndexTest(BitcoinTestFramework):
 
         # Test that the result of the reorged block is not returned for its old block height
         res2 = index_node.gettxoutsetinfo('muhash', 111)
-        assert_equal(res["bestblock"], block[0])
+        assert_equal(res["bestblock"], block)
         assert_equal(res["muhash"], res2["muhash"])
         assert(res["muhash"] != res_invalid["muhash"])
+
+        # Test that requesting reorged out block by hash is still returning correct results
+        res_invalid2 = index_node.gettxoutsetinfo('muhash', reorg_block)
+        assert_equal(res_invalid2["muhash"], res_invalid["muhash"])
+        assert(res["muhash"] != res_invalid2["muhash"])
 
         # Ensure that removing and re-adding blocks yields consistent results
         block = index_node.getblockhash(99)
