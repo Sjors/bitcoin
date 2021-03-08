@@ -41,6 +41,7 @@ public:
         m_dep_storage.startheight= 100;
         m_dep_storage.timeoutheight = 200;
         m_dep_storage.threshold = 9;
+        m_dep_storage.m_min_activation_height = 0;
     }
 
     TestConditionChecker& operator=(const TestConditionChecker& other)

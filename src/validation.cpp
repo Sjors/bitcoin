@@ -1846,6 +1846,7 @@ public:
         m_dep_storage.startheight = 0;
         m_dep_storage.timeoutheight = Consensus::VBitsDeployment::NO_TIMEOUT;
         m_dep_storage.threshold = params.nRuleChangeActivationThreshold;
+        m_dep_storage.m_min_activation_height = 0;
     }
 
     bool Condition(const CBlockIndex* pindex) const override

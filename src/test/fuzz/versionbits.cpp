@@ -162,7 +162,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
             if (prev != nullptr && block_offset == 0) {
                 int height = prev->nHeight + 1;
                 if (height >= dep.timeoutheight) {
-                    assert(state == ThresholdState::ACTIVE || state == ThresholdState::FAILED);
+                    assert(state == ThresholdState::ACTIVE || state == ThresholdState::FAILED || state == ThresholdState::LOCKED_IN);
                 } else if (height >= dep.startheight) {
                     assert(state != ThresholdState::DEFINED);
                 }
@@ -219,7 +219,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
         blocks.push_back(current_block);
     }
 
-    assert(last_state == ThresholdState::ACTIVE || last_state == ThresholdState::FAILED);
+    assert(last_state == ThresholdState::ACTIVE || last_state == ThresholdState::FAILED || last_state == ThresholdState::LOCKED_IN);
 
     for (auto& v : blocks) {
         delete v;
