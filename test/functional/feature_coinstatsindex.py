@@ -252,23 +252,22 @@ class CoinStatsIndexTest(BitcoinTestFramework):
     def _test_reorg_index(self):
         self.log.info("Test that index can handle reorgs")
 
-        # Generate a block, let the index catch up, then invalidate the block
+        # Generate two block, let the index catch up, then invalidate the blocks
         index_node = self.nodes[1]
-        reorg_block = index_node.generatetoaddress(1, index_node.getnewaddress())[0]
+        reorg_blocks = index_node.generatetoaddress(2, index_node.getnewaddress())
+        reorg_block = reorg_blocks[1]
         self.wait_until(lambda: not try_rpc(-32603, "Unable to read UTXO set", index_node.gettxoutsetinfo, 'muhash'))
         res_invalid = index_node.gettxoutsetinfo('muhash')
-        index_node.invalidateblock(reorg_block)
+        index_node.invalidateblock(reorg_blocks[0])
         assert_equal(index_node.gettxoutsetinfo('muhash')['height'], 110)
 
         # Add two new blocks
-        block = index_node.generate(1)[0]
+        block = index_node.generate(2)[1]
         self.wait_until(lambda: not try_rpc(-32603, "Unable to read UTXO set", index_node.gettxoutsetinfo, 'muhash'))
         res = index_node.gettxoutsetinfo('muhash', None, False)
-        index_node.generate(1)
-        self.wait_until(lambda: not try_rpc(-32603, "Unable to read UTXO set", index_node.gettxoutsetinfo, 'muhash'))
 
         # Test that the result of the reorged block is not returned for its old block height
-        res2 = index_node.gettxoutsetinfo('muhash', 111)
+        res2 = index_node.gettxoutsetinfo('muhash', 112)
         assert_equal(res["bestblock"], block)
         assert_equal(res["muhash"], res2["muhash"])
         assert(res["muhash"] != res_invalid["muhash"])
@@ -278,13 +277,17 @@ class CoinStatsIndexTest(BitcoinTestFramework):
         assert_equal(res_invalid2["muhash"], res_invalid["muhash"])
         assert(res["muhash"] != res_invalid2["muhash"])
 
+        # Add another block, so we don't depend on reconsiderblock remembering which
+        # blocks were touched by invalidateblock
+        index_node.generate(1)
+
         # Ensure that removing and re-adding blocks yields consistent results
         block = index_node.getblockhash(99)
         index_node.invalidateblock(block)
         self.wait_until(lambda: not try_rpc(-32603, "Unable to read UTXO set", index_node.gettxoutsetinfo, 'muhash'))
         index_node.reconsiderblock(block)
         self.wait_until(lambda: not try_rpc(-32603, "Unable to read UTXO set", index_node.gettxoutsetinfo, 'muhash'))
-        res3 = index_node.gettxoutsetinfo('muhash', 111)
+        res3 = index_node.gettxoutsetinfo('muhash', 112)
         assert_equal(res2, res3)
 
     def _test_index_rejects_hash_serialized(self):
