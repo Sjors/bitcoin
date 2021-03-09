@@ -42,7 +42,7 @@ FUZZ_TARGET_INIT(versionbits, initialize)
     // const Consensus::Params& params = Params().GetConsensus();
 
     const int period = 100; // params.nMinerConfirmationWindow;
-    const int threshold = 90; // params.nRuleChangeActivationThreshold;
+    const int threshold = 90; // VBitsDeployment.threshold;
 
     assert(0 < threshold && threshold <= period - 2);
 
