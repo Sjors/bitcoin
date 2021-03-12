@@ -17,13 +17,16 @@ class scanblocksTest(BitcoinTestFramework):
     def run_test(self):
         # send 1.0, mempool only
         addr_1 = self.nodes[0].getnewaddress()
-        self.nodes[0].sendtoaddress(addr_1, 1.0)
+        tx1_id = self.nodes[0].sendtoaddress(addr_1, 1.0)
 
         # send 1.0, mempool only
-        self.nodes[0].sendtoaddress("mkS4HXoTYWRTescLGaUTGbtTTYX5EjJyEE", 1.0) # childkey 5 of tpubD6NzVbkrYhZ4WaWSyoBvQwbpLkojyoTZPRsgXELWz3Popb3qkjcJyJUGLnL4qHHoQvao8ESaAstxYSnhyswJ76uZPStJRJCTKvosUCJZL5B
+        tx2_id = self.nodes[0].sendtoaddress("mkS4HXoTYWRTescLGaUTGbtTTYX5EjJyEE", 1.0) # childkey 5 of tpubD6NzVbkrYhZ4WaWSyoBvQwbpLkojyoTZPRsgXELWz3Popb3qkjcJyJUGLnL4qHHoQvao8ESaAstxYSnhyswJ76uZPStJRJCTKvosUCJZL5B
 
         # mine a block and assure that the mined blockhash is in the filterresult
         blockhash = self.nodes[0].generate(1)[0]
+        assert(tx1_id in self.nodes[0].getblock(blockhash)["tx"])
+        assert(tx2_id in self.nodes[0].getblock(blockhash)["tx"])
+
         out = self.nodes[0].scanblocks("start", ["addr("+addr_1+")"])
         assert(blockhash in out['relevant_blocks'])
         assert_equal(self.nodes[0].getblockheader(blockhash)['height'], out['to_height'])
