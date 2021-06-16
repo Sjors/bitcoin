@@ -64,6 +64,8 @@ void TestAddAddressesToSendBook(interfaces::Node& node)
     test.m_node.wallet_client = wallet_client.get();
     node.setContext(&test.m_node);
     std::shared_ptr<CWallet> wallet = std::make_shared<CWallet>(node.context()->chain.get(), "", CreateMockWalletDatabase());
+    wallet->m_default_address_type = OutputType::BECH32;
+
     wallet->SetupLegacyScriptPubKeyMan();
     wallet->LoadWallet();
 
