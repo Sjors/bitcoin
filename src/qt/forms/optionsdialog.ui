@@ -252,6 +252,17 @@
             </property>
            </widget>
           </item>
+          <item>
+           <widget class="QCheckBox" name="bech32m">
+            <property name="toolTip">
+             <string>Generate taproot addresses for wallets that support it. These start with bc1p instead of bc1q. Some other wallets and services can not yet send coins to taproot addresses (bech32m, BIP 350).</string>
+            </property>
+            <property name="text">
+             <string>Use &amp;Taproot</string>
+            </property>
+           </widget>
+          </item>
+
          </layout>
         </widget>
        </item>

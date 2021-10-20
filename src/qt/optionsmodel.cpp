@@ -118,6 +118,12 @@ void OptionsModel::Init(bool resetSettings)
     if (!gArgs.SoftSetBoolArg("-spendzeroconfchange", settings.value("bSpendZeroConfChange").toBool()))
         addOverriddenOption("-spendzeroconfchange");
 
+    // This is a QT-only setting
+    if (!settings.contains("bech32m")) {
+        settings.setValue("bech32m", false);
+    }
+    m_bech32m = settings.value("bech32m").toBool();
+
     if (!settings.contains("external_signer_path"))
         settings.setValue("external_signer_path", "");
 
@@ -349,6 +355,8 @@ QVariant OptionsModel::data(const QModelIndex & index, int role) const
             return settings.value("external_signer_path");
         case SubFeeFromAmount:
             return m_sub_fee_from_amount;
+        case Bech32m:
+            return m_bech32m;
 #endif
         case DisplayUnit:
             return nDisplayUnit;
@@ -409,6 +417,10 @@ bool OptionsModel::setData(const QModelIndex & index, const QVariant & value, in
         case MinimizeOnClose:
             fMinimizeOnClose = value.toBool();
             settings.setValue("fMinimizeOnClose", fMinimizeOnClose);
+            break;
+        case Bech32m:
+            m_bech32m = value.toBool();
+            settings.setValue("bech32m", m_bech32m);
             break;
 
         // default proxy

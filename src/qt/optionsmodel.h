@@ -68,6 +68,7 @@ public:
         DatabaseCache,          // int
         ExternalSignerPath,     // QString
         SpendZeroConfChange,    // bool
+        Bech32m,                // bool
         Listen,                 // bool
         Server,                 // bool
         OptionIDRowCount,
@@ -91,6 +92,7 @@ public:
     bool getUseEmbeddedMonospacedFont() const { return m_use_embedded_monospaced_font; }
     bool getCoinControlFeatures() const { return fCoinControlFeatures; }
     bool getSubFeeFromAmount() const { return m_sub_fee_from_amount; }
+    bool getBech32m() const { return m_bech32m; }
     const QString& getOverriddenByCommandLine() { return strOverriddenByCommandLine; }
 
     /* Explicit setters */
@@ -116,6 +118,8 @@ private:
     bool m_use_embedded_monospaced_font;
     bool fCoinControlFeatures;
     bool m_sub_fee_from_amount;
+    // Prefer bech32m over bech32 addresses
+    bool m_bech32m;
     /* settings that were overridden by command-line */
     QString strOverriddenByCommandLine;
 

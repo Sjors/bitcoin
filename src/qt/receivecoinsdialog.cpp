@@ -155,6 +155,15 @@ void ReceiveCoinsDialog::on_receiveButton_clicked()
             address_type = OutputType::P2SH_SEGWIT;
         }
     }
+
+    // Downgrade bech32m to bech32 if user has not opted in. This and the corresponding
+    // setting could be removed when sending to bech32m is more broadly supported.
+    if (address_type == OutputType::BECH32M) {
+        if (model && !model->getOptionsModel()->getBech32m()) {
+            address_type = OutputType::BECH32;
+        }
+    }
+
     address = model->getAddressTableModel()->addRow(AddressTableModel::Receive, label, "", address_type);
 
     switch(model->getAddressTableModel()->getEditStatus())
