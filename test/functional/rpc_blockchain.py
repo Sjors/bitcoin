@@ -180,8 +180,11 @@ class BlockchainTest(BitcoinTestFramework):
     def _test_getdeploymentinfo(self):
         self.log.info("Test getdeploymentinfo")
 
+        gbci = self.nodes[0].getblockchaininfo()
         res = self.nodes[0].getdeploymentinfo()
         assert_equal(res, {
+          "hash": gbci["bestblockhash"],
+          "height": gbci["blocks"],
           "deployments": {
             'bip34': {'type': 'buried', 'active': True, 'height': 2},
             'bip66': {'type': 'buried', 'active': True, 'height': 3},

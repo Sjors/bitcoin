@@ -1597,8 +1597,13 @@ static RPCHelpMan getdeploymentinfo()
         {
             {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Default{"chain tip"}, "The block hash at which to query fork state"},
         },
-        RPCResult{
-                            RPCResult::Type::OBJ, "xxxx", "name of the softfork",
+        RPCResult{RPCResult::Type::OBJ, "", "", {
+                            {RPCResult::Type::OBJ, "*", "",
+                            {
+                                {RPCResult::Type::STR, "hash", "block hash"},
+                                {RPCResult::Type::NUM, "height", "block height"},
+                            }},
+                            {RPCResult::Type::OBJ, "xxxx", "name of the softfork",
                             {
                                 {RPCResult::Type::STR, "type", "one of \"buried\", \"bip9\""},
                                 {RPCResult::Type::NUM, "height", /*optional=*/ true, "height of the first block which the rules are or will be enforced (only for \"buried\" type, or \"bip9\" type with \"active\" status)"},
@@ -1622,6 +1627,7 @@ static RPCHelpMan getdeploymentinfo()
                                     }},
                                 }},
                             }},
+        }},
         RPCExamples{ HelpExampleCli("getdeploymentinfo", "") + HelpExampleRpc("getdeploymentinfo", "") },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
         {
@@ -1644,6 +1650,8 @@ static RPCHelpMan getdeploymentinfo()
             const Consensus::Params& consensusParams = Params().GetConsensus();
 
             UniValue deploymentinfo(UniValue::VOBJ);
+            deploymentinfo.pushKV("hash", tip->GetBlockHash().ToString());
+            deploymentinfo.pushKV("height", tip->nHeight);
             deploymentinfo.pushKV("deployments", DeploymentInfo(tip, consensusParams));
             return deploymentinfo;
         },
