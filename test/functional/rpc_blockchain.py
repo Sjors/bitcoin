@@ -191,10 +191,11 @@ class BlockchainTest(BitcoinTestFramework):
             'testdummy': {
                 'type': 'bip9',
                 'bip9': {
-                    'status': 'started',
                     'bit': 28,
                     'start_time': 0,
                     'timeout': 0x7fffffffffffffff,  # testdummy does not have a timeout so is set to the max int64 value
+                    'status': 'started',
+                    'status-next': 'started',
                     'since': 144,
                     'statistics': {
                         'period': 144,
@@ -210,11 +211,12 @@ class BlockchainTest(BitcoinTestFramework):
             'taproot': {
                 'type': 'bip9',
                 'bip9': {
-                    'status': 'active',
                     'start_time': -1,
                     'timeout': 9223372036854775807,
-                    'since': 0,
                     'min_activation_height': 0,
+                    'status': 'active',
+                    'status-next': 'active',
+                    'since': 0,
                 },
                 'height': 0,
                 'active': True
