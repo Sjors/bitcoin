@@ -34,12 +34,14 @@ Type SanitizeType(Type e) {
     return e;
 }
 
-Type ComputeType(NodeType nodetype, Type x, Type y, Type z, uint32_t k, size_t n_subs, size_t n_keys) {
+Type ComputeType(NodeType nodetype, Type x, Type y, Type z, const std::vector<Type>& sub_types, uint32_t k, size_t n_subs, size_t n_keys) {
     // Sanity check on k
     if (nodetype == NodeType::OLDER || nodetype == NodeType::AFTER) {
         assert(k >= 1 && k < 0x80000000UL);
     } else if (nodetype == NodeType::MULTI) {
         assert(k >= 1 && k <= n_keys);
+    } else if (nodetype == NodeType::THRESH) {
+        assert(k >= 1 && k <= n_subs);
     } else {
         assert(k == 0);
     }
@@ -53,7 +55,7 @@ Type ComputeType(NodeType nodetype, Type x, Type y, Type z, uint32_t k, size_t n
                nodetype == NodeType::WRAP_D || nodetype == NodeType::WRAP_V || nodetype == NodeType::WRAP_J ||
                nodetype == NodeType::WRAP_N) {
         assert(n_subs == 1);
-    } else {
+    } else if (nodetype != NodeType::THRESH) {
         assert(n_subs == 0);
     }
     // Sanity check on keys
@@ -198,6 +200,37 @@ Type ComputeType(NodeType nodetype, Type x, Type y, Type z, uint32_t k, size_t n
                 ((x << "i"_mst) && (y << "j"_mst)) ||
                 ((x << "j"_mst) && (y << "i"_mst)))); // k=k_x*k_y*k_z* !(g_x*h_y + h_x*g_y + i_x*j_y + j_x*i_y)
         case NodeType::MULTI: return "Bnudemsk"_mst;
+        case NodeType::THRESH: {
+            bool all_e = true;
+            bool all_m = true;
+            uint32_t args = 0;
+            uint32_t num_s = 0;
+            Type acc_tl = "k"_mst;
+            for (size_t i = 0; i < sub_types.size(); ++i) {
+                Type t = sub_types[i];
+                if (!(t << (i ? "Wdu"_mst : "Bdu"_mst))) return ""_mst; // Require Bdu, Wdu, Wdu, ...
+                if (!(t << "e"_mst)) all_e = false;
+                if (!(t << "m"_mst)) all_m = false;
+                if (t << "s"_mst) num_s += 1;
+                args += (t << "z"_mst) ? 0 : (t << "o"_mst) ? 1 : 2;
+                acc_tl = ((acc_tl | t) & "ghij"_mst) |
+                    // Thresh contains a combination of timelocks if it has threshold > 1 and
+                    // it contains two different children that have different types of timelocks
+                    // Note how if any of the children don't have "k", the parent also does not have "k"
+                    "k"_mst.If(((acc_tl & t) << "k"_mst) && ((k <= 1) ||
+                        ((k > 1) && !(((acc_tl << "g"_mst) && (t << "h"_mst)) ||
+                        ((acc_tl << "h"_mst) && (t << "g"_mst)) ||
+                        ((acc_tl << "i"_mst) && (t << "j"_mst)) ||
+                        ((acc_tl << "j"_mst) && (t << "i"_mst))))));
+            }
+            return "Bdu"_mst |
+                   "z"_mst.If(args == 0) | // z=all z
+                   "o"_mst.If(args == 1) | // o=all z except one o
+                   "e"_mst.If(all_e && num_s == n_subs) | // e=all e and all s
+                   "m"_mst.If(all_e && all_m && num_s >= n_subs - k) | // m=all e, >=(n-k) s
+                   "s"_mst.If(num_s >= n_subs - k + 1) |  // s= >=(n-k+1) s
+                   acc_tl; // timelock info
+            }
     }
     assert(false);
     return ""_mst;
@@ -225,6 +258,7 @@ size_t ComputeScriptLen(NodeType nodetype, Type sub0typ, size_t subsize, uint32_
         case NodeType::OR_C: return subsize + 2;
         case NodeType::OR_I: return subsize + 3;
         case NodeType::ANDOR: return subsize + 3;
+        case NodeType::THRESH: return subsize + n_subs + 1;
         case NodeType::MULTI: return subsize + 3 + (n_keys > 16) + (k > 16) + 34 * n_keys;
     }
     assert(false);

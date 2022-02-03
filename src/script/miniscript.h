@@ -196,6 +196,7 @@ enum class NodeType {
     OR_D,      //!< [X] OP_IFDUP OP_NOTIF [Y] OP_ENDIF
     OR_I,      //!< OP_IF [X] OP_ELSE [Y] OP_ENDIF
     ANDOR,     //!< [X] OP_NOTIF [Z] OP_ELSE [Y] OP_ENDIF
+    THRESH,    //!< [X1] ([Xn] OP_ADD)* [k] OP_EQUAL
     MULTI,     //!< [k] [key_n]* [n] OP_CHECKMULTISIG
     // AND_N(X,Y) is represented as ANDOR(X,Y,0)
     // WRAP_T(X) is represented as AND_V(X,1)
@@ -206,7 +207,7 @@ enum class NodeType {
 namespace internal {
 
 //! Helper function for Node::CalcType.
-Type ComputeType(NodeType nodetype, Type x, Type y, Type z, uint32_t k, size_t n_subs, size_t n_keys);
+Type ComputeType(NodeType nodetype, Type x, Type y, Type z, const std::vector<Type>& sub_types, uint32_t k, size_t n_subs, size_t n_keys);
 
 //! Helper function for Node::CalcScriptLen.
 size_t ComputeScriptLen(NodeType nodetype, Type sub0typ, size_t subsize, uint32_t k, size_t n_subs, size_t n_keys);
@@ -221,11 +222,11 @@ template<typename Key>
 struct Node {
     //! What node type this node is.
     const NodeType nodetype;
-    //! The k parameter (time for OLDER/AFTER, threshold for MULTI)
+    //! The k parameter (time for OLDER/AFTER, threshold for THRESH(_M))
     const uint32_t k = 0;
     //! The keys used by this expression (only for PK_K/PK_H/MULTI)
     const std::vector<Key> keys;
-    //! Subexpressions (for WRAP_*/AND_*/OR_*/ANDOR)
+    //! Subexpressions (for WRAP_*/AND_*/OR_*/ANDOR/THRESH)
     const std::vector<NodeRef<Key>> subs;
 
 private:
@@ -347,12 +348,17 @@ private:
     Type CalcType() const {
         using namespace internal;
 
-        // All nodes can be computed just from the types of the 0-3 subexpexpressions.
+        // THRESH has a variable number of subexpression
+        std::vector<Type> sub_types;
+        if (nodetype == NodeType::THRESH) {
+            for (const auto& sub : subs) sub_types.push_back(sub->GetType());
+        }
+        // All other nodes than THRESH can be computed just from the types of the 0-3 subexpexpressions.
         Type x = subs.size() > 0 ? subs[0]->GetType() : ""_mst;
         Type y = subs.size() > 1 ? subs[1]->GetType() : ""_mst;
         Type z = subs.size() > 2 ? subs[2]->GetType() : ""_mst;
 
-        return SanitizeType(ComputeType(nodetype, x, y, z, k, subs.size(), keys.size()));
+        return SanitizeType(ComputeType(nodetype, x, y, z, sub_types, k, subs.size(), keys.size()));
     }
 
 public:
@@ -401,6 +407,13 @@ public:
                         script << ctx.ToPKBytes(key);
                     }
                     return std::move(script) << node.keys.size() << (verify ? OP_CHECKMULTISIGVERIFY : OP_CHECKMULTISIG);
+                }
+                case NodeType::THRESH: {
+                    CScript script = std::move(subs[0]);
+                    for (size_t i = 1; i < subs.size(); ++i) {
+                        script = (std::move(script) + std::move(subs[i])) << OP_ADD;
+                    }
+                    return std::move(script) << node.k << (verify ? OP_EQUALVERIFY : OP_EQUAL);
                 }
             }
             assert(false);
@@ -490,6 +503,13 @@ public:
                         std::string key_str;
                         if (!ctx.ToString(key, key_str)) return {};
                         str += "," + std::move(key_str);
+                    }
+                    return std::move(str) + ")";
+                }
+                case NodeType::THRESH: {
+                    auto str = std::move(ret) + "thresh(" + ::ToString(node.k);
+                    for (auto& sub : subs) {
+                        str += "," + std::move(sub);
                     }
                     return std::move(str) + ")";
                 }
@@ -596,6 +616,12 @@ enum class ParseContext {
     /** OR_I will construct an or_i node from the last two constructed nodes. */
     OR_I,
 
+    /** THRESH will read a wrapped expression, and then look for a COMMA. If
+     * no comma follows, it will construct a thresh node from the appropriate
+     * number of constructed children. Otherwise, it will recurse with another
+     * THRESH. */
+    THRESH,
+
     /** COMMA expects the next element to be ',' and fails if not. */
     COMMA,
     /** CLOSE_BRACKET expects the next element to be ')' and fails if not. */
@@ -624,15 +650,15 @@ inline NodeRef<Key> Parse(Span<const char> in, const Ctx& ctx)
 {
     using namespace spanparsing;
 
-    std::vector<std::tuple<ParseContext, int64_t>> to_parse;
+    // The two integers are used to hold state for thresh()
+    std::vector<std::tuple<ParseContext, int64_t, int64_t>> to_parse;
     std::vector<NodeRef<Key>> constructed;
 
-    to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1);
+    to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1, -1);
 
     while (!to_parse.empty()) {
-        int64_t k = -1; // multi() threshold
         // Get the current context we are decoding within
-        auto [cur_context, n] = to_parse.back();
+        auto [cur_context, n, k] = to_parse.back();
         to_parse.pop_back();
 
         switch (cur_context) {
@@ -648,32 +674,32 @@ inline NodeRef<Key> Parse(Span<const char> in, const Ctx& ctx)
             // If there is no colon, this loop won't execute
             for (int j = 0; j < colon_index; ++j) {
                 if (in[j] == 'a') {
-                    to_parse.emplace_back(ParseContext::ALT, -1);
+                    to_parse.emplace_back(ParseContext::ALT, -1, -1);
                 } else if (in[j] == 's') {
-                    to_parse.emplace_back(ParseContext::SWAP, -1);
+                    to_parse.emplace_back(ParseContext::SWAP, -1, -1);
                 } else if (in[j] == 'c') {
-                    to_parse.emplace_back(ParseContext::CHECK, -1);
+                    to_parse.emplace_back(ParseContext::CHECK, -1, -1);
                 } else if (in[j] == 'd') {
-                    to_parse.emplace_back(ParseContext::DUP_IF, -1);
+                    to_parse.emplace_back(ParseContext::DUP_IF, -1, -1);
                 } else if (in[j] == 'j') {
-                    to_parse.emplace_back(ParseContext::NON_ZERO, -1);
+                    to_parse.emplace_back(ParseContext::NON_ZERO, -1, -1);
                 } else if (in[j] == 'n') {
-                    to_parse.emplace_back(ParseContext::ZERO_NOTEQUAL, -1);
+                    to_parse.emplace_back(ParseContext::ZERO_NOTEQUAL, -1, -1);
                 } else if (in[j] == 'v') {
-                    to_parse.emplace_back(ParseContext::VERIFY, -1);
+                    to_parse.emplace_back(ParseContext::VERIFY, -1, -1);
                 } else if (in[j] == 'u') {
-                    to_parse.emplace_back(ParseContext::WRAP_U, -1);
+                    to_parse.emplace_back(ParseContext::WRAP_U, -1, -1);
                 } else if (in[j] == 't') {
-                    to_parse.emplace_back(ParseContext::WRAP_T, -1);
+                    to_parse.emplace_back(ParseContext::WRAP_T, -1, -1);
                 } else if (in[j] == 'l') {
                     // The l: wrapper is equivalent to or_i(0,X)
                     constructed.push_back(MakeNodeRef<Key>(NodeType::JUST_0));
-                    to_parse.emplace_back(ParseContext::OR_I, -1);
+                    to_parse.emplace_back(ParseContext::OR_I, -1, -1);
                 } else {
                     return {};
                 }
             }
-            to_parse.emplace_back(ParseContext::EXPR, -1);
+            to_parse.emplace_back(ParseContext::EXPR, -1, -1);
             in = in.subspan(colon_index + 1);
             break;
         }
@@ -746,36 +772,45 @@ inline NodeRef<Key> Parse(Span<const char> in, const Ctx& ctx)
                 if (keys.size() < 1 || keys.size() > 20) return {};
                 if (k < 1 || k > (int64_t)keys.size()) return {};
                 constructed.push_back(MakeNodeRef<Key>(NodeType::MULTI, std::move(keys), k));
+            } else if (Const("thresh(", in)) {
+                int next_comma = FindNextChar(in, ',');
+                if (next_comma < 1) return {};
+                if (!ParseInt64(std::string(in.begin(), in.begin() + next_comma), &k)) return {};
+                if (k < 1) return {};
+                in = in.subspan(next_comma + 1);
+                // n = 1 here because we read the first WRAPPED_EXPR before reaching THRESH
+                to_parse.emplace_back(ParseContext::THRESH, 1, k);
+                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1, -1);
             } else if (Const("andor(", in)) {
-                to_parse.emplace_back(ParseContext::ANDOR, -1);
-                to_parse.emplace_back(ParseContext::CLOSE_BRACKET, -1);
-                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1);
-                to_parse.emplace_back(ParseContext::COMMA, -11);
-                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1);
-                to_parse.emplace_back(ParseContext::COMMA, -1);
-                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1);
+                to_parse.emplace_back(ParseContext::ANDOR, -1, -1);
+                to_parse.emplace_back(ParseContext::CLOSE_BRACKET, -1, -1);
+                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1, -1);
+                to_parse.emplace_back(ParseContext::COMMA, -1, -1);
+                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1, -1);
+                to_parse.emplace_back(ParseContext::COMMA, -1, -1);
+                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1, -1);
             } else {
                 if (Const("and_n(", in)) {
-                    to_parse.emplace_back(ParseContext::AND_N, -1);
+                    to_parse.emplace_back(ParseContext::AND_N, -1, -1);
                 } else if (Const("and_b(", in)) {
-                    to_parse.emplace_back(ParseContext::AND_B, -1);
+                    to_parse.emplace_back(ParseContext::AND_B, -1, -1);
                 } else if (Const("and_v(", in)) {
-                    to_parse.emplace_back(ParseContext::AND_V, -1);
+                    to_parse.emplace_back(ParseContext::AND_V, -1, -1);
                 } else if (Const("or_b(", in)) {
-                    to_parse.emplace_back(ParseContext::OR_B, -1);
+                    to_parse.emplace_back(ParseContext::OR_B, -1, -1);
                 } else if (Const("or_c(", in)) {
-                    to_parse.emplace_back(ParseContext::OR_C, -1);
+                    to_parse.emplace_back(ParseContext::OR_C, -1, -1);
                 } else if (Const("or_d(", in)) {
-                    to_parse.emplace_back(ParseContext::OR_D, -1);
+                    to_parse.emplace_back(ParseContext::OR_D, -1, -1);
                 } else if (Const("or_i(", in)) {
-                    to_parse.emplace_back(ParseContext::OR_I, -1);
+                    to_parse.emplace_back(ParseContext::OR_I, -1, -1);
                 } else {
                     return {};
                 }
-                to_parse.emplace_back(ParseContext::CLOSE_BRACKET, -1);
-                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1);
-                to_parse.emplace_back(ParseContext::COMMA, -1);
-                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1);
+                to_parse.emplace_back(ParseContext::CLOSE_BRACKET, -1, -1);
+                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1, -1);
+                to_parse.emplace_back(ParseContext::COMMA, -1, -1);
+                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1, -1);
             }
             break;
         }
@@ -851,6 +886,28 @@ inline NodeRef<Key> Parse(Span<const char> in, const Ctx& ctx)
             auto mid = std::move(constructed.back());
             constructed.pop_back();
             constructed.back() = MakeNodeRef<Key>(NodeType::ANDOR, Vector(std::move(constructed.back()), std::move(mid), std::move(right)));
+            break;
+        }
+        case ParseContext::THRESH: {
+            if (in.size() < 1) return {};
+            if (in[0] == ',') {
+                in = in.subspan(1);
+                to_parse.emplace_back(ParseContext::THRESH, n+1, k);
+                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1, -1);
+            } else if (in[0] == ')') {
+                if (k > n) return {};
+                in = in.subspan(1);
+                // Children are constructed in reverse order, so iterate from end to beginning
+                std::vector<NodeRef<Key>> subs;
+                for (int i = 0; i < n; ++i) {
+                    subs.push_back(std::move(constructed.back()));
+                    constructed.pop_back();
+                }
+                std::reverse(subs.begin(), subs.end());
+                constructed.push_back(MakeNodeRef<Key>(NodeType::THRESH, std::move(subs), k));
+            } else {
+                return {};
+            }
             break;
         }
         case ParseContext::COMMA: {
