@@ -62,6 +62,9 @@ std::unique_ptr<const TestData> g_testdata;
 struct KeyConverter {
     typedef CPubKey Key;
 
+    //! Public keys in text form are their usual hex notation (no xpubs, ...).
+    bool ToString(const CPubKey& key, std::string& ret) const { ret = HexStr(key); return true; }
+
     //! Convert a public key to bytes.
     std::vector<unsigned char> ToPKBytes(const CPubKey& key) const { return {key.begin(), key.end()}; }
 
@@ -90,6 +93,121 @@ using NodeType = miniscript::NodeType;
 using NodeRef = miniscript::NodeRef<CPubKey>;
 template<typename... Args> NodeRef MakeNodeRef(Args&&... args) { return miniscript::MakeNodeRef<CPubKey>(std::forward<Args>(args)...); }
 using miniscript::operator"" _mst;
+
+NodeRef GenNode(miniscript::Type typ, int complexity);
+
+//! Generate a random valid miniscript node of the given type and complexity.
+NodeRef RandomNode(miniscript::Type typ, int complexity) {
+    assert(complexity > 0);
+    NodeRef ret;
+    do {
+        ret = GenNode(typ, complexity);
+    } while (!ret || !ret->IsValid() || !(ret->GetType() << typ));
+    return ret;
+}
+
+//! Generate a vector of valid miniscript nodes of the given types, and a specified complexity of their sum.
+std::vector<NodeRef> MultiNode(int complexity, const std::vector<miniscript::Type>& types)
+{
+    int nodes = types.size();
+    assert(complexity >= nodes);
+    std::vector<int> subcomplex(nodes, 1);
+    if (nodes == 1) {
+        subcomplex[0] = complexity;
+    } else {
+        // This is a silly inefficient way to construct a multinomial distribution.
+        for (int i = 0; i < complexity - nodes; ++i) {
+            subcomplex[InsecureRandRange(nodes)]++;
+        }
+    }
+    std::vector<NodeRef> subs;
+    for (int i = 0; i < nodes; ++i) {
+        subs.push_back(RandomNode(types[i], subcomplex[i]));
+    }
+    return subs;
+}
+
+//! Generate a random (but occasionally invalid) miniscript node of the given type and complexity.
+NodeRef GenNode(miniscript::Type typ, int complexity) {
+    if (typ << "B"_mst) {
+        // Generate a "B" node.
+        if (complexity == 1) {
+            switch (InsecureRandBits(2)) {
+                case 0: return MakeNodeRef(InsecureRandBool() ? NodeType::JUST_0 : NodeType::JUST_1);
+                case 1: return MakeNodeRef(InsecureRandBool() ? NodeType::OLDER : NodeType::AFTER, 1 + InsecureRandRange((1ULL << (1 + InsecureRandRange(31))) - 1));
+                // Reserved for hashes, use WRAP_C for now:
+                case 2: return MakeNodeRef(NodeType::WRAP_C, MultiNode(complexity, Vector("K"_mst)));
+                case 3: return MakeNodeRef(NodeType::WRAP_C, MultiNode(complexity, Vector("K"_mst)));
+            }
+            assert(false);
+        }
+        switch (InsecureRandRange(7 + (complexity >= 3) * 7 + (complexity >= 4) * 2)) {
+            // Complexity >= 2
+            case 0: return MakeNodeRef(NodeType::WRAP_C, MultiNode(complexity, Vector("K"_mst)));
+            case 1: return MakeNodeRef(NodeType::WRAP_D, MultiNode(complexity - 1, Vector("V"_mst)));
+            case 2: return MakeNodeRef(NodeType::WRAP_J, MultiNode(complexity - 1, Vector("B"_mst)));
+            case 3: return MakeNodeRef(NodeType::WRAP_N, MultiNode(complexity - 1, Vector("B"_mst)));
+            case 4: return MakeNodeRef(NodeType::OR_I, Cat(MultiNode(complexity - 1, Vector("B"_mst)), Vector(MakeNodeRef(NodeType::JUST_0))));
+            case 5: return MakeNodeRef(NodeType::OR_I, Cat(Vector(MakeNodeRef(NodeType::JUST_0)), MultiNode(complexity - 1, Vector("B"_mst))));
+            case 6: return MakeNodeRef(NodeType::AND_V, Cat(MultiNode(complexity - 1, Vector("V"_mst)), Vector(MakeNodeRef(NodeType::JUST_1))));
+            // Complexity >= 3
+            case 7: return MakeNodeRef(NodeType::AND_V, MultiNode(complexity - 1, Vector("V"_mst, "B"_mst)));
+            case 8: return MakeNodeRef(NodeType::ANDOR, Cat(MultiNode(complexity - 1, Vector("B"_mst, "B"_mst)), Vector(MakeNodeRef(NodeType::JUST_0))));
+            case 9: return MakeNodeRef(NodeType::AND_B, MultiNode(complexity - 1, Vector("B"_mst, "W"_mst)));
+            case 10: return MakeNodeRef(NodeType::OR_B, MultiNode(complexity - 1, Vector("B"_mst, "W"_mst)));
+            case 11: return MakeNodeRef(NodeType::OR_D, MultiNode(complexity - 1, Vector("B"_mst, "B"_mst)));
+            case 12: return MakeNodeRef(NodeType::OR_I, MultiNode(complexity - 1, Vector("B"_mst, "B"_mst)));
+            case 13: {
+                if (complexity != 3) return {};
+                int nkeys = 1 + (InsecureRandRange(15) * InsecureRandRange(25)) / 17;
+                int sigs = 1 + InsecureRandRange(nkeys);
+                std::vector<CPubKey> keys;
+                for (int i = 0; i < nkeys; ++i) keys.push_back(g_testdata->pubkeys[InsecureRandRange(255)]);
+                return MakeNodeRef(NodeType::MULTI, std::move(keys), sigs);
+            }
+            // Complexity >= 4
+            case 15: // Reserved for thresh()
+            case 14: return MakeNodeRef(NodeType::ANDOR, MultiNode(complexity - 1, Vector("B"_mst, "B"_mst, "B"_mst)));
+        }
+    } else if (typ << "V"_mst) {
+        // Generate a "V" node.
+        switch (InsecureRandRange(1 + (complexity >= 3) * 3 + (complexity >= 4))) {
+            // Complexity >= 1
+            case 0: return MakeNodeRef(NodeType::WRAP_V, MultiNode(complexity, Vector("B"_mst)));
+            // Complexity >= 3
+            case 1: return MakeNodeRef(NodeType::AND_V, MultiNode(complexity - 1, Vector("V"_mst, "V"_mst)));
+            case 2: return MakeNodeRef(NodeType::OR_C, MultiNode(complexity - 1, Vector("B"_mst, "V"_mst)));
+            case 3: return MakeNodeRef(NodeType::OR_I, MultiNode(complexity - 1, Vector("V"_mst, "V"_mst)));
+            // Complexity >= 4
+            case 4: return MakeNodeRef(NodeType::ANDOR, MultiNode(complexity - 1, Vector("B"_mst, "V"_mst, "V"_mst)));
+        }
+    } else if (typ << "W"_mst) {
+        // Generate a "W" node by wrapping a "B" node.
+        auto sub = RandomNode("B"_mst, complexity);
+        if (sub->GetType() << "o"_mst) {
+            if (InsecureRandBool()) return MakeNodeRef(NodeType::WRAP_S, Vector(std::move(sub)));
+        }
+        return MakeNodeRef(NodeType::WRAP_A, Vector(std::move(sub)));
+    } else if (typ << "K"_mst) {
+        // Generate a "K" node.
+        if (complexity == 1 || complexity == 2) {
+            if (InsecureRandBool()) {
+                return MakeNodeRef(NodeType::PK_K, Vector(g_testdata->pubkeys[InsecureRandRange(255)]));
+            } else {
+                return MakeNodeRef(NodeType::PK_H, Vector(g_testdata->pubkeys[InsecureRandRange(255)]));
+            }
+        }
+        switch (InsecureRandRange(2 + (complexity >= 4))) {
+            // Complexity >= 3
+            case 0: return MakeNodeRef(NodeType::AND_V, MultiNode(complexity - 1, Vector("V"_mst, "K"_mst)));
+            case 1: return MakeNodeRef(NodeType::OR_I, MultiNode(complexity - 1, Vector("K"_mst, "K"_mst)));
+            // Complexity >= 4
+            case 2: return MakeNodeRef(NodeType::ANDOR, MultiNode(complexity - 1, Vector("B"_mst, "K"_mst, "K"_mst)));
+        }
+    }
+    assert(false);
+    return {};
+}
 
 enum TestMode : int {
     TESTMODE_INVALID = 0,
@@ -199,6 +317,31 @@ BOOST_AUTO_TEST_CASE(fixed_tests)
     Test("after(1000000000)", "?", TESTMODE_VALID | TESTMODE_NONMAL); // only timelock
     Test("or_b(l:after(100),al:after(1000000000))", "?", TESTMODE_VALID); // or_b(timelock, heighlock) valid
     Test("and_b(after(100),a:after(1000000000))", "?", TESTMODE_VALID | TESTMODE_NONMAL | TESTMODE_TIMELOCKMIX); // and_b(timelock, heighlock) invalid
+
+    g_testdata.reset();
+}
+
+BOOST_AUTO_TEST_CASE(random_tests)
+{
+    // Initialize precomputed data.
+    g_testdata.reset(new TestData());
+
+    for (int i = 0; i < 100; ++i) {
+        bool safe = InsecureRandRange(20) == 0; // In 5% of the cases, generate safe top-level expressions.
+        // Generate a random B (or Bms) node of variable complexity, which should be valid as a top-level expression.
+        auto node = RandomNode(safe ? "Bms"_mst : "B"_mst, 1 + InsecureRandRange(90));
+        BOOST_CHECK(node && node->IsValid() && node->IsValidTopLevel());
+        auto script = node->ToScript(CONVERTER);
+        BOOST_CHECK(node->ScriptSize() == script.size()); // Check consistency between script size estimation and real size
+        // Check consistency of "x" property with the script (relying on the fact that no top-level scripts end with a hash or key push, whose last byte could match these opcodes).
+        bool ends_in_verify = !(node->GetType() << "x"_mst);
+        BOOST_CHECK(ends_in_verify == (script.back() == OP_CHECKSIG || script.back() == OP_CHECKMULTISIG || script.back() == OP_EQUAL));
+        std::string str;
+        BOOST_CHECK(node->ToString(CONVERTER, str)); // Check that we can convert to text
+        auto parsed = miniscript::FromString(str, CONVERTER);
+        BOOST_CHECK(parsed); // Check that we can convert back
+        BOOST_CHECK(*parsed == *node); // Check that it matches the original
+    }
 
     g_testdata.reset();
 }
