@@ -13,12 +13,13 @@ namespace miniscript {
 namespace internal {
 
 Type SanitizeType(Type e) {
-    int num_types = (e << "K"_mst) + (e << "V"_mst) + (e << "B"_mst);
+    int num_types = (e << "K"_mst) + (e << "V"_mst) + (e << "B"_mst) + (e << "W"_mst);
     if (num_types == 0) return ""_mst; // No valid type, don't care about the rest
-    assert(num_types == 1); // K, V, B all conflict with each other
+    assert(num_types == 1); // K, V, B, W all conflict with each other
     bool ok = // Work around a GCC 4.8 bug that breaks user-defined literals in macro calls.
         (!(e << "z"_mst) || !(e << "o"_mst)) && // z conflicts with o
         (!(e << "n"_mst) || !(e << "z"_mst)) && // n conflicts with z
+        (!(e << "n"_mst) || !(e << "W"_mst)) && // n conflicts with W
         (!(e << "V"_mst) || !(e << "d"_mst)) && // V conflicts with d
         (!(e << "K"_mst) ||  (e << "u"_mst)) && // K implies u
         (!(e << "V"_mst) || !(e << "u"_mst)) && // V conflicts with u
@@ -48,7 +49,9 @@ Type ComputeType(NodeType nodetype, Type x, Type y, Type z, uint32_t k, size_t n
         assert(n_subs == 2);
     } else if (nodetype == NodeType::ANDOR) {
         assert(n_subs == 3);
-    } else if (nodetype == NodeType::WRAP_C) {
+    } else if (nodetype == NodeType::WRAP_A || nodetype == NodeType::WRAP_S || nodetype == NodeType::WRAP_C ||
+               nodetype == NodeType::WRAP_D || nodetype == NodeType::WRAP_V || nodetype == NodeType::WRAP_J ||
+               nodetype == NodeType::WRAP_N) {
         assert(n_subs == 1);
     } else {
         assert(n_subs == 0);
@@ -77,12 +80,43 @@ Type ComputeType(NodeType nodetype, Type x, Type y, Type z, uint32_t k, size_t n
             "j"_mst.If(k < LOCKTIME_THRESHOLD) |
             "Bzfmxk"_mst;
         case NodeType::JUST_1: return "Bzufmxk"_mst;
-        case NodeType::JUST_0: return "Bzudesmxk"_mst;
+        case NodeType::JUST_0: return "Bzudemsxk"_mst;
+        case NodeType::WRAP_A: return
+            "W"_mst.If(x << "B"_mst) | // W=B_x
+            (x & "ghijk"_mst) | // g=g_x, h=h_x, i=i_x, j=j_x, k=k_x
+            (x & "udfems"_mst) | // u=u_x, d=d_x, f=f_x, e=e_x, m=m_x, s=s_x
+            "x"_mst; // x
+        case NodeType::WRAP_S: return
+            "W"_mst.If(x << "Bo"_mst) | // W=B_x*o_x
+            (x & "ghijk"_mst) | // g=g_x, h=h_x, i=i_x, j=j_x, k=k_x
+            (x & "udfemsx"_mst); // u=u_x, d=d_x, f=f_x, e=e_x, m=m_x, s=s_x, x=x_x
         case NodeType::WRAP_C: return
             "B"_mst.If(x << "K"_mst) | // B=K_x
             (x & "ghijk"_mst) | // g=g_x, h=h_x, i=i_x, j=j_x, k=k_x
             (x & "ondfem"_mst) | // n=n_x, d=d_x, f=f_x, e=e_x
             "us"_mst; // u, s
+        case NodeType::WRAP_D: return
+            "B"_mst.If(x << "Vz"_mst) | // B=V_x*z_x
+            "o"_mst.If(x << "z"_mst) | // o=z_x
+            "e"_mst.If(x << "f"_mst) | // e=f_x
+            (x & "ghijk"_mst) | // g=g_x, h=h_x, i=i_x, j=j_x, k=k_x
+            (x & "ms"_mst) | // m=m_x, s=s_x
+            "nudx"_mst; // n, u, d, x
+        case NodeType::WRAP_V: return
+            "V"_mst.If(x << "B"_mst) | // V=B_x
+            (x & "ghijk"_mst) | // g=g_x, h=h_x, i=i_x, j=j_x, k=k_x
+            (x & "zonms"_mst) | // z=z_x, o=o_x, n=n_x, m=m_x, s=s_x
+            "fx"_mst; // f, x
+        case NodeType::WRAP_J: return
+            "B"_mst.If(x << "Bn"_mst) | // B=B_x*n_x
+            "e"_mst.If(x << "f"_mst) | // e=f_x
+            (x & "ghijk"_mst) | // g=g_x, h=h_x, i=i_x, j=j_x, k=k_x
+            (x & "oums"_mst) | // o=o_x, u=u_x, m=m_x, s=s_x
+            "ndx"_mst; // n, d, x
+        case NodeType::WRAP_N: return
+            (x & "ghijk"_mst) | // g=g_x, h=h_x, i=i_x, j=j_x, k=k_x
+            (x & "Bzondfems"_mst) | // B=B_x, z=z_x, o=o_x, n=n_x, d=d_x, f=f_x, e=e_x, m=m_x, s=s_x
+            "ux"_mst; // u, x
         case NodeType::AND_V: return
             (y & "KVB"_mst).If(x << "V"_mst) | // B=V_x*B_y, V=V_x*V_y, K=V_x*K_y
             (x & "n"_mst) | (y & "n"_mst).If(x << "z"_mst) | // n=n_x+z_x*n_y
@@ -98,6 +132,7 @@ Type ComputeType(NodeType nodetype, Type x, Type y, Type z, uint32_t k, size_t n
                 ((x << "i"_mst) && (y << "j"_mst)) ||
                 ((x << "j"_mst) && (y << "i"_mst)))); // k=k_x*k_y*!(g_x*h_y + h_x*g_y + i_x*j_y + j_x*i_y)
         case NodeType::AND_B: return
+            (x & "B"_mst).If(y << "W"_mst) | // B=B_x*W_y
             ((x | y) & "o"_mst).If((x | y) << "z"_mst) | // o=o_x*z_y+z_x*o_y
             (x & "n"_mst) | (y & "n"_mst).If(x << "z"_mst) | // n=n_x+z_x*n_y
             (x & y & "e"_mst).If((x & y) << "s"_mst) | // e=e_x*e_y*s_x*s_y
@@ -112,6 +147,7 @@ Type ComputeType(NodeType nodetype, Type x, Type y, Type z, uint32_t k, size_t n
                 ((x << "i"_mst) && (y << "j"_mst)) ||
                 ((x << "j"_mst) && (y << "i"_mst)))); // k=k_x*k_y*!(g_x*h_y + h_x*g_y + i_x*j_y + j_x*i_y)
         case NodeType::OR_B: return
+            "B"_mst.If(x << "Bd"_mst && y << "Wd"_mst) | // B=B_x*d_x*W_x*d_y
             ((x | y) & "o"_mst).If((x | y) << "z"_mst) | // o=o_x*z_y+z_x*o_y
             (x & y & "m"_mst).If((x | y) << "s"_mst && (x & y) << "e"_mst) | // m=m_x*m_y*e_x*e_y*(s_x+s_y)
             (x & y & "zse"_mst) | // z=z_x*z_y, s=s_x*s_y, e=e_x*e_y
@@ -173,7 +209,13 @@ size_t ComputeScriptLen(NodeType nodetype, Type sub0typ, size_t subsize, uint32_
         case NodeType::PK_H: return subsize + 3 + 21;
         case NodeType::OLDER: return subsize + 1 + (CScript() << k).size();
         case NodeType::AFTER: return subsize + 1 + (CScript() << k).size();
+        case NodeType::WRAP_A: return subsize + 2;
+        case NodeType::WRAP_S: return subsize + 1;
         case NodeType::WRAP_C: return subsize + 1;
+        case NodeType::WRAP_D: return subsize + 3;
+        case NodeType::WRAP_V: return subsize + (sub0typ << "x"_mst);
+        case NodeType::WRAP_J: return subsize + 4;
+        case NodeType::WRAP_N: return subsize + 1;
         case NodeType::JUST_1: return 1;
         case NodeType::JUST_0: return 1;
         case NodeType::AND_V: return subsize;

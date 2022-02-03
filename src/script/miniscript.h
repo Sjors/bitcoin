@@ -50,7 +50,12 @@ namespace miniscript {
  *   - Always pushes a public key onto the stack, for which a signature is to be
  *     provided to satisfy the expression.
  *   - For example pk_h(key) = OP_DUP OP_HASH160 <Hash160(key)> OP_EQUALVERIFY
- * - "W" Wrapped: introduced in a later commit
+ * - "W" Wrapped:
+ *   - Takes its input from one below the top of the stack.
+ *   - When satisfied, pushes a nonzero value (like B) on top of the stack, or one below.
+ *   - When dissatisfied, pushes 0 op top of the stack or one below.
+ *   - Is always "OP_SWAP [B]" or "OP_TOALTSTACK [B] OP_FROMALTSTACK".
+ *   - For example sc:pk_k(key) = OP_SWAP <key> OP_CHECKSIG
  *
  * There a type properties that help reasoning about correctness:
  * - "z" Zero-arg:
@@ -59,7 +64,7 @@ namespace miniscript {
  * - "n" Nonzero:
  *   - For every way this expression can be satisfied, a satisfaction exists that never needs
  *     a zero top stack element.
- *   - Conflicts with property 'z'
+ *   - Conflicts with property 'z' and with type 'W'.
  * - "d" Dissatisfiable:
  *   - There is an easy way to construct a dissatisfaction for this expression.
  *   - Conflicts with type 'V'.
@@ -142,6 +147,7 @@ inline constexpr Type operator"" _mst(const char* c, size_t l) {
         *c == 'B' ? 1 << 0 : // Base type
         *c == 'V' ? 1 << 1 : // Verify type
         *c == 'K' ? 1 << 2 : // Key type
+        *c == 'W' ? 1 << 3 : // Wrapped type
         *c == 'z' ? 1 << 4 : // Zero-arg property
         *c == 'o' ? 1 << 5 : // One-arg property
         *c == 'n' ? 1 << 6 : // Nonzero arg property
@@ -176,7 +182,13 @@ enum class NodeType {
     PK_H,      //!< OP_DUP OP_HASH160 [keyhash] OP_EQUALVERIFY
     OLDER,     //!< [n] OP_CHECKSEQUENCEVERIFY
     AFTER,     //!< [n] OP_CHECKLOCKTIMEVERIFY
+    WRAP_A,    //!< OP_TOALTSTACK [X] OP_FROMALTSTACK
+    WRAP_S,    //!< OP_SWAP [X]
     WRAP_C,    //!< [X] OP_CHECKSIG
+    WRAP_D,    //!< OP_DUP OP_IF [X] OP_ENDIF
+    WRAP_V,    //!< [X] OP_VERIFY (or -VERIFY version of last opcode in X)
+    WRAP_J,    //!< OP_SIZE OP_0NOTEQUAL OP_IF [X] OP_ENDIF
+    WRAP_N,    //!< [X] OP_0NOTEQUAL
     AND_V,     //!< [X] [Y]
     AND_B,     //!< [X] [Y] OP_BOOLAND
     OR_B,      //!< [X] [Y] OP_BOOLOR
@@ -186,6 +198,9 @@ enum class NodeType {
     ANDOR,     //!< [X] OP_NOTIF [Z] OP_ELSE [Y] OP_ENDIF
     MULTI,     //!< [k] [key_n]* [n] OP_CHECKMULTISIG
     // AND_N(X,Y) is represented as ANDOR(X,Y,0)
+    // WRAP_T(X) is represented as AND_V(X,1)
+    // WRAP_L(X) is represented as OR_I(0,X)
+    // WRAP_U(X) is represented as OR_I(X,0)
 };
 
 namespace internal {
@@ -348,9 +363,12 @@ public:
         // The State is a boolean: whether or not the node's script expansion is followed
         // by an OP_VERIFY (which may need to be combined with the last script opcode).
         auto downfn = [](bool verify, const Node& node, size_t index) {
-            // The last subexpression of AND_V
+            // For WRAP_V, the subexpression is certainly followed by OP_VERIFY.
+            if (node.nodetype == NodeType::WRAP_V) return true;
+            // The subexpression of WRAP_S, and the last subexpression of AND_V
             // inherit the followed-by-OP_VERIFY property from the parent.
-            if (node.nodetype == NodeType::AND_V && index == 1) return verify;
+            if (node.nodetype == NodeType::WRAP_S ||
+                (node.nodetype == NodeType::AND_V && index == 1)) return verify;
             return false;
         };
         // The upward function computes for a node, given its followed-by-OP_VERIFY status
@@ -361,7 +379,13 @@ public:
                 case NodeType::PK_H: return CScript() << OP_DUP << OP_HASH160 << ctx.ToPKHBytes(node.keys[0]) << OP_EQUALVERIFY;
                 case NodeType::OLDER: return CScript() << node.k << OP_CHECKSEQUENCEVERIFY;
                 case NodeType::AFTER: return CScript() << node.k << OP_CHECKLOCKTIMEVERIFY;
+                case NodeType::WRAP_A: return (CScript() << OP_TOALTSTACK) + std::move(subs[0]) + (CScript() << OP_FROMALTSTACK);
+                case NodeType::WRAP_S: return (CScript() << OP_SWAP) + std::move(subs[0]);
                 case NodeType::WRAP_C: return std::move(subs[0]) + CScript() << (verify ? OP_CHECKSIGVERIFY : OP_CHECKSIG);
+                case NodeType::WRAP_D: return (CScript() << OP_DUP << OP_IF) + std::move(subs[0]) + (CScript() << OP_ENDIF);
+                case NodeType::WRAP_V: return std::move(subs[0]) + (node.subs[0]->GetType() << "x"_mst ? (CScript() << OP_VERIFY) : CScript());
+                case NodeType::WRAP_J: return (CScript() << OP_SIZE << OP_0NOTEQUAL << OP_IF) + std::move(subs[0]) + (CScript() << OP_ENDIF);
+                case NodeType::WRAP_N: return std::move(subs[0]) + CScript() << OP_0NOTEQUAL;
                 case NodeType::JUST_1: return CScript() << OP_1;
                 case NodeType::JUST_0: return CScript() << OP_0;
                 case NodeType::AND_V: return std::move(subs[0]) + std::move(subs[1]);
@@ -391,7 +415,10 @@ public:
         // the TreeEvalMaybe algorithm. The State is a boolean: whether the parent node is a
         // wrapper. If so, non-wrapper expressions must be prefixed with a ":".
         auto downfn = [](bool, const Node& node, size_t) {
-            return (node.nodetype == NodeType::WRAP_C ||
+            return (node.nodetype == NodeType::WRAP_A || node.nodetype == NodeType::WRAP_S ||
+                    node.nodetype == NodeType::WRAP_D || node.nodetype == NodeType::WRAP_V ||
+                    node.nodetype == NodeType::WRAP_J || node.nodetype == NodeType::WRAP_N ||
+                    node.nodetype == NodeType::WRAP_C ||
                     (node.nodetype == NodeType::AND_V && node.subs[1]->nodetype == NodeType::JUST_1) ||
                     (node.nodetype == NodeType::OR_I && node.subs[0]->nodetype == NodeType::JUST_0) ||
                     (node.nodetype == NodeType::OR_I && node.subs[1]->nodetype == NodeType::JUST_0));
@@ -402,6 +429,8 @@ public:
             std::string ret = wrapped ? ":" : "";
 
             switch (node.nodetype) {
+                case NodeType::WRAP_A: return "a" + std::move(subs[0]);
+                case NodeType::WRAP_S: return "s" + std::move(subs[0]);
                 case NodeType::WRAP_C:
                     if (node.subs[0]->nodetype == NodeType::PK_K) {
                         // pk(K) is syntactic sugar for c:pk_k(K)
@@ -416,6 +445,10 @@ public:
                         return std::move(ret) + "pkh(" + std::move(key_str) + ")";
                     }
                     return "c" + std::move(subs[0]);
+                case NodeType::WRAP_D: return "d" + std::move(subs[0]);
+                case NodeType::WRAP_V: return "v" + std::move(subs[0]);
+                case NodeType::WRAP_J: return "j" + std::move(subs[0]);
+                case NodeType::WRAP_N: return "n" + std::move(subs[0]);
                 case NodeType::AND_V:
                     // t:X is syntactic sugar for and_v(X,1).
                     if (node.subs[1]->nodetype == NodeType::JUST_1) return "t" + std::move(subs[0]);
@@ -527,8 +560,25 @@ enum class ParseContext {
     /** A miniscript expression which does not begin with wrappers. */
     EXPR,
 
+    /** SWAP wraps the top constructed node with s: */
+    SWAP,
+    /** ALT wraps the top constructed node with a: */
+    ALT,
     /** CHECK wraps the top constructed node with c: */
     CHECK,
+    /** DUP_IF wraps the top constructed node with d: */
+    DUP_IF,
+    /** VERIFY wraps the top constructed node with v: */
+    VERIFY,
+    /** NON_ZERO wraps the top constructed node with j: */
+    NON_ZERO,
+    /** ZERO_NOTEQUAL wraps the top constructed node with n: */
+    ZERO_NOTEQUAL,
+    /** WRAP_U will construct an or_i(X,0) node from the top constructed node. */
+    WRAP_U,
+    /** WRAP_T will construct an and_v(X,1) node from the top constructed node. */
+    WRAP_T,
+
     /** AND_N will construct an andor(X,Y,0) node from the last two constructed nodes. */
     AND_N,
     /** AND_V will construct an and_v node from the last two constructed nodes. */
@@ -597,8 +647,28 @@ inline NodeRef<Key> Parse(Span<const char> in, const Ctx& ctx)
             }
             // If there is no colon, this loop won't execute
             for (int j = 0; j < colon_index; ++j) {
-                if (in[j] == 'c') {
+                if (in[j] == 'a') {
+                    to_parse.emplace_back(ParseContext::ALT, -1);
+                } else if (in[j] == 's') {
+                    to_parse.emplace_back(ParseContext::SWAP, -1);
+                } else if (in[j] == 'c') {
                     to_parse.emplace_back(ParseContext::CHECK, -1);
+                } else if (in[j] == 'd') {
+                    to_parse.emplace_back(ParseContext::DUP_IF, -1);
+                } else if (in[j] == 'j') {
+                    to_parse.emplace_back(ParseContext::NON_ZERO, -1);
+                } else if (in[j] == 'n') {
+                    to_parse.emplace_back(ParseContext::ZERO_NOTEQUAL, -1);
+                } else if (in[j] == 'v') {
+                    to_parse.emplace_back(ParseContext::VERIFY, -1);
+                } else if (in[j] == 'u') {
+                    to_parse.emplace_back(ParseContext::WRAP_U, -1);
+                } else if (in[j] == 't') {
+                    to_parse.emplace_back(ParseContext::WRAP_T, -1);
+                } else if (in[j] == 'l') {
+                    // The l: wrapper is equivalent to or_i(0,X)
+                    constructed.push_back(MakeNodeRef<Key>(NodeType::JUST_0));
+                    to_parse.emplace_back(ParseContext::OR_I, -1);
                 } else {
                     return {};
                 }
@@ -709,8 +779,40 @@ inline NodeRef<Key> Parse(Span<const char> in, const Ctx& ctx)
             }
             break;
         }
+        case ParseContext::ALT: {
+            constructed.back() = MakeNodeRef<Key>(NodeType::WRAP_A, Vector(std::move(constructed.back())));
+            break;
+        }
+        case ParseContext::SWAP: {
+            constructed.back() = MakeNodeRef<Key>(NodeType::WRAP_S, Vector(std::move(constructed.back())));
+            break;
+        }
         case ParseContext::CHECK: {
             constructed.back() = MakeNodeRef<Key>(NodeType::WRAP_C, Vector(std::move(constructed.back())));
+            break;
+        }
+        case ParseContext::DUP_IF: {
+            constructed.back() = MakeNodeRef<Key>(NodeType::WRAP_D, Vector(std::move(constructed.back())));
+            break;
+        }
+        case ParseContext::NON_ZERO: {
+            constructed.back() = MakeNodeRef<Key>(NodeType::WRAP_J, Vector(std::move(constructed.back())));
+            break;
+        }
+        case ParseContext::ZERO_NOTEQUAL: {
+            constructed.back() = MakeNodeRef<Key>(NodeType::WRAP_N, Vector(std::move(constructed.back())));
+            break;
+        }
+        case ParseContext::VERIFY: {
+            constructed.back() = MakeNodeRef<Key>(NodeType::WRAP_V, Vector(std::move(constructed.back())));
+            break;
+        }
+        case ParseContext::WRAP_U: {
+            constructed.back() = MakeNodeRef<Key>(NodeType::OR_I, Vector(std::move(constructed.back()), MakeNodeRef<Key>(NodeType::JUST_0)));
+            break;
+        }
+        case ParseContext::WRAP_T: {
+            constructed.back() = MakeNodeRef<Key>(NodeType::AND_V, Vector(std::move(constructed.back()), MakeNodeRef<Key>(NodeType::JUST_1)));
             break;
         }
         case ParseContext::AND_B: {
