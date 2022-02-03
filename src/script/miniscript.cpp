@@ -27,7 +27,7 @@ Type ComputeType(NodeType nodetype, Type x, size_t n_subs, size_t n_keys) {
         assert(n_subs == 0);
     }
     // Sanity check on keys
-    if (nodetype == NodeType::PK_H) {
+    if (nodetype == NodeType::PK_K || nodetype == NodeType::PK_H) {
         assert(n_keys == 1);
     } else {
         assert(n_keys == 0);
@@ -37,6 +37,7 @@ Type ComputeType(NodeType nodetype, Type x, size_t n_subs, size_t n_keys) {
     // It heavily relies on Type's << operator (where "X << a_mst" means
     // "X has all properties listed in a").
     switch (nodetype) {
+        case NodeType::PK_K: return "K"_mst;
         case NodeType::PK_H: return "K"_mst;
         case NodeType::WRAP_C: return
             "B"_mst.If(x << "K"_mst); // B=K_x
@@ -47,6 +48,7 @@ Type ComputeType(NodeType nodetype, Type x, size_t n_subs, size_t n_keys) {
 
 size_t ComputeScriptLen(NodeType nodetype, Type sub0typ, size_t subsize, size_t n_subs, size_t n_keys) {
     switch (nodetype) {
+        case NodeType::PK_K: return subsize + 34;
         case NodeType::PK_H: return subsize + 3 + 21;
         case NodeType::WRAP_C: return subsize + 1;
     }

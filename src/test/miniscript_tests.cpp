@@ -62,6 +62,9 @@ std::unique_ptr<const TestData> g_testdata;
 struct KeyConverter {
     typedef CPubKey Key;
 
+    //! Convert a public key to bytes.
+    std::vector<unsigned char> ToPKBytes(const CPubKey& key) const { return {key.begin(), key.end()}; }
+
     //! Convert a public key to its Hash160 bytes (precomputed).
     std::vector<unsigned char> ToPKHBytes(const CPubKey& key) const
     {
@@ -117,6 +120,7 @@ BOOST_AUTO_TEST_CASE(fixed_tests)
     g_testdata.reset(new TestData());
 
     // Validity rules
+    Test("pkh(03d30199d74fb5a22d47b6e054e2f378cedacffcb89904a61d75d0dbd407143e65)", "76a914fcd35ddacad9f2d5be5e464639441c6065e6955d88ac", TESTMODE_VALID); // alias to c:pk_h
     Test("pkh(03d30199d74fb5a22d47b6e054e2f378cedacffcb89904a61d75d0dbd407143e65)", "76a914fcd35ddacad9f2d5be5e464639441c6065e6955d88ac", TESTMODE_VALID); // alias to c:pk_h
 
     g_testdata.reset();

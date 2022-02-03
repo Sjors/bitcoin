@@ -96,6 +96,7 @@ NodeRef<Key> MakeNodeRef(Args&&... args) { return std::make_shared<const Node<Ke
 
 //! The different node types in miniscript.
 enum class NodeType {
+    PK_K,      //!< [key]
     PK_H,      //!< OP_DUP OP_HASH160 [keyhash] OP_EQUALVERIFY
     WRAP_C,    //!< [X] OP_CHECKSIG
 };
@@ -262,6 +263,7 @@ public:
         // and the CScripts of its child nodes, the CScript of the node.
         auto upfn = [&ctx](bool verify, const Node& node, Span<CScript> subs) -> CScript {
             switch (node.nodetype) {
+                case NodeType::PK_K: return CScript() << ctx.ToPKBytes(node.keys[0]);
                 case NodeType::PK_H: return CScript() << OP_DUP << OP_HASH160 << ctx.ToPKHBytes(node.keys[0]) << OP_EQUALVERIFY;
                 case NodeType::WRAP_C: return std::move(subs[0]) + CScript() << (verify ? OP_CHECKSIGVERIFY : OP_CHECKSIG);
             }
@@ -286,6 +288,12 @@ public:
 
             switch (node.nodetype) {
                 case NodeType::WRAP_C:
+                    if (node.subs[0]->nodetype == NodeType::PK_K) {
+                        // pk(K) is syntactic sugar for c:pk_k(K)
+                        std::string key_str;
+                        if (!ctx.ToString(node.subs[0]->keys[0], key_str)) return {};
+                        return std::move(ret) + "pk(" + std::move(key_str) + ")";
+                    }
                     if (node.subs[0]->nodetype == NodeType::PK_H) {
                         // pkh(K) is syntactic sugar for c:pk_h(K)
                         std::string key_str;
@@ -296,6 +304,11 @@ public:
                 default: break;
             }
             switch (node.nodetype) {
+                case NodeType::PK_K: {
+                    std::string key_str;
+                    if (!ctx.ToString(node.keys[0], key_str)) return {};
+                    return std::move(ret) + "pk_k(" + std::move(key_str) + ")";
+                }
                 case NodeType::PK_H: {
                     std::string key_str;
                     if (!ctx.ToString(node.keys[0], key_str)) return {};
@@ -422,12 +435,26 @@ inline NodeRef<Key> Parse(Span<const char> in, const Ctx& ctx)
             break;
         }
         case ParseContext::EXPR: {
-            if (Const("pkh(", in)) {
+            if (Const("pk(", in)) {
+                Key key;
+                int key_size = FindNextChar(in, ')');
+                if (key_size < 1) return {};
+                if (!ctx.FromString(in.begin(), in.begin() + key_size, key)) return {};
+                constructed.push_back(MakeNodeRef<Key>(NodeType::WRAP_C, Vector(MakeNodeRef<Key>(NodeType::PK_K, Vector(std::move(key))))));
+                in = in.subspan(key_size + 1);
+            } else if (Const("pkh(", in)) {
                 Key key;
                 int key_size = FindNextChar(in, ')');
                 if (key_size < 1) return {};
                 if (!ctx.FromString(in.begin(), in.begin() + key_size, key)) return {};
                 constructed.push_back(MakeNodeRef<Key>(NodeType::WRAP_C, Vector(MakeNodeRef<Key>(NodeType::PK_H, Vector(std::move(key))))));
+                in = in.subspan(key_size + 1);
+            } else if (Const("pk_k(", in)) {
+                Key key;
+                int key_size = FindNextChar(in, ')');
+                if (key_size < 1) return {};
+                if (!ctx.FromString(in.begin(), in.begin() + key_size, key)) return {};
+                constructed.push_back(MakeNodeRef<Key>(NodeType::PK_K, Vector(std::move(key))));
                 in = in.subspan(key_size + 1);
             } else if (Const("pk_h(", in)) {
                 Key key;
