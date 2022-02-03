@@ -182,6 +182,10 @@ enum class NodeType {
     PK_H,      //!< OP_DUP OP_HASH160 [keyhash] OP_EQUALVERIFY
     OLDER,     //!< [n] OP_CHECKSEQUENCEVERIFY
     AFTER,     //!< [n] OP_CHECKLOCKTIMEVERIFY
+    SHA256,    //!< OP_SIZE 32 OP_EQUALVERIFY OP_SHA256 [hash] OP_EQUAL
+    HASH256,   //!< OP_SIZE 32 OP_EQUALVERIFY OP_HASH256 [hash] OP_EQUAL
+    RIPEMD160, //!< OP_SIZE 32 OP_EQUALVERIFY OP_RIPEMD160 [hash] OP_EQUAL
+    HASH160,   //!< OP_SIZE 32 OP_EQUALVERIFY OP_HASH160 [hash] OP_EQUAL
     WRAP_A,    //!< OP_TOALTSTACK [X] OP_FROMALTSTACK
     WRAP_S,    //!< OP_SWAP [X]
     WRAP_C,    //!< [X] OP_CHECKSIG
@@ -207,7 +211,7 @@ enum class NodeType {
 namespace internal {
 
 //! Helper function for Node::CalcType.
-Type ComputeType(NodeType nodetype, Type x, Type y, Type z, const std::vector<Type>& sub_types, uint32_t k, size_t n_subs, size_t n_keys);
+Type ComputeType(NodeType nodetype, Type x, Type y, Type z, const std::vector<Type>& sub_types, uint32_t k, size_t data_size, size_t n_subs, size_t n_keys);
 
 //! Helper function for Node::CalcScriptLen.
 size_t ComputeScriptLen(NodeType nodetype, Type sub0typ, size_t subsize, uint32_t k, size_t n_subs, size_t n_keys);
@@ -226,6 +230,8 @@ struct Node {
     const uint32_t k = 0;
     //! The keys used by this expression (only for PK_K/PK_H/MULTI)
     const std::vector<Key> keys;
+    //! The data bytes in this expression (only for HASH160/HASH256/SHA256/RIPEMD10).
+    const std::vector<unsigned char> data;
     //! Subexpressions (for WRAP_*/AND_*/OR_*/ANDOR/THRESH)
     const std::vector<NodeRef<Key>> subs;
 
@@ -358,7 +364,7 @@ private:
         Type y = subs.size() > 1 ? subs[1]->GetType() : ""_mst;
         Type z = subs.size() > 2 ? subs[2]->GetType() : ""_mst;
 
-        return SanitizeType(ComputeType(nodetype, x, y, z, sub_types, k, subs.size(), keys.size()));
+        return SanitizeType(ComputeType(nodetype, x, y, z, sub_types, k, data.size(), subs.size(), keys.size()));
     }
 
 public:
@@ -385,6 +391,10 @@ public:
                 case NodeType::PK_H: return CScript() << OP_DUP << OP_HASH160 << ctx.ToPKHBytes(node.keys[0]) << OP_EQUALVERIFY;
                 case NodeType::OLDER: return CScript() << node.k << OP_CHECKSEQUENCEVERIFY;
                 case NodeType::AFTER: return CScript() << node.k << OP_CHECKLOCKTIMEVERIFY;
+                case NodeType::SHA256: return CScript() << OP_SIZE << 32 << OP_EQUALVERIFY << OP_SHA256 << node.data << (verify ? OP_EQUALVERIFY : OP_EQUAL);
+                case NodeType::RIPEMD160: return CScript() << OP_SIZE << 32 << OP_EQUALVERIFY << OP_RIPEMD160 << node.data << (verify ? OP_EQUALVERIFY : OP_EQUAL);
+                case NodeType::HASH256: return CScript() << OP_SIZE << 32 << OP_EQUALVERIFY << OP_HASH256 << node.data << (verify ? OP_EQUALVERIFY : OP_EQUAL);
+                case NodeType::HASH160: return CScript() << OP_SIZE << 32 << OP_EQUALVERIFY << OP_HASH160 << node.data << (verify ? OP_EQUALVERIFY : OP_EQUAL);
                 case NodeType::WRAP_A: return (CScript() << OP_TOALTSTACK) + std::move(subs[0]) + (CScript() << OP_FROMALTSTACK);
                 case NodeType::WRAP_S: return (CScript() << OP_SWAP) + std::move(subs[0]);
                 case NodeType::WRAP_C: return std::move(subs[0]) + CScript() << (verify ? OP_CHECKSIGVERIFY : OP_CHECKSIG);
@@ -485,6 +495,10 @@ public:
                 }
                 case NodeType::AFTER: return std::move(ret) + "after(" + ::ToString(node.k) + ")";
                 case NodeType::OLDER: return std::move(ret) + "older(" + ::ToString(node.k) + ")";
+                case NodeType::HASH256: return std::move(ret) + "hash256(" + HexStr(node.data) + ")";
+                case NodeType::HASH160: return std::move(ret) + "hash160(" + HexStr(node.data) + ")";
+                case NodeType::SHA256: return std::move(ret) + "sha256(" + HexStr(node.data) + ")";
+                case NodeType::RIPEMD160: return std::move(ret) + "ripemd160(" + HexStr(node.data) + ")";
                 case NodeType::JUST_1: return std::move(ret) + "1";
                 case NodeType::JUST_0: return std::move(ret) + "0";
                 case NodeType::AND_V: return std::move(ret) + "and_v(" + std::move(subs[0]) + "," + std::move(subs[1]) + ")";
@@ -553,6 +567,7 @@ public:
     {
         if (nodetype != arg.nodetype) return false;
         if (k != arg.k) return false;
+        if (data != arg.data) return false;
         if (keys != arg.keys) return false;
         if (subs.size() != arg.subs.size()) return false;
         for (size_t i = 0; i < subs.size(); ++i) {
@@ -564,8 +579,8 @@ public:
     }
 
     // Constructors with various argument combinations.
-    Node(NodeType nt, std::vector<NodeRef<Key>> sub, std::vector<unsigned char> arg, uint32_t val = 0) : nodetype(nt), k(val), subs(std::move(sub)), typ(CalcType()), scriptlen(CalcScriptLen()) {}
-    Node(NodeType nt, std::vector<unsigned char> arg, uint32_t val = 0) : nodetype(nt), k(val), typ(CalcType()), scriptlen(CalcScriptLen()) {}
+    Node(NodeType nt, std::vector<NodeRef<Key>> sub, std::vector<unsigned char> arg, uint32_t val = 0) : nodetype(nt), k(val), data(std::move(arg)), subs(std::move(sub)), typ(CalcType()), scriptlen(CalcScriptLen()) {}
+    Node(NodeType nt, std::vector<unsigned char> arg, uint32_t val = 0) : nodetype(nt), k(val), data(std::move(arg)), typ(CalcType()), scriptlen(CalcScriptLen()) {}
     Node(NodeType nt, std::vector<NodeRef<Key>> sub, std::vector<Key> key, uint32_t val = 0) : nodetype(nt), k(val), keys(std::move(key)), subs(std::move(sub)), typ(CalcType()), scriptlen(CalcScriptLen()) {}
     Node(NodeType nt, std::vector<Key> key, uint32_t val = 0) : nodetype(nt), k(val), keys(std::move(key)), typ(CalcType()), scriptlen(CalcScriptLen()) {}
     Node(NodeType nt, std::vector<NodeRef<Key>> sub, uint32_t val = 0) : nodetype(nt), k(val), subs(std::move(sub)), typ(CalcType()), scriptlen(CalcScriptLen()) {}
@@ -736,6 +751,42 @@ inline NodeRef<Key> Parse(Span<const char> in, const Ctx& ctx)
                 if (!ctx.FromString(in.begin(), in.begin() + key_size, key)) return {};
                 constructed.push_back(MakeNodeRef<Key>(NodeType::PK_H, Vector(std::move(key))));
                 in = in.subspan(key_size + 1);
+            } else if (Const("sha256(", in)) {
+                int hash_size = FindNextChar(in, ')');
+                if (hash_size < 1) return {};
+                std::string val = std::string(in.begin(), in.begin() + hash_size);
+                if (!IsHex(val)) return {};
+                auto hash = ParseHex(val);
+                if (hash.size() != 32) return {};
+                constructed.push_back(MakeNodeRef<Key>(NodeType::SHA256, std::move(hash)));
+                in = in.subspan(hash_size + 1);
+            } else if (Const("ripemd160(", in)) {
+                int hash_size = FindNextChar(in, ')');
+                if (hash_size < 1) return {};
+                std::string val = std::string(in.begin(), in.begin() + hash_size);
+                if (!IsHex(val)) return {};
+                auto hash = ParseHex(val);
+                if (hash.size() != 20) return {};
+                constructed.push_back(MakeNodeRef<Key>(NodeType::RIPEMD160, std::move(hash)));
+                in = in.subspan(hash_size + 1);
+            } else if (Const("hash256(", in)) {
+                int hash_size = FindNextChar(in, ')');
+                if (hash_size < 1) return {};
+                std::string val = std::string(in.begin(), in.begin() + hash_size);
+                if (!IsHex(val)) return {};
+                auto hash = ParseHex(val);
+                if (hash.size() != 32) return {};
+                constructed.push_back(MakeNodeRef<Key>(NodeType::HASH256, std::move(hash)));
+                in = in.subspan(hash_size + 1);
+            } else if (Const("hash160(", in)) {
+                int hash_size = FindNextChar(in, ')');
+                if (hash_size < 1) return {};
+                std::string val = std::string(in.begin(), in.begin() + hash_size);
+                if (!IsHex(val)) return {};
+                auto hash = ParseHex(val);
+                if (hash.size() != 20) return {};
+                constructed.push_back(MakeNodeRef<Key>(NodeType::HASH160, std::move(hash)));
+                in = in.subspan(hash_size + 1);
             } else if (Const("after(", in)) {
                 int arg_size = FindNextChar(in, ')');
                 if (arg_size < 1) return {};

@@ -34,7 +34,15 @@ Type SanitizeType(Type e) {
     return e;
 }
 
-Type ComputeType(NodeType nodetype, Type x, Type y, Type z, const std::vector<Type>& sub_types, uint32_t k, size_t n_subs, size_t n_keys) {
+Type ComputeType(NodeType nodetype, Type x, Type y, Type z, const std::vector<Type>& sub_types, uint32_t k, size_t data_size, size_t n_subs, size_t n_keys) {
+    // Sanity check on data
+    if (nodetype == NodeType::SHA256 || nodetype == NodeType::HASH256) {
+        assert(data_size == 32);
+    } else if (nodetype == NodeType::RIPEMD160 || nodetype == NodeType::HASH160) {
+        assert(data_size == 20);
+    } else {
+        assert(data_size == 0);
+    }
     // Sanity check on k
     if (nodetype == NodeType::OLDER || nodetype == NodeType::AFTER) {
         assert(k >= 1 && k < 0x80000000UL);
@@ -81,6 +89,10 @@ Type ComputeType(NodeType nodetype, Type x, Type y, Type z, const std::vector<Ty
             "i"_mst.If(k >= LOCKTIME_THRESHOLD) |
             "j"_mst.If(k < LOCKTIME_THRESHOLD) |
             "Bzfmxk"_mst;
+        case NodeType::SHA256: return "Bonudmk"_mst;
+        case NodeType::RIPEMD160: return "Bonudmk"_mst;
+        case NodeType::HASH256: return "Bonudmk"_mst;
+        case NodeType::HASH160: return "Bonudmk"_mst;
         case NodeType::JUST_1: return "Bzufmxk"_mst;
         case NodeType::JUST_0: return "Bzudemsxk"_mst;
         case NodeType::WRAP_A: return
@@ -242,6 +254,10 @@ size_t ComputeScriptLen(NodeType nodetype, Type sub0typ, size_t subsize, uint32_
         case NodeType::PK_H: return subsize + 3 + 21;
         case NodeType::OLDER: return subsize + 1 + (CScript() << k).size();
         case NodeType::AFTER: return subsize + 1 + (CScript() << k).size();
+        case NodeType::HASH256: return subsize + 4 + 2 + 33;
+        case NodeType::HASH160: return subsize + 4 + 2 + 21;
+        case NodeType::SHA256: return subsize + 4 + 2 + 33;
+        case NodeType::RIPEMD160: return subsize + 4 + 2 + 21;
         case NodeType::WRAP_A: return subsize + 2;
         case NodeType::WRAP_S: return subsize + 1;
         case NodeType::WRAP_C: return subsize + 1;
