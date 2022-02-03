@@ -19,7 +19,13 @@ Type SanitizeType(Type e) {
     return e;
 }
 
-Type ComputeType(NodeType nodetype, Type x, size_t n_subs, size_t n_keys) {
+Type ComputeType(NodeType nodetype, Type x, uint32_t k, size_t n_subs, size_t n_keys) {
+    // Sanity check on k
+    if (nodetype == NodeType::MULTI) {
+        assert(k >= 1 && k <= n_keys);
+    } else {
+        assert(k == 0);
+    }
     // Sanity check on subs
     if (nodetype == NodeType::WRAP_C) {
         assert(n_subs == 1);
@@ -29,6 +35,8 @@ Type ComputeType(NodeType nodetype, Type x, size_t n_subs, size_t n_keys) {
     // Sanity check on keys
     if (nodetype == NodeType::PK_K || nodetype == NodeType::PK_H) {
         assert(n_keys == 1);
+    } else if (nodetype == NodeType::MULTI) {
+        assert(n_keys >= 1 && n_keys <= 20);
     } else {
         assert(n_keys == 0);
     }
@@ -41,16 +49,18 @@ Type ComputeType(NodeType nodetype, Type x, size_t n_subs, size_t n_keys) {
         case NodeType::PK_H: return "K"_mst;
         case NodeType::WRAP_C: return
             "B"_mst.If(x << "K"_mst); // B=K_x
+        case NodeType::MULTI: return "B"_mst;
     }
     assert(false);
     return ""_mst;
 }
 
-size_t ComputeScriptLen(NodeType nodetype, Type sub0typ, size_t subsize, size_t n_subs, size_t n_keys) {
+size_t ComputeScriptLen(NodeType nodetype, Type sub0typ, size_t subsize, uint32_t k, size_t n_subs, size_t n_keys) {
     switch (nodetype) {
         case NodeType::PK_K: return subsize + 34;
         case NodeType::PK_H: return subsize + 3 + 21;
         case NodeType::WRAP_C: return subsize + 1;
+        case NodeType::MULTI: return subsize + 3 + (n_keys > 16) + (k > 16) + 34 * n_keys;
     }
     assert(false);
     return 0;

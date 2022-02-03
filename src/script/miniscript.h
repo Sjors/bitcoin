@@ -99,15 +99,16 @@ enum class NodeType {
     PK_K,      //!< [key]
     PK_H,      //!< OP_DUP OP_HASH160 [keyhash] OP_EQUALVERIFY
     WRAP_C,    //!< [X] OP_CHECKSIG
+    MULTI,     //!< [k] [key_n]* [n] OP_CHECKMULTISIG
 };
 
 namespace internal {
 
 //! Helper function for Node::CalcType.
-Type ComputeType(NodeType nodetype, Type x, size_t n_subs, size_t n_keys);
+Type ComputeType(NodeType nodetype, Type x, uint32_t k, size_t n_subs, size_t n_keys);
 
 //! Helper function for Node::CalcScriptLen.
-size_t ComputeScriptLen(NodeType nodetype, Type sub0typ, size_t subsize, size_t n_subs, size_t n_keys);
+size_t ComputeScriptLen(NodeType nodetype, Type sub0typ, size_t subsize, uint32_t k, size_t n_subs, size_t n_keys);
 
 //! A helper sanitizer/checker for the output of CalcType.
 Type SanitizeType(Type x);
@@ -119,6 +120,8 @@ template<typename Key>
 struct Node {
     //! What node type this node is.
     const NodeType nodetype;
+    //! The k parameter (time for OLDER/AFTER, threshold for MULTI)
+    const uint32_t k = 0;
     //! The keys used by this expression (only for PK_K/PK_H/MULTI)
     const std::vector<Key> keys;
     //! Subexpressions (for WRAP_C)
@@ -137,7 +140,7 @@ private:
             subsize += sub->ScriptSize();
         }
         Type sub0type = subs.size() > 0 ? subs[0]->GetType() : ""_mst;
-        return internal::ComputeScriptLen(nodetype, sub0type, subsize, subs.size(), keys.size());
+        return internal::ComputeScriptLen(nodetype, sub0type, subsize, k, subs.size(), keys.size());
     }
 
     /* Apply a recursive algorithm to a Miniscript tree, without actual recursive calls.
@@ -246,7 +249,7 @@ private:
         // All nodes can be computed just from the types of the 0-1 subexpexpressions.
         Type x = subs.size() > 0 ? subs[0]->GetType() : ""_mst;
 
-        return SanitizeType(ComputeType(nodetype, x, subs.size(), keys.size()));
+        return SanitizeType(ComputeType(nodetype, x, k, subs.size(), keys.size()));
     }
 
 public:
@@ -266,6 +269,13 @@ public:
                 case NodeType::PK_K: return CScript() << ctx.ToPKBytes(node.keys[0]);
                 case NodeType::PK_H: return CScript() << OP_DUP << OP_HASH160 << ctx.ToPKHBytes(node.keys[0]) << OP_EQUALVERIFY;
                 case NodeType::WRAP_C: return std::move(subs[0]) + CScript() << (verify ? OP_CHECKSIGVERIFY : OP_CHECKSIG);
+                case NodeType::MULTI: {
+                    CScript script = CScript() << node.k;
+                    for (const auto& key : node.keys) {
+                        script << ctx.ToPKBytes(key);
+                    }
+                    return std::move(script) << node.keys.size() << (verify ? OP_CHECKMULTISIGVERIFY : OP_CHECKMULTISIG);
+                }
             }
             assert(false);
             return {};
@@ -314,6 +324,15 @@ public:
                     if (!ctx.ToString(node.keys[0], key_str)) return {};
                     return std::move(ret) + "pk_h(" + std::move(key_str) + ")";
                 }
+                case NodeType::MULTI: {
+                    auto str = std::move(ret) + "multi(" + ::ToString(node.k);
+                    for (const auto& key : node.keys) {
+                        std::string key_str;
+                        if (!ctx.ToString(key, key_str)) return {};
+                        str += "," + std::move(key_str);
+                    }
+                    return std::move(str) + ")";
+                }
                 default: assert(false);
             }
             return ""; // Should never be reached.
@@ -344,6 +363,7 @@ public:
     bool operator==(const Node<Key>& arg) const
     {
         if (nodetype != arg.nodetype) return false;
+        if (k != arg.k) return false;
         if (keys != arg.keys) return false;
         if (subs.size() != arg.subs.size()) return false;
         for (size_t i = 0; i < subs.size(); ++i) {
@@ -355,12 +375,12 @@ public:
     }
 
     // Constructors with various argument combinations.
-    Node(NodeType nt, std::vector<NodeRef<Key>> sub, std::vector<unsigned char> arg, uint32_t val = 0) : nodetype(nt), subs(std::move(sub)), typ(CalcType()), scriptlen(CalcScriptLen()) {}
-    Node(NodeType nt, std::vector<unsigned char> arg, uint32_t val = 0) : nodetype(nt), typ(CalcType()), scriptlen(CalcScriptLen()) {}
-    Node(NodeType nt, std::vector<NodeRef<Key>> sub, std::vector<Key> key, uint32_t val = 0) : nodetype(nt), keys(std::move(key)), subs(std::move(sub)), typ(CalcType()), scriptlen(CalcScriptLen()) {}
-    Node(NodeType nt, std::vector<Key> key, uint32_t val = 0) : nodetype(nt), keys(std::move(key)), typ(CalcType()), scriptlen(CalcScriptLen()) {}
-    Node(NodeType nt, std::vector<NodeRef<Key>> sub, uint32_t val = 0) : nodetype(nt), subs(std::move(sub)), typ(CalcType()), scriptlen(CalcScriptLen()) {}
-    Node(NodeType nt, uint32_t val = 0) : nodetype(nt), typ(CalcType()), scriptlen(CalcScriptLen()) {}
+    Node(NodeType nt, std::vector<NodeRef<Key>> sub, std::vector<unsigned char> arg, uint32_t val = 0) : nodetype(nt), k(val), subs(std::move(sub)), typ(CalcType()), scriptlen(CalcScriptLen()) {}
+    Node(NodeType nt, std::vector<unsigned char> arg, uint32_t val = 0) : nodetype(nt), k(val), typ(CalcType()), scriptlen(CalcScriptLen()) {}
+    Node(NodeType nt, std::vector<NodeRef<Key>> sub, std::vector<Key> key, uint32_t val = 0) : nodetype(nt), k(val), keys(std::move(key)), subs(std::move(sub)), typ(CalcType()), scriptlen(CalcScriptLen()) {}
+    Node(NodeType nt, std::vector<Key> key, uint32_t val = 0) : nodetype(nt), k(val), keys(std::move(key)), typ(CalcType()), scriptlen(CalcScriptLen()) {}
+    Node(NodeType nt, std::vector<NodeRef<Key>> sub, uint32_t val = 0) : nodetype(nt), k(val), subs(std::move(sub)), typ(CalcType()), scriptlen(CalcScriptLen()) {}
+    Node(NodeType nt, uint32_t val = 0) : nodetype(nt), k(val), typ(CalcType()), scriptlen(CalcScriptLen()) {}
 };
 
 namespace internal {
@@ -408,6 +428,7 @@ inline NodeRef<Key> Parse(Span<const char> in, const Ctx& ctx)
     to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1);
 
     while (!to_parse.empty()) {
+        int64_t k = -1; // multi() threshold
         // Get the current context we are decoding within
         auto [cur_context, n] = to_parse.back();
         to_parse.pop_back();
@@ -463,6 +484,26 @@ inline NodeRef<Key> Parse(Span<const char> in, const Ctx& ctx)
                 if (!ctx.FromString(in.begin(), in.begin() + key_size, key)) return {};
                 constructed.push_back(MakeNodeRef<Key>(NodeType::PK_H, Vector(std::move(key))));
                 in = in.subspan(key_size + 1);
+            } else if (Const("multi(", in)) {
+                // Get threshold
+                int next_comma = FindNextChar(in, ',');
+                if (next_comma < 1) return {};
+                if (!ParseInt64(std::string(in.begin(), in.begin() + next_comma), &k)) return {};
+                in = in.subspan(next_comma + 1);
+                // Get keys
+                std::vector<Key> keys;
+                while (next_comma != -1) {
+                    Key key;
+                    next_comma = FindNextChar(in, ',');
+                    int key_length = (next_comma == -1) ? FindNextChar(in, ')') : next_comma;
+                    if (key_length < 1) return {};
+                    if (!ctx.FromString(in.begin(), in.begin() + key_length, key)) return {};
+                    keys.push_back(std::move(key));
+                    in = in.subspan(key_length + 1);
+                }
+                if (keys.size() < 1 || keys.size() > 20) return {};
+                if (k < 1 || k > (int64_t)keys.size()) return {};
+                constructed.push_back(MakeNodeRef<Key>(NodeType::MULTI, std::move(keys), k));
             }
             break;
         }
