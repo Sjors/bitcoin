@@ -65,6 +65,8 @@ Type ComputeType(NodeType nodetype, Type x, uint32_t k, size_t n_subs, size_t n_
             "i"_mst.If(k >= LOCKTIME_THRESHOLD) |
             "j"_mst.If(k < LOCKTIME_THRESHOLD) |
             "Bzfk"_mst;
+        case NodeType::JUST_1: return "Bzufk"_mst;
+        case NodeType::JUST_0: return "Bzudesk"_mst;
         case NodeType::WRAP_C: return
             "B"_mst.If(x << "K"_mst) | // B=K_x
             (x & "ghijk"_mst) | // g=g_x, h=h_x, i=i_x, j=j_x, k=k_x
@@ -83,6 +85,8 @@ size_t ComputeScriptLen(NodeType nodetype, Type sub0typ, size_t subsize, uint32_
         case NodeType::OLDER: return subsize + 1 + (CScript() << k).size();
         case NodeType::AFTER: return subsize + 1 + (CScript() << k).size();
         case NodeType::WRAP_C: return subsize + 1;
+        case NodeType::JUST_1: return 1;
+        case NodeType::JUST_0: return 1;
         case NodeType::MULTI: return subsize + 3 + (n_keys > 16) + (k > 16) + 34 * n_keys;
     }
     assert(false);

@@ -144,6 +144,8 @@ NodeRef<Key> MakeNodeRef(Args&&... args) { return std::make_shared<const Node<Ke
 
 //! The different node types in miniscript.
 enum class NodeType {
+    JUST_0,    //!< OP_0
+    JUST_1,    //!< OP_1
     PK_K,      //!< [key]
     PK_H,      //!< OP_DUP OP_HASH160 [keyhash] OP_EQUALVERIFY
     OLDER,     //!< [n] OP_CHECKSEQUENCEVERIFY
@@ -321,6 +323,8 @@ public:
                 case NodeType::OLDER: return CScript() << node.k << OP_CHECKSEQUENCEVERIFY;
                 case NodeType::AFTER: return CScript() << node.k << OP_CHECKLOCKTIMEVERIFY;
                 case NodeType::WRAP_C: return std::move(subs[0]) + CScript() << (verify ? OP_CHECKSIGVERIFY : OP_CHECKSIG);
+                case NodeType::JUST_1: return CScript() << OP_1;
+                case NodeType::JUST_0: return CScript() << OP_0;
                 case NodeType::MULTI: {
                     CScript script = CScript() << node.k;
                     for (const auto& key : node.keys) {
@@ -378,6 +382,8 @@ public:
                 }
                 case NodeType::AFTER: return std::move(ret) + "after(" + ::ToString(node.k) + ")";
                 case NodeType::OLDER: return std::move(ret) + "older(" + ::ToString(node.k) + ")";
+                case NodeType::JUST_1: return std::move(ret) + "1";
+                case NodeType::JUST_0: return std::move(ret) + "0";
                 case NodeType::MULTI: {
                     auto str = std::move(ret) + "multi(" + ::ToString(node.k);
                     for (const auto& key : node.keys) {
@@ -516,7 +522,11 @@ inline NodeRef<Key> Parse(Span<const char> in, const Ctx& ctx)
             break;
         }
         case ParseContext::EXPR: {
-            if (Const("pk(", in)) {
+            if (Const("0", in)) {
+                constructed.push_back(MakeNodeRef<Key>(NodeType::JUST_0));
+            } else if (Const("1", in)) {
+                constructed.push_back(MakeNodeRef<Key>(NodeType::JUST_1));
+            } else if (Const("pk(", in)) {
                 Key key;
                 int key_size = FindNextChar(in, ')');
                 if (key_size < 1) return {};
