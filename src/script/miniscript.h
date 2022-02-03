@@ -36,7 +36,14 @@ namespace miniscript {
  *   - When dissatisfied, pushes a 0 onto the stack.
  *   - This is used for most expressions, and required for the top level one.
  *   - For example: older(n) = <n> OP_CHECKSEQUENCEVERIFY.
- * - "V" Verify: introduced in a later commit
+ * - "V" Verify:
+ *   - Takes its inputs from the top of the stack.
+ *   - When satisfactied, pushes nothing.
+ *   - Cannot be dissatisfied.
+ *   - This is obtained by adding an OP_VERIFY to a B, modifying the last opcode
+ *     of a B to its -VERIFY version (only for OP_CHECKSIG, OP_CHECKSIGVERIFY
+ *     and OP_EQUAL), or using IFs where both branches are also Vs.
+ *   - For example vc:pk_k(key) = <key> OP_CHECKSIGVERIFY
  * - "K" Key:
  *   - Takes its inputs from the top of the stack.
  *   - Becomes a B when followed by OP_CHECKSIG.
@@ -55,16 +62,20 @@ namespace miniscript {
  *   - Conflicts with property 'z'
  * - "d" Dissatisfiable:
  *   - There is an easy way to construct a dissatisfaction for this expression.
+ *   - Conflicts with type 'V'.
  * - "u" Unit:
  *   - In case of satisfaction, an exact 1 is put on the stack (rather than just nonzero).
+ *   - Conflicts with type 'V'.
  *
  * Additional type properties help reasoning about nonmalleability:
  * - "e" Expression:
  *   - This implies property 'd', but the dissatisfaction is nonmalleable.
  *   - This generally requires 'e' for all subexpressions which are invoked for that
  *     dissatifsaction, and property 'f' for the unexecuted subexpressions in that case.
+ *   - Conflicts with type 'V'.
  * - "f" Forced:
  *   - Dissatisfactions (if any) for this expression always involve at least one signature.
+ *   - Is always true for type 'V'.
  * - "s" Safe:
  *   - Satisfactions for this expression always involve at least one signature.
  * - "m" Nonmalleable:
@@ -76,6 +87,8 @@ namespace miniscript {
  * One type property is an implementation detail:
  * - "x" Expensive verify:
  *   - Expressions with this property have a script whose last opcode is not EQUAL, CHECKSIG, or CHECKMULTISIG.
+ *   - Not having this property means that it can be converted to a V at no cost (by switching to the
+ *     -VERIFY version of the last opcode).
  *
  * Five more type properties for representing timelock information. Spend paths
  * in miniscripts containing conflicting timelocks and heightlocks cannot be spent together.
@@ -127,8 +140,10 @@ public:
 inline constexpr Type operator"" _mst(const char* c, size_t l) {
     return l == 0 ? Type(0) : operator"" _mst(c + 1, l - 1) | Type(
         *c == 'B' ? 1 << 0 : // Base type
+        *c == 'V' ? 1 << 1 : // Verify type
         *c == 'K' ? 1 << 2 : // Key type
         *c == 'z' ? 1 << 4 : // Zero-arg property
+        *c == 'o' ? 1 << 5 : // One-arg property
         *c == 'n' ? 1 << 6 : // Nonzero arg property
         *c == 'd' ? 1 << 7 : // Dissatisfiable property
         *c == 'u' ? 1 << 8 : // Unit property
@@ -162,13 +177,21 @@ enum class NodeType {
     OLDER,     //!< [n] OP_CHECKSEQUENCEVERIFY
     AFTER,     //!< [n] OP_CHECKLOCKTIMEVERIFY
     WRAP_C,    //!< [X] OP_CHECKSIG
+    AND_V,     //!< [X] [Y]
+    AND_B,     //!< [X] [Y] OP_BOOLAND
+    OR_B,      //!< [X] [Y] OP_BOOLOR
+    OR_C,      //!< [X] OP_NOTIF [Y] OP_ENDIF
+    OR_D,      //!< [X] OP_IFDUP OP_NOTIF [Y] OP_ENDIF
+    OR_I,      //!< OP_IF [X] OP_ELSE [Y] OP_ENDIF
+    ANDOR,     //!< [X] OP_NOTIF [Z] OP_ELSE [Y] OP_ENDIF
     MULTI,     //!< [k] [key_n]* [n] OP_CHECKMULTISIG
+    // AND_N(X,Y) is represented as ANDOR(X,Y,0)
 };
 
 namespace internal {
 
 //! Helper function for Node::CalcType.
-Type ComputeType(NodeType nodetype, Type x, uint32_t k, size_t n_subs, size_t n_keys);
+Type ComputeType(NodeType nodetype, Type x, Type y, Type z, uint32_t k, size_t n_subs, size_t n_keys);
 
 //! Helper function for Node::CalcScriptLen.
 size_t ComputeScriptLen(NodeType nodetype, Type sub0typ, size_t subsize, uint32_t k, size_t n_subs, size_t n_keys);
@@ -187,7 +210,7 @@ struct Node {
     const uint32_t k = 0;
     //! The keys used by this expression (only for PK_K/PK_H/MULTI)
     const std::vector<Key> keys;
-    //! Subexpressions (for WRAP_C)
+    //! Subexpressions (for WRAP_*/AND_*/OR_*/ANDOR)
     const std::vector<NodeRef<Key>> subs;
 
 private:
@@ -309,10 +332,12 @@ private:
     Type CalcType() const {
         using namespace internal;
 
-        // All nodes can be computed just from the types of the 0-1 subexpexpressions.
+        // All nodes can be computed just from the types of the 0-3 subexpexpressions.
         Type x = subs.size() > 0 ? subs[0]->GetType() : ""_mst;
+        Type y = subs.size() > 1 ? subs[1]->GetType() : ""_mst;
+        Type z = subs.size() > 2 ? subs[2]->GetType() : ""_mst;
 
-        return SanitizeType(ComputeType(nodetype, x, k, subs.size(), keys.size()));
+        return SanitizeType(ComputeType(nodetype, x, y, z, k, subs.size(), keys.size()));
     }
 
 public:
@@ -323,6 +348,9 @@ public:
         // The State is a boolean: whether or not the node's script expansion is followed
         // by an OP_VERIFY (which may need to be combined with the last script opcode).
         auto downfn = [](bool verify, const Node& node, size_t index) {
+            // The last subexpression of AND_V
+            // inherit the followed-by-OP_VERIFY property from the parent.
+            if (node.nodetype == NodeType::AND_V && index == 1) return verify;
             return false;
         };
         // The upward function computes for a node, given its followed-by-OP_VERIFY status
@@ -336,6 +364,13 @@ public:
                 case NodeType::WRAP_C: return std::move(subs[0]) + CScript() << (verify ? OP_CHECKSIGVERIFY : OP_CHECKSIG);
                 case NodeType::JUST_1: return CScript() << OP_1;
                 case NodeType::JUST_0: return CScript() << OP_0;
+                case NodeType::AND_V: return std::move(subs[0]) + std::move(subs[1]);
+                case NodeType::AND_B: return std::move(subs[0]) + std::move(subs[1]) + (CScript() << OP_BOOLAND);
+                case NodeType::OR_B: return std::move(subs[0]) + std::move(subs[1]) + (CScript() << OP_BOOLOR);
+                case NodeType::OR_D: return std::move(subs[0]) + (CScript() << OP_IFDUP << OP_NOTIF) + std::move(subs[1]) + (CScript() << OP_ENDIF);
+                case NodeType::OR_C: return std::move(subs[0]) + (CScript() << OP_NOTIF) + std::move(subs[1]) + (CScript() << OP_ENDIF);
+                case NodeType::OR_I: return (CScript() << OP_IF) + std::move(subs[0]) + (CScript() << OP_ELSE) + std::move(subs[1]) + (CScript() << OP_ENDIF);
+                case NodeType::ANDOR: return std::move(subs[0]) + (CScript() << OP_NOTIF) + std::move(subs[2]) + (CScript() << OP_ELSE) + std::move(subs[1]) + (CScript() << OP_ENDIF);
                 case NodeType::MULTI: {
                     CScript script = CScript() << node.k;
                     for (const auto& key : node.keys) {
@@ -356,7 +391,10 @@ public:
         // the TreeEvalMaybe algorithm. The State is a boolean: whether the parent node is a
         // wrapper. If so, non-wrapper expressions must be prefixed with a ":".
         auto downfn = [](bool, const Node& node, size_t) {
-            return node.nodetype == NodeType::WRAP_C;
+            return (node.nodetype == NodeType::WRAP_C ||
+                    (node.nodetype == NodeType::AND_V && node.subs[1]->nodetype == NodeType::JUST_1) ||
+                    (node.nodetype == NodeType::OR_I && node.subs[0]->nodetype == NodeType::JUST_0) ||
+                    (node.nodetype == NodeType::OR_I && node.subs[1]->nodetype == NodeType::JUST_0));
         };
         // The upward function computes for a node, given whether its parent is a wrapper,
         // and the string representations of its child nodes, the string representation of the node.
@@ -378,6 +416,14 @@ public:
                         return std::move(ret) + "pkh(" + std::move(key_str) + ")";
                     }
                     return "c" + std::move(subs[0]);
+                case NodeType::AND_V:
+                    // t:X is syntactic sugar for and_v(X,1).
+                    if (node.subs[1]->nodetype == NodeType::JUST_1) return "t" + std::move(subs[0]);
+                    break;
+                case NodeType::OR_I:
+                    if (node.subs[0]->nodetype == NodeType::JUST_0) return "l" + std::move(subs[1]);
+                    if (node.subs[1]->nodetype == NodeType::JUST_0) return "u" + std::move(subs[0]);
+                    break;
                 default: break;
             }
             switch (node.nodetype) {
@@ -395,6 +441,16 @@ public:
                 case NodeType::OLDER: return std::move(ret) + "older(" + ::ToString(node.k) + ")";
                 case NodeType::JUST_1: return std::move(ret) + "1";
                 case NodeType::JUST_0: return std::move(ret) + "0";
+                case NodeType::AND_V: return std::move(ret) + "and_v(" + std::move(subs[0]) + "," + std::move(subs[1]) + ")";
+                case NodeType::AND_B: return std::move(ret) + "and_b(" + std::move(subs[0]) + "," + std::move(subs[1]) + ")";
+                case NodeType::OR_B: return std::move(ret) + "or_b(" + std::move(subs[0]) + "," + std::move(subs[1]) + ")";
+                case NodeType::OR_D: return std::move(ret) + "or_d(" + std::move(subs[0]) + "," + std::move(subs[1]) + ")";
+                case NodeType::OR_C: return std::move(ret) + "or_c(" + std::move(subs[0]) + "," + std::move(subs[1]) + ")";
+                case NodeType::OR_I: return std::move(ret) + "or_i(" + std::move(subs[0]) + "," + std::move(subs[1]) + ")";
+                case NodeType::ANDOR:
+                    // and_n(X,Y) is syntactic sugar for andor(X,Y,0).
+                    if (node.subs[2]->nodetype == NodeType::JUST_0) return std::move(ret) + "and_n(" + std::move(subs[0]) + "," + std::move(subs[1]) + ")";
+                    return std::move(ret) + "andor(" + std::move(subs[0]) + "," + std::move(subs[1]) + "," + std::move(subs[2]) + ")";
                 case NodeType::MULTI: {
                     auto str = std::move(ret) + "multi(" + ::ToString(node.k);
                     for (const auto& key : node.keys) {
@@ -473,6 +529,22 @@ enum class ParseContext {
 
     /** CHECK wraps the top constructed node with c: */
     CHECK,
+    /** AND_N will construct an andor(X,Y,0) node from the last two constructed nodes. */
+    AND_N,
+    /** AND_V will construct an and_v node from the last two constructed nodes. */
+    AND_V,
+    /** AND_B will construct an and_b node from the last two constructed nodes. */
+    AND_B,
+    /** ANDOR will construct an andor node from the last three constructed nodes. */
+    ANDOR,
+    /** OR_B will construct an or_b node from the last two constructed nodes. */
+    OR_B,
+    /** OR_C will construct an or_c node from the last two constructed nodes. */
+    OR_C,
+    /** OR_D will construct an or_d node from the last two constructed nodes. */
+    OR_D,
+    /** OR_I will construct an or_i node from the last two constructed nodes. */
+    OR_I,
 
     /** COMMA expects the next element to be ',' and fails if not. */
     COMMA,
@@ -604,11 +676,79 @@ inline NodeRef<Key> Parse(Span<const char> in, const Ctx& ctx)
                 if (keys.size() < 1 || keys.size() > 20) return {};
                 if (k < 1 || k > (int64_t)keys.size()) return {};
                 constructed.push_back(MakeNodeRef<Key>(NodeType::MULTI, std::move(keys), k));
+            } else if (Const("andor(", in)) {
+                to_parse.emplace_back(ParseContext::ANDOR, -1);
+                to_parse.emplace_back(ParseContext::CLOSE_BRACKET, -1);
+                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1);
+                to_parse.emplace_back(ParseContext::COMMA, -11);
+                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1);
+                to_parse.emplace_back(ParseContext::COMMA, -1);
+                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1);
+            } else {
+                if (Const("and_n(", in)) {
+                    to_parse.emplace_back(ParseContext::AND_N, -1);
+                } else if (Const("and_b(", in)) {
+                    to_parse.emplace_back(ParseContext::AND_B, -1);
+                } else if (Const("and_v(", in)) {
+                    to_parse.emplace_back(ParseContext::AND_V, -1);
+                } else if (Const("or_b(", in)) {
+                    to_parse.emplace_back(ParseContext::OR_B, -1);
+                } else if (Const("or_c(", in)) {
+                    to_parse.emplace_back(ParseContext::OR_C, -1);
+                } else if (Const("or_d(", in)) {
+                    to_parse.emplace_back(ParseContext::OR_D, -1);
+                } else if (Const("or_i(", in)) {
+                    to_parse.emplace_back(ParseContext::OR_I, -1);
+                } else {
+                    return {};
+                }
+                to_parse.emplace_back(ParseContext::CLOSE_BRACKET, -1);
+                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1);
+                to_parse.emplace_back(ParseContext::COMMA, -1);
+                to_parse.emplace_back(ParseContext::WRAPPED_EXPR, -1);
             }
             break;
         }
         case ParseContext::CHECK: {
             constructed.back() = MakeNodeRef<Key>(NodeType::WRAP_C, Vector(std::move(constructed.back())));
+            break;
+        }
+        case ParseContext::AND_B: {
+            BuildBack(NodeType::AND_B, constructed);
+            break;
+        }
+        case ParseContext::AND_N: {
+            auto mid = std::move(constructed.back());
+            constructed.pop_back();
+            constructed.back() = MakeNodeRef<Key>(NodeType::ANDOR, Vector(std::move(constructed.back()), std::move(mid), MakeNodeRef<Key>(NodeType::JUST_0)));
+            break;
+        }
+        case ParseContext::AND_V: {
+            BuildBack(NodeType::AND_V, constructed);
+            break;
+        }
+        case ParseContext::OR_B: {
+            BuildBack(NodeType::OR_B, constructed);
+            break;
+        }
+        case ParseContext::OR_C: {
+            BuildBack(NodeType::OR_C, constructed);
+            break;
+        }
+        case ParseContext::OR_D: {
+            BuildBack(NodeType::OR_D, constructed);
+            break;
+        }
+        case ParseContext::OR_I: {
+            BuildBack(NodeType::OR_I, constructed);
+            break;
+        }
+        case ParseContext::ANDOR: {
+            auto right = std::move(constructed.back());
+            constructed.pop_back();
+            auto mid = std::move(constructed.back());
+            constructed.pop_back();
+            constructed.back() = MakeNodeRef<Key>(NodeType::ANDOR, Vector(std::move(constructed.back()), std::move(mid), std::move(right)));
             break;
         }
         case ParseContext::COMMA: {
