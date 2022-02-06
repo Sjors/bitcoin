@@ -94,6 +94,7 @@ using miniscript::operator"" _mst;
 enum TestMode : int {
     TESTMODE_INVALID = 0,
     TESTMODE_VALID = 1,
+    TESTMODE_NEEDSIG = 4,
 };
 
 void Test(const std::string& ms, const std::string& hexscript, int mode)
@@ -120,8 +121,8 @@ BOOST_AUTO_TEST_CASE(fixed_tests)
     g_testdata.reset(new TestData());
 
     // Validity rules
-    Test("pkh(03d30199d74fb5a22d47b6e054e2f378cedacffcb89904a61d75d0dbd407143e65)", "76a914fcd35ddacad9f2d5be5e464639441c6065e6955d88ac", TESTMODE_VALID); // alias to c:pk_h
-    Test("pkh(03d30199d74fb5a22d47b6e054e2f378cedacffcb89904a61d75d0dbd407143e65)", "76a914fcd35ddacad9f2d5be5e464639441c6065e6955d88ac", TESTMODE_VALID); // alias to c:pk_h
+    Test("pkh(03d30199d74fb5a22d47b6e054e2f378cedacffcb89904a61d75d0dbd407143e65)", "76a914fcd35ddacad9f2d5be5e464639441c6065e6955d88ac", TESTMODE_VALID | TESTMODE_NEEDSIG); // alias to c:pk_h
+    Test("pkh(03d30199d74fb5a22d47b6e054e2f378cedacffcb89904a61d75d0dbd407143e65)", "76a914fcd35ddacad9f2d5be5e464639441c6065e6955d88ac", TESTMODE_VALID | TESTMODE_NEEDSIG); // alias to c:pk_h
 
     g_testdata.reset();
 }

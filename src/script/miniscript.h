@@ -45,6 +45,25 @@ namespace miniscript {
  *   - For example pk_h(key) = OP_DUP OP_HASH160 <Hash160(key)> OP_EQUALVERIFY
  * - "W" Wrapped: introduced in a later commit
  *
+ * There a type properties that help reasoning about correctness:
+ * - "n" Nonzero:
+ *   - For every way this expression can be satisfied, a satisfaction exists that never needs
+ *     a zero top stack element.
+ * - "d" Dissatisfiable:
+ *   - There is an easy way to construct a dissatisfaction for this expression.
+ * - "u" Unit:
+ *   - In case of satisfaction, an exact 1 is put on the stack (rather than just nonzero).
+ *
+ * Additional type properties help reasoning about nonmalleability:
+ * - "e" Expression:
+ *   - This implies property 'd', but the dissatisfaction is nonmalleable.
+ *   - This generally requires 'e' for all subexpressions which are invoked for that
+ *     dissatifsaction, and property 'f' for the unexecuted subexpressions in that case.
+ * - "f" Forced:
+ *   - Dissatisfactions (if any) for this expression always involve at least one signature.
+ * - "s" Safe:
+ *   - Satisfactions for this expression always involve at least one signature.
+ *
  * For each of these properties the subset rule holds: an expression with properties X, Y, and Z, is also
  * valid in places where an X, a Y, a Z, an XY, ... is expected.
 */
@@ -83,6 +102,12 @@ inline constexpr Type operator"" _mst(const char* c, size_t l) {
     return l == 0 ? Type(0) : operator"" _mst(c + 1, l - 1) | Type(
         *c == 'B' ? 1 << 0 : // Base type
         *c == 'K' ? 1 << 2 : // Key type
+        *c == 'n' ? 1 << 6 : // Nonzero arg property
+        *c == 'd' ? 1 << 7 : // Dissatisfiable property
+        *c == 'u' ? 1 << 8 : // Unit property
+        *c == 'e' ? 1 << 9 : // Expression property
+        *c == 'f' ? 1 << 10 : // Forced property
+        *c == 's' ? 1 << 11 : // Safe property
         (throw std::logic_error("Unknown character in _mst literal"), 0)
     );
 }
@@ -356,8 +381,11 @@ public:
     //! Check whether this node is valid as a script on its own.
     bool IsValidTopLevel() const { return GetType() << "B"_mst; }
 
+    //! Check whether this script always needs a signature.
+    bool NeedsSignature() const { return GetType() << "s"_mst; }
+
     //! Check whether this node is safe as a script on its own.
-    bool IsSaneTopLevel() const { return IsValidTopLevel(); }
+    bool IsSaneTopLevel() const { return IsValidTopLevel() && NeedsSignature(); }
 
     //! Equality testing.
     bool operator==(const Node<Key>& arg) const

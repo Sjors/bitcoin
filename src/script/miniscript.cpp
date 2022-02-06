@@ -16,6 +16,11 @@ Type SanitizeType(Type e) {
     int num_types = (e << "K"_mst) + (e << "B"_mst);
     if (num_types == 0) return ""_mst; // No valid type, don't care about the rest
     assert(num_types == 1); // K, V, B all conflict with each other
+    bool ok = // Work around a GCC 4.8 bug that breaks user-defined literals in macro calls.
+        (!(e << "K"_mst) ||  (e << "u"_mst)) && // K implies u
+        (!(e << "e"_mst) ||  (e << "d"_mst)) && // e implies d
+        (!(e << "K"_mst) ||  (e << "s"_mst)); // K implies s
+    assert(ok);
     return e;
 }
 
@@ -45,10 +50,12 @@ Type ComputeType(NodeType nodetype, Type x, uint32_t k, size_t n_subs, size_t n_
     // It heavily relies on Type's << operator (where "X << a_mst" means
     // "X has all properties listed in a").
     switch (nodetype) {
-        case NodeType::PK_K: return "K"_mst;
-        case NodeType::PK_H: return "K"_mst;
+        case NodeType::PK_K: return "Knudes"_mst;
+        case NodeType::PK_H: return "Knudes"_mst;
         case NodeType::WRAP_C: return
             "B"_mst.If(x << "K"_mst); // B=K_x
+            (x & "ndfe"_mst) | // n=n_x, d=d_x, f=f_x, e=e_x
+            "us"_mst; // u, s
         case NodeType::MULTI: return "B"_mst;
     }
     assert(false);
