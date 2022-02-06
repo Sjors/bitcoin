@@ -67,6 +67,15 @@ namespace miniscript {
  *   - Dissatisfactions (if any) for this expression always involve at least one signature.
  * - "s" Safe:
  *   - Satisfactions for this expression always involve at least one signature.
+ * - "m" Nonmalleable:
+ *   - For every way this expression can be satisfied (which may be none),
+ *     a nonmalleable satisfaction exists.
+ *   - This generally requires 'm' for all subexpressions, and 'e' for all subexpressions
+ *     which are dissatisfied when satisfying the parent.
+ *
+ * One type property is an implementation detail:
+ * - "x" Expensive verify:
+ *   - Expressions with this property have a script whose last opcode is not EQUAL, CHECKSIG, or CHECKMULTISIG.
  *
  * Five more type properties for representing timelock information. Spend paths
  * in miniscripts containing conflicting timelocks and heightlocks cannot be spent together.
@@ -126,6 +135,8 @@ inline constexpr Type operator"" _mst(const char* c, size_t l) {
         *c == 'e' ? 1 << 9 : // Expression property
         *c == 'f' ? 1 << 10 : // Forced property
         *c == 's' ? 1 << 11 : // Safe property
+        *c == 'm' ? 1 << 12 : // Nonmalleable property
+        *c == 'x' ? 1 << 13 : // Expensive verify
         *c == 'g' ? 1 << 14 : // older: contains relative time timelock   (csv_time)
         *c == 'h' ? 1 << 15 : // older: contains relative height timelock (csv_height)
         *c == 'i' ? 1 << 16 : // after: contains time timelock   (cltv_time)
@@ -415,6 +426,9 @@ public:
 
     //! Check whether this node is valid as a script on its own.
     bool IsValidTopLevel() const { return GetType() << "B"_mst; }
+
+    //! Check whether this script can always be satisfied in a non-malleable way.
+    bool IsNonMalleable() const { return GetType() << "m"_mst; }
 
     //! Check whether this script always needs a signature.
     bool NeedsSignature() const { return GetType() << "s"_mst; }

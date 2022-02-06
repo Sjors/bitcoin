@@ -55,24 +55,24 @@ Type ComputeType(NodeType nodetype, Type x, uint32_t k, size_t n_subs, size_t n_
     // It heavily relies on Type's << operator (where "X << a_mst" means
     // "X has all properties listed in a").
     switch (nodetype) {
-        case NodeType::PK_K: return "Knudesk"_mst;
-        case NodeType::PK_H: return "Knudesk"_mst;
+        case NodeType::PK_K: return "Knudemsxk"_mst;
+        case NodeType::PK_H: return "Knudemsxk"_mst;
         case NodeType::OLDER: return
             "g"_mst.If(k & CTxIn::SEQUENCE_LOCKTIME_TYPE_FLAG) |
             "h"_mst.If(!(k & CTxIn::SEQUENCE_LOCKTIME_TYPE_FLAG)) |
-            "Bzfk"_mst;
+            "Bzfmxk"_mst;
         case NodeType::AFTER: return
             "i"_mst.If(k >= LOCKTIME_THRESHOLD) |
             "j"_mst.If(k < LOCKTIME_THRESHOLD) |
-            "Bzfk"_mst;
-        case NodeType::JUST_1: return "Bzufk"_mst;
-        case NodeType::JUST_0: return "Bzudesk"_mst;
+            "Bzfmxk"_mst;
+        case NodeType::JUST_1: return "Bzufmxk"_mst;
+        case NodeType::JUST_0: return "Bzudesmxk"_mst;
         case NodeType::WRAP_C: return
             "B"_mst.If(x << "K"_mst) | // B=K_x
             (x & "ghijk"_mst) | // g=g_x, h=h_x, i=i_x, j=j_x, k=k_x
-            (x & "ndfe"_mst) | // n=n_x, d=d_x, f=f_x, e=e_x
+            (x & "ndfem"_mst) | // n=n_x, d=d_x, f=f_x, e=e_x
             "us"_mst; // u, s
-        case NodeType::MULTI: return "Bnudesk"_mst;
+        case NodeType::MULTI: return "Bnudemsk"_mst;
     }
     assert(false);
     return ""_mst;
