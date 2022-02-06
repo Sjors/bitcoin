@@ -95,6 +95,7 @@ enum TestMode : int {
     TESTMODE_INVALID = 0,
     TESTMODE_VALID = 1,
     TESTMODE_NEEDSIG = 4,
+    TESTMODE_TIMELOCKMIX = 8
 };
 
 void Test(const std::string& ms, const std::string& hexscript, int mode)
@@ -109,6 +110,8 @@ void Test(const std::string& ms, const std::string& hexscript, int mode)
         auto computed_script = node->ToScript(CONVERTER);
         BOOST_CHECK_MESSAGE(node->ScriptSize() == computed_script.size(), "Script size mismatch: " + ms);
         if (hexscript != "?") BOOST_CHECK_MESSAGE(HexStr(computed_script) == hexscript, "Script mismatch: " + ms + " (" + HexStr(computed_script) + " vs " + hexscript + ")");
+        BOOST_CHECK_MESSAGE(node->NeedsSignature() == !!(mode & TESTMODE_NEEDSIG), "Signature necessity mismatch: " + ms);
+        BOOST_CHECK_MESSAGE((node->GetType() << "k"_mst) == !(mode & TESTMODE_TIMELOCKMIX), "Timelock mix mismatch: " + ms);
     }
 
 }
@@ -121,8 +124,12 @@ BOOST_AUTO_TEST_CASE(fixed_tests)
     g_testdata.reset(new TestData());
 
     // Validity rules
+    Test("pk(03d30199d74fb5a22d47b6e054e2f378cedacffcb89904a61d75d0dbd407143e65)", "2103d30199d74fb5a22d47b6e054e2f378cedacffcb89904a61d75d0dbd407143e65ac", TESTMODE_VALID | TESTMODE_NEEDSIG); // alias to c:pk_k
     Test("pkh(03d30199d74fb5a22d47b6e054e2f378cedacffcb89904a61d75d0dbd407143e65)", "76a914fcd35ddacad9f2d5be5e464639441c6065e6955d88ac", TESTMODE_VALID | TESTMODE_NEEDSIG); // alias to c:pk_h
-    Test("pkh(03d30199d74fb5a22d47b6e054e2f378cedacffcb89904a61d75d0dbd407143e65)", "76a914fcd35ddacad9f2d5be5e464639441c6065e6955d88ac", TESTMODE_VALID | TESTMODE_NEEDSIG); // alias to c:pk_h
+
+    // Timelock tests
+    Test("after(100)", "?", TESTMODE_VALID); // only heightlock
+    Test("after(1000000000)", "?", TESTMODE_VALID); // only timelock
 
     g_testdata.reset();
 }

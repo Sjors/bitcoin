@@ -46,9 +46,13 @@ namespace miniscript {
  * - "W" Wrapped: introduced in a later commit
  *
  * There a type properties that help reasoning about correctness:
+ * - "z" Zero-arg:
+ *   - Is known to always consume exactly 0 stack elements.
+ *   - For example after(n) = <n> OP_CHECKLOCKTIMEVERIFY
  * - "n" Nonzero:
  *   - For every way this expression can be satisfied, a satisfaction exists that never needs
  *     a zero top stack element.
+ *   - Conflicts with property 'z'
  * - "d" Dissatisfiable:
  *   - There is an easy way to construct a dissatisfaction for this expression.
  * - "u" Unit:
@@ -64,6 +68,19 @@ namespace miniscript {
  * - "s" Safe:
  *   - Satisfactions for this expression always involve at least one signature.
  *
+ * Five more type properties for representing timelock information. Spend paths
+ * in miniscripts containing conflicting timelocks and heightlocks cannot be spent together.
+ * This helps users detect if miniscript does not match the semantic behaviour the
+ * user expects.
+ * - "g" Whether the branch contains a relative time timelock
+ * - "h" Whether the branch contains a relative height timelock
+ * - "i" Whether the branch contains a absolute time timelock
+ * - "j" Whether the branch contains a absolute time heightlock
+ * - "k"
+ *   - Whether all satisfactions of this expression don't contain a mix of heightlock and timelock
+ *     of the same type.
+ *   - If the miniscript does not have the "k" property, the miniscript template will not match
+ *     the user expectation of the corresponding spending policy.
  * For each of these properties the subset rule holds: an expression with properties X, Y, and Z, is also
  * valid in places where an X, a Y, a Z, an XY, ... is expected.
 */
@@ -102,12 +119,18 @@ inline constexpr Type operator"" _mst(const char* c, size_t l) {
     return l == 0 ? Type(0) : operator"" _mst(c + 1, l - 1) | Type(
         *c == 'B' ? 1 << 0 : // Base type
         *c == 'K' ? 1 << 2 : // Key type
+        *c == 'z' ? 1 << 4 : // Zero-arg property
         *c == 'n' ? 1 << 6 : // Nonzero arg property
         *c == 'd' ? 1 << 7 : // Dissatisfiable property
         *c == 'u' ? 1 << 8 : // Unit property
         *c == 'e' ? 1 << 9 : // Expression property
         *c == 'f' ? 1 << 10 : // Forced property
         *c == 's' ? 1 << 11 : // Safe property
+        *c == 'g' ? 1 << 14 : // older: contains relative time timelock   (csv_time)
+        *c == 'h' ? 1 << 15 : // older: contains relative height timelock (csv_height)
+        *c == 'i' ? 1 << 16 : // after: contains time timelock   (cltv_time)
+        *c == 'j' ? 1 << 17 : // after: contains height timelock   (cltv_height)
+        *c == 'k' ? 1 << 18 : // does not contain a combination of height and time locks
         (throw std::logic_error("Unknown character in _mst literal"), 0)
     );
 }
@@ -123,6 +146,8 @@ NodeRef<Key> MakeNodeRef(Args&&... args) { return std::make_shared<const Node<Ke
 enum class NodeType {
     PK_K,      //!< [key]
     PK_H,      //!< OP_DUP OP_HASH160 [keyhash] OP_EQUALVERIFY
+    OLDER,     //!< [n] OP_CHECKSEQUENCEVERIFY
+    AFTER,     //!< [n] OP_CHECKLOCKTIMEVERIFY
     WRAP_C,    //!< [X] OP_CHECKSIG
     MULTI,     //!< [k] [key_n]* [n] OP_CHECKMULTISIG
 };
@@ -293,6 +318,8 @@ public:
             switch (node.nodetype) {
                 case NodeType::PK_K: return CScript() << ctx.ToPKBytes(node.keys[0]);
                 case NodeType::PK_H: return CScript() << OP_DUP << OP_HASH160 << ctx.ToPKHBytes(node.keys[0]) << OP_EQUALVERIFY;
+                case NodeType::OLDER: return CScript() << node.k << OP_CHECKSEQUENCEVERIFY;
+                case NodeType::AFTER: return CScript() << node.k << OP_CHECKLOCKTIMEVERIFY;
                 case NodeType::WRAP_C: return std::move(subs[0]) + CScript() << (verify ? OP_CHECKSIGVERIFY : OP_CHECKSIG);
                 case NodeType::MULTI: {
                     CScript script = CScript() << node.k;
@@ -349,6 +376,8 @@ public:
                     if (!ctx.ToString(node.keys[0], key_str)) return {};
                     return std::move(ret) + "pk_h(" + std::move(key_str) + ")";
                 }
+                case NodeType::AFTER: return std::move(ret) + "after(" + ::ToString(node.k) + ")";
+                case NodeType::OLDER: return std::move(ret) + "older(" + ::ToString(node.k) + ")";
                 case NodeType::MULTI: {
                     auto str = std::move(ret) + "multi(" + ::ToString(node.k);
                     for (const auto& key : node.keys) {
@@ -384,8 +413,11 @@ public:
     //! Check whether this script always needs a signature.
     bool NeedsSignature() const { return GetType() << "s"_mst; }
 
+    //! Do all sanity checks.
+    bool IsSane() const { return GetType() << "k"_mst && IsValid(); }
+
     //! Check whether this node is safe as a script on its own.
-    bool IsSaneTopLevel() const { return IsValidTopLevel() && NeedsSignature(); }
+    bool IsSaneTopLevel() const { return IsValidTopLevel() && IsSane() && NeedsSignature(); }
 
     //! Equality testing.
     bool operator==(const Node<Key>& arg) const
@@ -469,7 +501,7 @@ inline NodeRef<Key> Parse(Span<const char> in, const Ctx& ctx)
                     colon_index = i;
                     break;
                 }
-                if (in[i] < 'a') break;
+                if (in[i] < 'a' || in[i] > 'z') break;
             }
             // If there is no colon, this loop won't execute
             for (int j = 0; j < colon_index; ++j) {
@@ -512,6 +544,22 @@ inline NodeRef<Key> Parse(Span<const char> in, const Ctx& ctx)
                 if (!ctx.FromString(in.begin(), in.begin() + key_size, key)) return {};
                 constructed.push_back(MakeNodeRef<Key>(NodeType::PK_H, Vector(std::move(key))));
                 in = in.subspan(key_size + 1);
+            } else if (Const("after(", in)) {
+                int arg_size = FindNextChar(in, ')');
+                if (arg_size < 1) return {};
+                int64_t num;
+                if (!ParseInt64(std::string(in.begin(), in.begin() + arg_size), &num)) return {};
+                if (num < 1 || num >= 0x80000000L) return {};
+                constructed.push_back(MakeNodeRef<Key>(NodeType::AFTER, num));
+                in = in.subspan(arg_size + 1);
+            } else if (Const("older(", in)) {
+                int arg_size = FindNextChar(in, ')');
+                if (arg_size < 1) return {};
+                int64_t num;
+                if (!ParseInt64(std::string(in.begin(), in.begin() + arg_size), &num)) return {};
+                if (num < 1 || num >= 0x80000000L) return {};
+                constructed.push_back(MakeNodeRef<Key>(NodeType::OLDER, num));
+                in = in.subspan(arg_size + 1);
             } else if (Const("multi(", in)) {
                 // Get threshold
                 int next_comma = FindNextChar(in, ',');

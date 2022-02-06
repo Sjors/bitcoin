@@ -17,8 +17,11 @@ Type SanitizeType(Type e) {
     if (num_types == 0) return ""_mst; // No valid type, don't care about the rest
     assert(num_types == 1); // K, V, B all conflict with each other
     bool ok = // Work around a GCC 4.8 bug that breaks user-defined literals in macro calls.
+        (!(e << "n"_mst) || !(e << "z"_mst)) && // n conflicts with z
         (!(e << "K"_mst) ||  (e << "u"_mst)) && // K implies u
+        (!(e << "e"_mst) || !(e << "f"_mst)) && // e conflicts with f
         (!(e << "e"_mst) ||  (e << "d"_mst)) && // e implies d
+        (!(e << "d"_mst) || !(e << "f"_mst)) && // d conflicts with f
         (!(e << "K"_mst) ||  (e << "s"_mst)); // K implies s
     assert(ok);
     return e;
@@ -26,7 +29,9 @@ Type SanitizeType(Type e) {
 
 Type ComputeType(NodeType nodetype, Type x, uint32_t k, size_t n_subs, size_t n_keys) {
     // Sanity check on k
-    if (nodetype == NodeType::MULTI) {
+    if (nodetype == NodeType::OLDER || nodetype == NodeType::AFTER) {
+        assert(k >= 1 && k < 0x80000000UL);
+    } else if (nodetype == NodeType::MULTI) {
         assert(k >= 1 && k <= n_keys);
     } else {
         assert(k == 0);
@@ -50,13 +55,22 @@ Type ComputeType(NodeType nodetype, Type x, uint32_t k, size_t n_subs, size_t n_
     // It heavily relies on Type's << operator (where "X << a_mst" means
     // "X has all properties listed in a").
     switch (nodetype) {
-        case NodeType::PK_K: return "Knudes"_mst;
-        case NodeType::PK_H: return "Knudes"_mst;
+        case NodeType::PK_K: return "Knudesk"_mst;
+        case NodeType::PK_H: return "Knudesk"_mst;
+        case NodeType::OLDER: return
+            "g"_mst.If(k & CTxIn::SEQUENCE_LOCKTIME_TYPE_FLAG) |
+            "h"_mst.If(!(k & CTxIn::SEQUENCE_LOCKTIME_TYPE_FLAG)) |
+            "Bzfk"_mst;
+        case NodeType::AFTER: return
+            "i"_mst.If(k >= LOCKTIME_THRESHOLD) |
+            "j"_mst.If(k < LOCKTIME_THRESHOLD) |
+            "Bzfk"_mst;
         case NodeType::WRAP_C: return
-            "B"_mst.If(x << "K"_mst); // B=K_x
+            "B"_mst.If(x << "K"_mst) | // B=K_x
+            (x & "ghijk"_mst) | // g=g_x, h=h_x, i=i_x, j=j_x, k=k_x
             (x & "ndfe"_mst) | // n=n_x, d=d_x, f=f_x, e=e_x
             "us"_mst; // u, s
-        case NodeType::MULTI: return "B"_mst;
+        case NodeType::MULTI: return "Bnudesk"_mst;
     }
     assert(false);
     return ""_mst;
@@ -66,6 +80,8 @@ size_t ComputeScriptLen(NodeType nodetype, Type sub0typ, size_t subsize, uint32_
     switch (nodetype) {
         case NodeType::PK_K: return subsize + 34;
         case NodeType::PK_H: return subsize + 3 + 21;
+        case NodeType::OLDER: return subsize + 1 + (CScript() << k).size();
+        case NodeType::AFTER: return subsize + 1 + (CScript() << k).size();
         case NodeType::WRAP_C: return subsize + 1;
         case NodeType::MULTI: return subsize + 3 + (n_keys > 16) + (k > 16) + 34 * n_keys;
     }
