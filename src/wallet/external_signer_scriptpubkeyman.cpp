@@ -63,9 +63,10 @@ bool ExternalSignerScriptPubKeyMan::DisplayAddress(const CScript scriptPubKey, c
 // If sign is true, transaction must previously have been filled
 TransactionError ExternalSignerScriptPubKeyMan::FillPSBT(PartiallySignedTransaction& psbt, const PrecomputedTransactionData& txdata, int sighash_type, bool sign, bool bip32derivs, int* n_signed, bool finalize) const
 {
-    if (!sign) {
-        return DescriptorScriptPubKeyMan::FillPSBT(psbt, txdata, sighash_type, false, bip32derivs, n_signed, finalize);
-    }
+    // First fill transaction with our data without signing,
+    // so external signers are not asked to sign more than once.
+    TransactionError result = DescriptorScriptPubKeyMan::FillPSBT(psbt, txdata, sighash_type, /*sign=*/false, /*bip32derivs=*/bip32derivs, /*n_signed=*/n_signed, /*finalize=*/finalize);
+    if (!sign) return result;
 
     // Already complete if every input is now signed
     bool complete = true;

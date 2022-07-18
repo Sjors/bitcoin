@@ -81,11 +81,8 @@ static UniValue FinishTransaction(const std::shared_ptr<CWallet> pwallet, const 
     // Make a blank psbt
     PartiallySignedTransaction psbtx(rawTx);
 
-    // First fill transaction with our data without signing,
-    // so external signers are not asked to sign more than once.
     bool complete;
-    pwallet->FillPSBT(psbtx, complete, SIGHASH_DEFAULT, /*sign=*/false, /*bip32derivs=*/true);
-    const TransactionError err{pwallet->FillPSBT(psbtx, complete, SIGHASH_DEFAULT, /*sign=*/true, /*bip32derivs=*/false)};
+    const TransactionError err{pwallet->FillPSBT(psbtx, complete, SIGHASH_DEFAULT, /*sign=*/true, /*bip32derivs=*/true)};
     if (err != TransactionError::OK) {
         throw JSONRPCTransactionError(err);
     }

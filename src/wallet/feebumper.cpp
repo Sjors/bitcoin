@@ -241,11 +241,7 @@ bool SignTransaction(CWallet& wallet, CMutableTransaction& mtx) {
     if (wallet.IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER)) {
         // Make a blank psbt
         PartiallySignedTransaction psbtx(mtx);
-
-        // First fill transaction with our data without signing,
-        // so external signers are not asked to sign more than once.
         bool complete;
-        wallet.FillPSBT(psbtx, complete, SIGHASH_ALL, false /* sign */, true /* bip32derivs */);
         const TransactionError err = wallet.FillPSBT(psbtx, complete, SIGHASH_ALL, true /* sign */, false  /* bip32derivs */);
         if (err != TransactionError::OK) return false;
         complete = FinalizeAndExtractPSBT(psbtx, mtx);
