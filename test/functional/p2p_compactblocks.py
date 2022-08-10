@@ -661,6 +661,25 @@ class CompactBlocksTest(BitcoinTestFramework):
                 break
         assert found
 
+        # A compactblock with insufficient work won't get its header included
+        hashPrevBlock = int(node.getblockhash(cur_height - 150), 16)
+        block = self.build_block_on_tip(node)
+        block.hashPrevBlock = hashPrevBlock
+        block.solve()
+
+        comp_block = HeaderAndShortIDs()
+        comp_block.initialize_from_block(block)
+        with self.nodes[0].assert_debug_log(['[net] Ignoring low-work compact block from peer 0']):
+            test_node.send_and_ping(msg_cmpctblock(comp_block.to_p2p()))
+
+        tips = node.getchaintips()
+        found = False
+        for x in tips:
+            if x["hash"] == block.hash:
+                found = True
+                break
+        assert not found
+
         # Requesting this block via getblocktxn should silently fail
         # (to avoid fingerprinting attacks).
         msg = msg_getblocktxn()
