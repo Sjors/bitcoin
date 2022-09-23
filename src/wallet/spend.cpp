@@ -30,11 +30,11 @@ using interfaces::FoundBlock;
 namespace wallet {
 static constexpr size_t OUTPUT_GROUP_MAX_ENTRIES{100};
 
-int CalculateMaximumSignedInputSize(const CTxOut& txout, const COutPoint outpoint, const SigningProvider* provider, const CCoinControl* coin_control)
+int CalculateMaximumSignedInputSize(const CTxOut& txout, const COutPoint outpoint, const SigningProvider* provider, bool can_grind_r, const CCoinControl* coin_control)
 {
     CMutableTransaction txn;
     txn.vin.push_back(CTxIn(outpoint));
-    if (!provider || !DummySignInput(*provider, txn.vin[0], txout, coin_control)) {
+    if (!provider || !DummySignInput(*provider, txn.vin[0], txout, can_grind_r, coin_control)) {
         return -1;
     }
     return GetVirtualTransactionInputSize(txn.vin[0]);
@@ -42,8 +42,9 @@ int CalculateMaximumSignedInputSize(const CTxOut& txout, const COutPoint outpoin
 
 int CalculateMaximumSignedInputSize(const CTxOut& txout, const CWallet* wallet, const CCoinControl* coin_control)
 {
+    const bool can_grind_r = !wallet->IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER);
     const std::unique_ptr<SigningProvider> provider = wallet->GetSolvingProvider(txout.scriptPubKey);
-    return CalculateMaximumSignedInputSize(txout, COutPoint(), provider.get(), coin_control);
+    return CalculateMaximumSignedInputSize(txout, COutPoint(), provider.get(), can_grind_r, coin_control);
 }
 
 // txouts needs to be in the order of tx.vin
@@ -161,6 +162,7 @@ util::Result<PreSelectedInputs> FetchSelectedInputs(const CWallet& wallet, const
                                             const CoinSelectionParams& coin_selection_params) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
 {
     PreSelectedInputs result;
+    const bool can_grind_r = !wallet.IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER);
     std::vector<COutPoint> vPresetInputs;
     coin_control.ListSelected(vPresetInputs);
     for (const COutPoint& outpoint : vPresetInputs) {
@@ -181,7 +183,7 @@ util::Result<PreSelectedInputs> FetchSelectedInputs(const CWallet& wallet, const
         }
 
         if (input_bytes == -1) {
-            input_bytes = CalculateMaximumSignedInputSize(txout, outpoint, &coin_control.m_external_provider, &coin_control);
+            input_bytes = CalculateMaximumSignedInputSize(txout, outpoint, &coin_control.m_external_provider, can_grind_r, &coin_control);
         }
 
         // If available, override calculated size with coin control specified size
@@ -214,6 +216,7 @@ CoinsResult AvailableCoins(const CWallet& wallet,
     const int min_depth = {coinControl ? coinControl->m_min_depth : DEFAULT_MIN_DEPTH};
     const int max_depth = {coinControl ? coinControl->m_max_depth : DEFAULT_MAX_DEPTH};
     const bool only_safe = {coinControl ? !coinControl->m_include_unsafe_inputs : true};
+    const bool can_grind_r = !wallet.IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER);
 
     std::set<uint256> trusted_parents;
     for (const auto& entry : wallet.mapWallet)
@@ -305,7 +308,7 @@ CoinsResult AvailableCoins(const CWallet& wallet,
 
             std::unique_ptr<SigningProvider> provider = wallet.GetSolvingProvider(output.scriptPubKey);
 
-            int input_bytes = CalculateMaximumSignedInputSize(output, COutPoint(), provider.get(), coinControl);
+            int input_bytes = CalculateMaximumSignedInputSize(output, COutPoint(), provider.get(), can_grind_r, coinControl);
             bool solvable = provider ? InferDescriptor(output.scriptPubKey, *provider)->IsSolvable() : false;
             bool spendable = ((mine & ISMINE_SPENDABLE) != ISMINE_NO) || (((mine & ISMINE_WATCH_ONLY) != ISMINE_NO) && (coinControl && coinControl->fAllowWatchOnly && solvable));
 
@@ -828,7 +831,7 @@ static util::Result<CreatedTransactionResult> CreateTransactionInternal(
     coin_selection_params.change_output_size = GetSerializeSize(change_prototype_txout);
 
     // Get size of spending the change output
-    int change_spend_size = CalculateMaximumSignedInputSize(change_prototype_txout, &wallet);
+    int change_spend_size = CalculateMaximumSignedInputSize(change_prototype_txout, &wallet, /*coin_control=*/nullptr);
     // If the wallet doesn't know how to sign change output, assume p2sh-p2wpkh
     // as lower-bound to allow BnB to do it's thing
     if (change_spend_size == -1) {

@@ -1004,7 +1004,7 @@ bool AddWalletSetting(interfaces::Chain& chain, const std::string& wallet_name);
 //! Remove wallet name from persistent configuration so it will not be loaded on startup.
 bool RemoveWalletSetting(interfaces::Chain& chain, const std::string& wallet_name);
 
-bool DummySignInput(const SigningProvider& provider, CTxIn &tx_in, const CTxOut &txout, const CCoinControl* coin_control = nullptr);
+bool DummySignInput(const SigningProvider& provider, CTxIn &tx_in, const CTxOut &txout, bool can_grind_r, const CCoinControl* coin_control);
 
 bool FillInputToWeight(CTxIn& txin, int64_t target_weight);
 
