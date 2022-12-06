@@ -6,6 +6,7 @@
 #define BITCOIN_TEST_UTIL_NET_H
 
 #include <compat/compat.h>
+#include <netmessagemaker.h>
 #include <net.h>
 #include <net_permissions.h>
 #include <net_processing.h>
@@ -19,9 +20,11 @@
 #include <array>
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -200,5 +203,112 @@ private:
     const std::string m_contents;
     mutable size_t m_consumed{0};
 };
+
+/**
+ * A mocked Sock alternative that allows providing the data to be returned by Recv()
+ * and inspecting the data that has been supplied to Send().
+ */
+class DynSock : public ZeroSock
+{
+public:
+    /**
+     * Unidirectional bytes or CNetMessage queue (FIFO).
+     */
+    class Pipe
+    {
+    public:
+        /**
+         * Get bytes and remove them from the pipe.
+         * @param[in] buf Destination to write bytes to.
+         * @param[in] len Write up to this number of bytes.
+         * @param[in] flags Same as the flags of `recv(2)`. Just `MSG_PEEK` is honored.
+         * @return The number of bytes written to `buf`. `0` if `Eof()` has been called.
+         * If no bytes are available then `-1` is returned and `errno` is set to `EAGAIN`.
+         */
+        ssize_t GetBytes(void* buf, size_t len, int flags = 0) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
+        /**
+         * Deserialize a `CNetMessage` and remove it from the pipe.
+         * If not enough bytes are available then the function will wait. If parsing fails
+         * or EOF is signaled to the pipe, then `std::nullopt` is returned.
+         */
+        std::optional<CNetMessage> GetNetMsg() EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
+        /**
+         * Push bytes to the pipe.
+         */
+        void PushBytes(const void* buf, size_t len) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
+        /**
+         * Construct and push CNetMessage to the pipe.
+         */
+        template <typename... Args>
+        void PushNetMsg(const std::string& type, Args&&... payload) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
+        /**
+         * Signal end-of-file on the receiving end (`GetBytes()` or `GetNetMsg()`).
+         */
+        void Eof() EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
+    private:
+        /**
+         * Return when there is some data to read or EOF has been signaled.
+         * @param[in,out] lock Unique lock that must have been derived from `m_mutex` by `WAIT_LOCK(m_mutex, lock)`.
+         */
+        void WaitForDataOrEof(UniqueLock<Mutex>& lock) EXCLUSIVE_LOCKS_REQUIRED(m_mutex);
+
+        Mutex m_mutex;
+        std::condition_variable m_cond;
+        std::vector<uint8_t> m_data GUARDED_BY(m_mutex);
+        bool m_eof GUARDED_BY(m_mutex){false};
+    };
+
+    struct Pipes {
+        Pipe recv;
+        Pipe send;
+    };
+
+    explicit DynSock(std::shared_ptr<Pipes> pipes);
+
+    ~DynSock();
+
+    ssize_t Recv(void* buf, size_t len, int flags) const override;
+
+    ssize_t Send(const void* buf, size_t len, int) const override;
+
+    bool Wait(std::chrono::milliseconds timeout,
+              Event requested,
+              Event* occurred = nullptr) const override;
+
+    bool WaitMany(std::chrono::milliseconds timeout, EventsPerSock& events_per_sock) const override;
+
+private:
+    DynSock& operator=(Sock&&) override;
+
+    std::shared_ptr<Pipes> m_pipes;
+};
+
+template <typename... Args>
+void DynSock::Pipe::PushNetMsg(const std::string& type, Args&&... payload)
+{
+    auto msg = NetMsg::Make(type, std::forward<Args>(payload)...);
+    V1Transport transport{NodeId{0}};
+
+    const bool queued{transport.SetMessageToSend(msg)};
+    assert(queued);
+
+    LOCK(m_mutex);
+
+    for (;;) {
+        const auto& [bytes, _more, _msg_type] = transport.GetBytesToSend(/*have_next_message=*/true);
+        if (bytes.empty()) {
+            break;
+        }
+        m_data.insert(m_data.end(), bytes.begin(), bytes.end());
+        transport.MarkBytesSent(bytes.size());
+    }
+
+    m_cond.notify_all();
+}
 
 #endif // BITCOIN_TEST_UTIL_NET_H
