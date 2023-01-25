@@ -2467,6 +2467,8 @@ bool Chainstate::FlushStateToDisk(
         bool fPeriodicFlush = mode == FlushStateMode::PERIODIC && nNow > m_last_flush + DATABASE_FLUSH_INTERVAL;
         // Combine all conditions that result in a full cache flush.
         fDoFullFlush = (mode == FlushStateMode::ALWAYS) || fCacheLarge || fCacheCritical || fPeriodicFlush || fFlushForPrune;
+        // Don't wipe the cache (just sync to disk) if we're not close to the limit
+        bool clear_cache = fCacheLarge || fCacheCritical;
         // Write blocks and block index to disk.
         if (fDoFullFlush || fPeriodicWrite) {
             // Ensure we can write block index
@@ -2510,10 +2512,15 @@ bool Chainstate::FlushStateToDisk(
                 return AbortNode(state, "Disk space is too low!", _("Disk space is too low!"));
             }
             // Flush the chainstate (which may refer to block index entries).
-            if (!CoinsTip().Flush())
+            if (clear_cache) {
+                full_flush_completed = CoinsTip().Flush();
+            } else {
+                full_flush_completed = CoinsTip().Sync();
+            }
+            if (!full_flush_completed) {
                 return AbortNode(state, "Failed to write to coin database");
+            }
             m_last_flush = nNow;
-            full_flush_completed = true;
             TRACE5(utxocache, flush,
                    (int64_t)(GetTimeMicros() - nNow.count()), // in microseconds (µs)
                    (uint32_t)mode,
