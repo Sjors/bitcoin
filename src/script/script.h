@@ -68,139 +68,148 @@ std::vector<unsigned char> ToByteVector(const T& in)
 /** Script opcodes */
 enum opcodetype
 {
+/**
+ * Opcodes that take a true/false value will evaluate the following as false:
+ *     an empty vector
+ *     a vector (of any length) of all zero bytes
+ *     a single byte of "\x80" ('negative zero')
+ *     a vector (of any length) of all zero bytes except the last byte is "\x80"
+ *
+ * Any other value will evaluate to true.
+ */
     // push value
-    OP_0 = 0x00,
-    OP_FALSE = OP_0,
-    OP_PUSHDATA1 = 0x4c,
-    OP_PUSHDATA2 = 0x4d,
-    OP_PUSHDATA4 = 0x4e,
-    OP_1NEGATE = 0x4f,
-    OP_RESERVED = 0x50,
-    OP_1 = 0x51,
-    OP_TRUE=OP_1,
-    OP_2 = 0x52,
-    OP_3 = 0x53,
-    OP_4 = 0x54,
-    OP_5 = 0x55,
-    OP_6 = 0x56,
-    OP_7 = 0x57,
-    OP_8 = 0x58,
-    OP_9 = 0x59,
-    OP_10 = 0x5a,
-    OP_11 = 0x5b,
-    OP_12 = 0x5c,
-    OP_13 = 0x5d,
-    OP_14 = 0x5e,
-    OP_15 = 0x5f,
-    OP_16 = 0x60,
+    OP_0 = 0x00,         // push "" onto the stack (which is an empty array of bytes)
+    OP_FALSE = OP_0,     // push "" onto the stack (which is an empty array of bytes)
+    OP_PUSHDATA1 = 0x4c, // read the next byte as N and push the next N bytes as an array onto the stack
+    OP_PUSHDATA2 = 0x4d, // read the next 2 bytes as N and push the next N bytes as an array onto the stack
+    OP_PUSHDATA4 = 0x4e, // read the next 4 bytes as N and push the next N bytes as an array onto the stack
+    OP_1NEGATE = 0x4f,   // push "\x81" onto the stack (which is interpreted as -1 by numerical opcodes)
+    OP_RESERVED = 0x50,  // mark tx invalid unless occurring in an unexecuted OP_IF branch
+    OP_1 = 0x51,         // push "\x01" onto the stack (which is interpreted as 1 by numerical opcodes)
+    OP_TRUE = OP_1,      // push "\x01" onto the stack (which is interpreted as 1 by numerical opcodes)
+    OP_2 = 0x52,         // push "\x02" onto the stack (which is interpreted as 2 by numerical opcodes)
+    OP_3 = 0x53,         // push "\x03" onto the stack (which is interpreted as 3 by numerical opcodes)
+    OP_4 = 0x54,         // push "\x04" onto the stack (which is interpreted as 4 by numerical opcodes)
+    OP_5 = 0x55,         // push "\x05" onto the stack (which is interpreted as 5 by numerical opcodes)
+    OP_6 = 0x56,         // push "\x06" onto the stack (which is interpreted as 6 by numerical opcodes)
+    OP_7 = 0x57,         // push "\x07" onto the stack (which is interpreted as 7 by numerical opcodes)
+    OP_8 = 0x58,         // push "\x08" onto the stack (which is interpreted as 8 by numerical opcodes)
+    OP_9 = 0x59,         // push "\x09" onto the stack (which is interpreted as 9 by numerical opcodes)
+    OP_10 = 0x5a,        // push "\x0A" onto the stack (which is interpreted as 10 by numerical opcodes)
+    OP_11 = 0x5b,        // push "\x0B" onto the stack (which is interpreted as 11 by numerical opcodes)
+    OP_12 = 0x5c,        // push "\x0C" onto the stack (which is interpreted as 12 by numerical opcodes)
+    OP_13 = 0x5d,        // push "\x0D" onto the stack (which is interpreted as 13 by numerical opcodes)
+    OP_14 = 0x5e,        // push "\x0E" onto the stack (which is interpreted as 14 by numerical opcodes)
+    OP_15 = 0x5f,        // push "\x0F" onto the stack (which is interpreted as 15 by numerical opcodes)
+    OP_16 = 0x60,        // push "\x10" onto the stack (which is interpreted as 16 by numerical opcodes)
 
     // control
-    OP_NOP = 0x61,
-    OP_VER = 0x62,
-    OP_IF = 0x63,
-    OP_NOTIF = 0x64,
-    OP_VERIF = 0x65,
-    OP_VERNOTIF = 0x66,
-    OP_ELSE = 0x67,
-    OP_ENDIF = 0x68,
-    OP_VERIFY = 0x69,
-    OP_RETURN = 0x6a,
+    OP_NOP = 0x61,      // do nothing
+    OP_VER = 0x62,      // mark tx invalid unless occuring in an unexecuted OP_IF branch
+    OP_IF = 0x63,       // if top stack value is true, execute the statement
+    OP_NOTIF = 0x64,    // if top stack value is false, execute the statement
+    OP_VERIF = 0x65,    // mark tx invalid even when occuring in an unexecuted OP_IF branch
+    OP_VERNOTIF = 0x66, // mark tx invalid even when occuring in an unexecuted OP_IF branch
+    OP_ELSE = 0x67,     // if the preceding OP_IF, OP_NOTIF or OP_ELSE not executed, execute the statement
+    OP_ENDIF = 0x68,    // end if/else block (must include, otherwise tx becomes invalid)
+    OP_VERIFY = 0x69,   // mark tx invalid if top stack value is false, unless occuring in an unexecuted OP_IF branch
+    OP_RETURN = 0x6a,   // mark tx invalid unless occuring in an unexecuted OP_IF branch
 
     // stack ops
-    OP_TOALTSTACK = 0x6b,
-    OP_FROMALTSTACK = 0x6c,
-    OP_2DROP = 0x6d,
-    OP_2DUP = 0x6e,
-    OP_3DUP = 0x6f,
-    OP_2OVER = 0x70,
-    OP_2ROT = 0x71,
-    OP_2SWAP = 0x72,
-    OP_IFDUP = 0x73,
-    OP_DEPTH = 0x74,
-    OP_DROP = 0x75,
-    OP_DUP = 0x76,
-    OP_NIP = 0x77,
-    OP_OVER = 0x78,
-    OP_PICK = 0x79,
-    OP_ROLL = 0x7a,
-    OP_ROT = 0x7b,
-    OP_SWAP = 0x7c,
-    OP_TUCK = 0x7d,
+    OP_TOALTSTACK = 0x6b,   // pop an item from the main stack onto the alt stack
+    OP_FROMALTSTACK = 0x6c, // pop an item from the alt stack onto the main stack
+    OP_2DROP = 0x6d,        // remove the two top stack items
+    OP_2DUP = 0x6e,         // duplicate top and second from top stack items
+    OP_3DUP = 0x6f,         // duplicate top, second from top and third from top stack items
+    OP_2OVER = 0x70,        // copy third and fourth from top stack items to the top
+    OP_2ROT = 0x71,         // move fifth and sixth from top stack items to the top
+    OP_2SWAP = 0x72,        // swap: top and second from top <-> third and fourth from top items of stack
+    OP_IFDUP = 0x73,        // if top stack value is false, duplicate it
+    OP_DEPTH = 0x74,        // push the current number of stack items onto the stack
+    OP_DROP = 0x75,         // remove top stack item
+    OP_DUP = 0x76,          // duplicate top stack item
+    OP_NIP = 0x77,          // remove second from top stack item
+    OP_OVER = 0x78,         // copy second from top stack item to the top
+    OP_PICK = 0x79,         // copy item N back in stack to the top
+    OP_ROLL = 0x7a,         // move item N back in stack to the top
+    OP_ROT = 0x7b,          // move third from top stack item to the top
+    OP_SWAP = 0x7c,         // swap top two items of stack
+    OP_TUCK = 0x7d,         // copy top stack item and insert before second from top item
 
     // splice ops
-    OP_CAT = 0x7e,
-    OP_SUBSTR = 0x7f,
-    OP_LEFT = 0x80,
-    OP_RIGHT = 0x81,
-    OP_SIZE = 0x82,
+    OP_CAT = 0x7e,    // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
+    OP_SUBSTR = 0x7f, // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
+    OP_LEFT = 0x80,   // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
+    OP_RIGHT = 0x81,  // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
+    OP_SIZE = 0x82,   // push the length of top stack item (not pop the top element whose size is inspected)
 
     // bit logic
-    OP_INVERT = 0x83,
-    OP_AND = 0x84,
-    OP_OR = 0x85,
-    OP_XOR = 0x86,
-    OP_EQUAL = 0x87,
-    OP_EQUALVERIFY = 0x88,
-    OP_RESERVED1 = 0x89,
-    OP_RESERVED2 = 0x8a,
+    OP_INVERT = 0x83,      // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
+    OP_AND = 0x84,         // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
+    OP_OR = 0x85,          // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
+    OP_XOR = 0x86,         // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
+    OP_EQUAL = 0x87,       // return 1 if the inputs are equal, 0 otherwise
+    OP_EQUALVERIFY = 0x88, // execute OP_EQUAL, then OP_VERIFY afterward
+    OP_RESERVED1 = 0x89,   // mark tx invalid unless occuring in an unexecuted OP_IF branch
+    OP_RESERVED2 = 0x8a,   // mark tx invalid unless occuring in an unexecuted OP_IF branch
 
     // numeric
-    OP_1ADD = 0x8b,
-    OP_1SUB = 0x8c,
-    OP_2MUL = 0x8d,
-    OP_2DIV = 0x8e,
-    OP_NEGATE = 0x8f,
-    OP_ABS = 0x90,
-    OP_NOT = 0x91,
-    OP_0NOTEQUAL = 0x92,
+    OP_1ADD = 0x8b,      // add 1 to the top stack item
+    OP_1SUB = 0x8c,      // subtract 1 from the top stack item
+    OP_2MUL = 0x8d,      // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
+    OP_2DIV = 0x8e,      // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
+    OP_NEGATE = 0x8f,    // multiply the top stack item by -1
+    OP_ABS = 0x90,       // absolute the top stack item value
+    OP_NOT = 0x91,       // convert 0 to 1 and else to 0
+    OP_0NOTEQUAL = 0x92, // return 0 if the input is 0, otherwise 1
 
-    OP_ADD = 0x93,
-    OP_SUB = 0x94,
-    OP_MUL = 0x95,
-    OP_DIV = 0x96,
-    OP_MOD = 0x97,
-    OP_LSHIFT = 0x98,
-    OP_RSHIFT = 0x99,
+    OP_ADD = 0x93,    // pop top two stack items and push their sum
+    OP_SUB = 0x94,    // pop top two stack items and push the second minus the top
+    OP_MUL = 0x95,    // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
+    OP_DIV = 0x96,    // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
+    OP_MOD = 0x97,    // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
+    OP_LSHIFT = 0x98, // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
+    OP_RSHIFT = 0x99, // disabled, fail the script unconditionally (apply in an unexecuted conditional branch)
 
-    OP_BOOLAND = 0x9a,
-    OP_BOOLOR = 0x9b,
-    OP_NUMEQUAL = 0x9c,
-    OP_NUMEQUALVERIFY = 0x9d,
-    OP_NUMNOTEQUAL = 0x9e,
-    OP_LESSTHAN = 0x9f,
-    OP_GREATERTHAN = 0xa0,
-    OP_LESSTHANOREQUAL = 0xa1,
-    OP_GREATERTHANOREQUAL = 0xa2,
-    OP_MIN = 0xa3,
-    OP_MAX = 0xa4,
+    OP_BOOLAND = 0x9a,            // return 1 if both top two stack items are not 0, otherwise 0
+    OP_BOOLOR = 0x9b,             // return 1 if top or second from top stack item is not 0, otherwise 0
+    OP_NUMEQUAL = 0x9c,           // return 1 if inputs are equal, otherwise 0
+    OP_NUMEQUALVERIFY = 0x9d,     // execute OP_NUMEQUAL, then OP_VERIFY afterward
+    OP_NUMNOTEQUAL = 0x9e,        // return 1 if inputs are not equal, otherwise 0
+    OP_LESSTHAN = 0x9f,           // pop top two stack items and push 1 if second from top < top, otherwise 0
+    OP_GREATERTHAN = 0xa0,        // pop top two stack items and push 1 if second from top > top, otherwise 0
+    OP_LESSTHANOREQUAL = 0xa1,    // pop top two stack items and push 1 if second from top <= top, otherwise 0
+    OP_GREATERTHANOREQUAL = 0xa2, // pop top two stack items and push 1 if second from top >= top, otherwise 0
+    OP_MIN = 0xa3,                // pop the top two items and push the smaller
+    OP_MAX = 0xa4,                // pop the top two items and push the bigger
 
-    OP_WITHIN = 0xa5,
+    OP_WITHIN = 0xa5, // pop the top three items and push 1 if third from top > top >= second from top, otherwise 0
 
     // crypto
-    OP_RIPEMD160 = 0xa6,
-    OP_SHA1 = 0xa7,
-    OP_SHA256 = 0xa8,
-    OP_HASH160 = 0xa9,
-    OP_HASH256 = 0xaa,
-    OP_CODESEPARATOR = 0xab,
-    OP_CHECKSIG = 0xac,
-    OP_CHECKSIGVERIFY = 0xad,
-    OP_CHECKMULTISIG = 0xae,
-    OP_CHECKMULTISIGVERIFY = 0xaf,
+    OP_RIPEMD160 = 0xa6,           // hash input using RIPEMD-160
+    OP_SHA1 = 0xa7,                // hash input using SHA-1
+    OP_SHA256 = 0xa8,              // hash input using SHA-256
+    OP_HASH160 = 0xa9,             // hash input using SHA-256, then RIPEMD-160
+    OP_HASH256 = 0xaa,             // hash input using SHA-256 twice
+    OP_CODESEPARATOR = 0xab,       // all of the signature checking words will only match signatures to the data after the most recently-executed OP_CODESEPARATOR
+    OP_CHECKSIG = 0xac,            // push 1 if signature is valid for tx hash and public key, otherwise 0
+    OP_CHECKSIGVERIFY = 0xad,      // execute OP_CHECKSIG, then OP_VERIFY afterward
+    OP_CHECKMULTISIG = 0xae,       // OP_CHECKSIG for muti-signature
+    OP_CHECKMULTISIGVERIFY = 0xaf, // execute OP_CHECKMULTISIG, then OP_VERIFY afterward
 
     // expansion
-    OP_NOP1 = 0xb0,
-    OP_CHECKLOCKTIMEVERIFY = 0xb1,
-    OP_NOP2 = OP_CHECKLOCKTIMEVERIFY,
-    OP_CHECKSEQUENCEVERIFY = 0xb2,
-    OP_NOP3 = OP_CHECKSEQUENCEVERIFY,
-    OP_NOP4 = 0xb3,
-    OP_NOP5 = 0xb4,
-    OP_NOP6 = 0xb5,
-    OP_NOP7 = 0xb6,
-    OP_NOP8 = 0xb7,
-    OP_NOP9 = 0xb8,
-    OP_NOP10 = 0xb9,
+    OP_NOP1 = 0xb0,                   // do nothing
+    OP_CHECKLOCKTIMEVERIFY = 0xb1,    // BIP65 (absolute lock time)
+    OP_NOP2 = OP_CHECKLOCKTIMEVERIFY, // BIP65 (absolute lock time)
+    OP_CHECKSEQUENCEVERIFY = 0xb2,    // BIP68 and BIP112 (relative lock time)
+    OP_NOP3 = OP_CHECKSEQUENCEVERIFY, // BIP68 and BIP112 (relative lock time)
+    OP_NOP4 = 0xb3,                   // do nothing
+    OP_NOP5 = 0xb4,                   // do nothing
+    OP_NOP6 = 0xb5,                   // do nothing
+    OP_NOP7 = 0xb6,                   // do nothing
+    OP_NOP8 = 0xb7,                   // do nothing
+    OP_NOP9 = 0xb8,                   // do nothing
+    OP_NOP10 = 0xb9,                  // do nothing
 
     // Opcode added by BIP 342 (Tapscript)
     OP_CHECKSIGADD = 0xba,
