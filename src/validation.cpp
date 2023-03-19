@@ -3832,6 +3832,21 @@ bool ChainstateManager::AcceptBlockHeader(const CBlockHeader& block, BlockValida
     if (ppindex)
         *ppindex = pindex;
 
+    // TODO: once Info is the default loglevel, change "Warning" to "Info".
+    const auto level = ActiveChainstate().IsInitialBlockDownload() ?
+        BCLog::Level::Debug : BCLog::Level::Warning;
+
+    // Since this is the earliest point at which we have determined that a
+    // header is both new and valid, log here.
+    //
+    // These messages are valuable for detecting potential selfish mining behavior;
+    // if multiple displacing headers are seen near simultaneously across many
+    // nodes in the network, this might be an indication of selfish mining. Having
+    // this log by default when not in IBD ensures broad availability of this data
+    // in case investigation is merited.
+    LogPrintLevel(BCLog::VALIDATION, level, "Saw new header hash=%s height=%d\n",
+                  hash.ToString(), pindex->nHeight);
+
     return true;
 }
 
