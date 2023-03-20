@@ -3832,9 +3832,8 @@ bool ChainstateManager::AcceptBlockHeader(const CBlockHeader& block, BlockValida
     if (ppindex)
         *ppindex = pindex;
 
-    // TODO: once Info is the default loglevel, change "Warning" to "Info".
     const auto level = ActiveChainstate().IsInitialBlockDownload() ?
-        BCLog::Level::Debug : BCLog::Level::Warning;
+        BCLog::Level::Debug : BCLog::Level::Info;
 
     // Since this is the earliest point at which we have determined that a
     // header is both new and valid, log here.
