@@ -409,6 +409,8 @@ def write_config(config_path, *, n, chain, extra_config="", disable_autoconnect=
         f.write("shrinkdebugfile=0\n")
         # To improve SQLite wallet performance so that the tests don't timeout, use -unsafesqlitesync
         f.write("unsafesqlitesync=1\n")
+        # Ignore memory leak in BDB 4.8.30 so legacy wallet tests can run with address sanitizer
+        f.write("privdb=0\n")
         if disable_autoconnect:
             f.write("connect=0\n")
         f.write(extra_config)

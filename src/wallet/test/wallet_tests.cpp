@@ -46,6 +46,10 @@ BOOST_FIXTURE_TEST_SUITE(wallet_tests, WalletTestingSetup)
 static std::shared_ptr<CWallet> TestLoadWallet(WalletContext& context)
 {
     DatabaseOptions options;
+    // Ignore memory leak in BDB 4.8.30. Equivalent of -dbpriv=0.
+    options.use_shared_memory = true;
+    // When BDB is configured it's used as the backend, even for descriptor wallets.
+    // Note that MakeDatabase() prefers BDB over SQLite.
     options.create_flags = WALLET_FLAG_DESCRIPTORS;
     DatabaseStatus status;
     bilingual_str error;
