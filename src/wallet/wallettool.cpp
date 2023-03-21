@@ -157,6 +157,10 @@ bool ExecuteWalletToolFunc(const ArgsManager& args, const std::string& command)
         if (make_descriptors) {
             options.create_flags |= WALLET_FLAG_DESCRIPTORS;
             options.require_format = DatabaseFormat::SQLITE;
+        } else {
+            // Use shared memory for the brief duration of this operation.
+            // This avoids a memory leak in BDB 4.8.30.
+            options.use_shared_memory = true;
         }
 
         const std::shared_ptr<CWallet> wallet_instance = MakeWallet(name, path, options);
@@ -166,6 +170,7 @@ bool ExecuteWalletToolFunc(const ArgsManager& args, const std::string& command)
         }
     } else if (command == "info") {
         DatabaseOptions options;
+        options.use_shared_memory = true;
         ReadDatabaseArgs(args, options);
         options.require_existing = true;
         const std::shared_ptr<CWallet> wallet_instance = MakeWallet(name, path, options);
@@ -194,6 +199,7 @@ bool ExecuteWalletToolFunc(const ArgsManager& args, const std::string& command)
         DatabaseOptions options;
         ReadDatabaseArgs(args, options);
         options.require_existing = true;
+        options.use_shared_memory = true;
         const std::shared_ptr<CWallet> wallet_instance = MakeWallet(name, path, options);
         if (!wallet_instance) return false;
         bilingual_str error;

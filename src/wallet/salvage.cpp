@@ -31,6 +31,9 @@ bool RecoverDatabaseFile(const ArgsManager& args, const fs::path& file_path, bil
     options.require_existing = true;
     options.verify = false;
     options.require_format = DatabaseFormat::BERKELEY;
+    // Use shared memory for the brief duration of this operation.
+    // This avoids a memory leak in BDB 4.8.30.
+    options.use_shared_memory = true;
     std::unique_ptr<WalletDatabase> database = MakeDatabase(file_path, options, status, error);
     if (!database) return false;
 

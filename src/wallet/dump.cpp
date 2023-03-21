@@ -198,6 +198,9 @@ bool CreateFromDump(const ArgsManager& args, const std::string& name, const fs::
     ReadDatabaseArgs(args, options);
     options.require_create = true;
     options.require_format = data_format;
+    // Use shared memory for the brief duration of this operation.
+    // This avoids a memory leak in BDB 4.8.30.
+    options.use_shared_memory = true;
     std::unique_ptr<WalletDatabase> database = MakeDatabase(wallet_path, options, status, error);
     if (!database) return false;
 
