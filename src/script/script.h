@@ -200,9 +200,7 @@ enum opcodetype
     // expansion
     OP_NOP1 = 0xb0,                   // do nothing
     OP_CHECKLOCKTIMEVERIFY = 0xb1,    // BIP65 (absolute lock time)
-    OP_NOP2 = OP_CHECKLOCKTIMEVERIFY, // BIP65 (absolute lock time)
     OP_CHECKSEQUENCEVERIFY = 0xb2,    // BIP68 and BIP112 (relative lock time)
-    OP_NOP3 = OP_CHECKSEQUENCEVERIFY, // BIP68 and BIP112 (relative lock time)
     OP_NOP4 = 0xb3,                   // do nothing
     OP_NOP5 = 0xb4,                   // do nothing
     OP_NOP6 = 0xb5,                   // do nothing

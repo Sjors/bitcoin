@@ -118,7 +118,6 @@ class DecodeScriptTest(BitcoinTestFramework):
 
         self.log.info("- CLTV redeem script")
         # redeem scripts are in-effect scriptPubKey scripts, so adding a test here.
-        # OP_NOP2 is also known as OP_CHECKLOCKTIMEVERIFY.
         # just imagine that the pub keys used below are different.
         # for our purposes here it does not matter that they are the same even though it is unrealistic.
         #
