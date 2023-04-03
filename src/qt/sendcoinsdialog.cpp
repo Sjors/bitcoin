@@ -797,7 +797,15 @@ void SendCoinsDialog::useAvailableBalance(SendCoinsEntry* entry)
     coin_control.m_allow_other_inputs = !coin_control.HasSelected();
 
     // Calculate available amount to send.
-    CAmount amount = model->getAvailableBalance(&coin_control);
+    auto res = model->getAvailableBalance(&coin_control);
+    if (!res) {
+        const QString msg = tr("Unable to calculate balance");
+        QMessageBox::critical(nullptr, msg, msg);
+        return;
+    }
+    CAmount amount = *res;
+
+
     for (int i = 0; i < ui->entries->count(); ++i) {
         SendCoinsEntry* e = qobject_cast<SendCoinsEntry*>(ui->entries->itemAt(i)->widget());
         if (e && !e->isHidden() && e != entry) {

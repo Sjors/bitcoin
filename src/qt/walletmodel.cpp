@@ -155,7 +155,7 @@ bool WalletModel::validateAddress(const QString& address) const
     return IsValidDestinationString(address.toStdString());
 }
 
-WalletModel::SendCoinsReturn WalletModel::prepareTransaction(WalletModelTransaction &transaction, const CCoinControl& coinControl)
+WalletModel::SendCoinsReturn WalletModel::prepareTransaction(WalletModelTransaction &transaction, const CCoinControl& coin_control)
 {
     CAmount total = 0;
     bool fSubtractFeeFromAmount = false;
@@ -201,9 +201,15 @@ WalletModel::SendCoinsReturn WalletModel::prepareTransaction(WalletModelTransact
 
     // If no coin was manually selected, use the cached balance
     // Future: can merge this call with 'createTransaction'.
-    CAmount nBalance = getAvailableBalance(&coinControl);
+    auto res = getAvailableBalance(&coin_control);
+    if (!res) {
+        Q_EMIT message(tr("Send Coins"), QString::fromStdString(util::ErrorString(res).translated),
+        CClientUIInterface::MSG_ERROR);
+        return TransactionCreationFailed;
+    }
+    const CAmount amount = *res;
 
-    if(total > nBalance)
+    if(total > amount)
     {
         return AmountExceedsBalance;
     }
@@ -213,7 +219,7 @@ WalletModel::SendCoinsReturn WalletModel::prepareTransaction(WalletModelTransact
         int nChangePosRet = -1;
 
         auto& newTx = transaction.getWtx();
-        const auto& res = m_wallet->createTransaction(vecSend, coinControl, /*sign=*/!wallet().privateKeysDisabled(), nChangePosRet, nFeeRequired);
+        const auto& res = m_wallet->createTransaction(vecSend, coin_control, /*sign=*/!wallet().privateKeysDisabled(), nChangePosRet, nFeeRequired);
         newTx = res ? *res : nullptr;
         transaction.setTransactionFee(nFeeRequired);
         if (fSubtractFeeFromAmount && newTx)
@@ -221,7 +227,7 @@ WalletModel::SendCoinsReturn WalletModel::prepareTransaction(WalletModelTransact
 
         if(!newTx)
         {
-            if(!fSubtractFeeFromAmount && (total + nFeeRequired) > nBalance)
+            if(!fSubtractFeeFromAmount && (total + nFeeRequired) > amount)
             {
                 return SendCoinsReturn(AmountWithFeeExceedsBalance);
             }
@@ -611,7 +617,7 @@ uint256 WalletModel::getLastBlockProcessed() const
     return m_client_model ? m_client_model->getBestBlockHash() : uint256{};
 }
 
-CAmount WalletModel::getAvailableBalance(const CCoinControl* control)
+util::Result<CAmount> WalletModel::getAvailableBalance(const CCoinControl* control)
 {
     // No selected coins, return the cached balance
     if (!control || !control->HasSelected()) {
