@@ -109,6 +109,7 @@ public:
 
     std::vector<Chunk> m_chunks;
     int64_t m_tx_count{0};
+    int64_t m_tx_size{0};
 
     const int64_t m_id;
     CTxMemPool* m_mempool;

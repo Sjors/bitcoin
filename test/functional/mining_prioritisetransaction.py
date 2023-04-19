@@ -109,6 +109,14 @@ class PrioritiseTransactionTest(BitcoinTestFramework):
         raw_before[txid_c]["fees"]["descendant"] += fee_delta_c_1 + fee_delta_c_2
         raw_before[txid_d]["fees"]["ancestor"] += fee_delta_b + fee_delta_c_1 + fee_delta_c_2
         raw_after = self.nodes[0].getrawmempool(verbose=True)
+        for txid in [txid_a, txid_b, txid_c, txid_d]:
+            del raw_before[txid]["fees"]["chunk"]
+            del raw_before[txid]["chunksize"]
+            del raw_before[txid]["clusterid"]
+        for txid in [txid_a, txid_b, txid_c, txid_d]:
+            del raw_after[txid]["fees"]["chunk"]
+            del raw_after[txid]["chunksize"]
+            del raw_after[txid]["clusterid"]
         assert_equal(raw_before[txid_a], raw_after[txid_a])
         assert_equal(raw_before, raw_after)
         prioritisation_map_in_mempool = self.nodes[0].getprioritisedtransactions()
@@ -132,6 +140,10 @@ class PrioritiseTransactionTest(BitcoinTestFramework):
         for t in [tx_o_a["hex"], tx_o_b["hex"], tx_o_c["hex"], tx_o_d["hex"]]:
             self.nodes[0].sendrawtransaction(t)
         raw_after = self.nodes[0].getrawmempool(verbose=True)
+        for txid in [txid_a, txid_b, txid_c, txid_d]:
+            del raw_after[txid]["fees"]["chunk"]
+            del raw_after[txid]["chunksize"]
+            del raw_after[txid]["clusterid"]
         assert_equal(raw_before[txid_a], raw_after[txid_a])
         assert_equal(raw_before, raw_after)
         prioritisation_map_in_mempool = self.nodes[0].getprioritisedtransactions()
