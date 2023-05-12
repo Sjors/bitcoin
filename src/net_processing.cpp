@@ -153,6 +153,8 @@ static constexpr auto OUTBOUND_INVENTORY_BROADCAST_INTERVAL{2s};
 static constexpr unsigned int INVENTORY_BROADCAST_PER_SECOND = 7;
 /** Maximum number of inventory items to send per transmission. */
 static constexpr unsigned int INVENTORY_BROADCAST_MAX = INVENTORY_BROADCAST_PER_SECOND * count_seconds(INBOUND_INVENTORY_BROADCAST_INTERVAL);
+/** Maximum number of pending inventory items to store per peer */
+static constexpr unsigned int INVENTORY_MAX_QUEUE = INVENTORY_BROADCAST_PER_SECOND * 60 * 30;
 /** The number of most recently announced transactions a peer can request. */
 static constexpr unsigned int INVENTORY_MAX_RECENT_RELAY = 3500;
 /** Verify that INVENTORY_MAX_RECENT_RELAY is enough to cache everything typically
@@ -5736,6 +5738,15 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                             // filter, when a child tx is requested. See
                             // ProcessGetData().
                             tx_relay->m_tx_inventory_known_filter.insert(txid);
+                        }
+                    }
+                    // If there's too much inventory, randomly drop half of what remains
+                    if (tx_relay->m_tx_inventory_to_send.size() > INVENTORY_MAX_QUEUE) {
+                        FastRandomContext rng;
+                        for (std::set<uint256>::iterator it = tx_relay->m_tx_inventory_to_send.begin(); it != tx_relay->m_tx_inventory_to_send.end(); it++) {
+                            if (rng.randbool()) {
+                                tx_relay->m_tx_inventory_to_send.erase(it);
+                            }
                         }
                     }
                 }
