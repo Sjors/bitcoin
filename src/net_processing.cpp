@@ -5740,13 +5740,18 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                             tx_relay->m_tx_inventory_known_filter.insert(txid);
                         }
                     }
-                    // If there's too much inventory, randomly drop half of what remains
-                    if (tx_relay->m_tx_inventory_to_send.size() > INVENTORY_MAX_QUEUE) {
-                        FastRandomContext rng;
-                        for (std::set<uint256>::iterator it = tx_relay->m_tx_inventory_to_send.begin(); it != tx_relay->m_tx_inventory_to_send.end(); it++) {
-                            if (rng.randbool()) {
-                                tx_relay->m_tx_inventory_to_send.erase(it);
-                            }
+                    // If there's too much inventory, drop half of what remains
+                    if (vInvTx.size() > INVENTORY_MAX_QUEUE) {
+                        // Reverse the heap:
+                        std::make_heap(vInvTx.rbegin(), vInvTx.rend(), compareInvMempoolOrder);
+
+                        while(vInvTx.size() > INVENTORY_MAX_QUEUE / 2) {
+                          Assume(vInvTx.size() == tx_relay->m_tx_inventory_to_send.size());
+                          std::pop_heap(vInvTx.begin(), vInvTx.end(), compareInvMempoolOrder);
+                          std::set<uint256>::iterator it = vInvTx.back();
+                          vInvTx.pop_back();
+                          // Remove it from the to-be-sent set
+                          tx_relay->m_tx_inventory_to_send.erase(it);
                         }
                     }
                 }
