@@ -536,7 +536,7 @@ Ondertekenen is alleen mogelijk met adressen van het type 'legacy'.</translation
     </message>
     <message>
         <source>This error could occur if this wallet was not shutdown cleanly and was last loaded using a build with a newer version of Berkeley DB. If so, please use the software that last loaded this wallet</source>
-        <translation type="unfinished">Deze fout komt mogelijks voor wanneer de portefeuille niet correct is afgesloten en dat deze de laatste keer geladen werd met een nieuwere versie van de Berkeley DB. 
+        <translation type="unfinished">Deze fout komt mogelijks voor wanneer de portefeuille niet correct is afgesloten en dat deze de laatste keer geladen werd met een nieuwere versie van de Berkeley DB.
 Indien dit het geval is, gelieve de software te gebruiken waarmee deze portefeuille de laatste keer werd geladen.</translation>
     </message>
     <message>
@@ -2103,7 +2103,7 @@ Dit is ideaal voor alleen-lezen portommonees.</translation>
     <message>
         <source>Maximum database cache size. A larger cache can contribute to faster sync, after which the benefit is less pronounced for most use cases. Lowering the cache size will reduce memory usage. Unused mempool memory is shared for this cache.</source>
         <extracomment>Tooltip text for Options window setting that sets the size of the database cache. Explains the corresponding effects of increasing/decreasing this value.</extracomment>
-        <translation type="unfinished">Maximum databank cache grootte. 
+        <translation type="unfinished">Maximum databank cache grootte.
 Een grotere cache kan bijdragen tot een snellere sync, waarna het voordeel verminderd voor de meeste use cases.
 De cache grootte verminderen verlaagt het geheugen gebruik.
 Ongebruikte mempool geheugen is gedeeld voor deze cache.</translation>
@@ -3031,16 +3031,14 @@ Use up and down arrows to navigate history, and %2 to clear screen.
 Use %3 and %4 to increase or decrease the font size.
 Type %5 for an overview of available commands.
 For more information on using this console, type %6.
-
-%7WARNING: Scammers have been active, telling users to type commands here, stealing their wallet contents. Do not use this console without fully understanding the ramifications of a command.%8</source>
+</source>
         <extracomment>RPC console welcome message. Placeholders %7 and %8 are style tags for the warning content, and they are not space separated from the rest of the text intentionally.</extracomment>
         <translation type="unfinished">Welkom bij de %1 RPC console.
 Gebruik pijl omhoog en omlaag om geschiedenis te navigeren, en %2 om het scherm te legen.
 Gebruik %3 en %4 om het lettertype te vergroten of verkleinen.
 Type %5 voor een overzicht van beschikbare commando's.
 Voor meer informatie over het gebruik van deze console, type %6.
-
-%7WAARSCHUWING: Er zijn oplichters actief, die gebruikers overhalen om hier commando's te typen, teneinde de inhoud van hun portemonnee te stelen. Gebruik de console niet, zonder de gevolgen van een commando volledig te begrijpen.%8</translation>
+</translation>
     </message>
     <message>
         <source>Executing…</source>
