@@ -861,10 +861,18 @@ DBErrors WalletBatch::LoadWallet(CWallet* pwallet)
                     strErr += "The wallet might have been tampered with or created with malicious intent.";
                     pwallet->WalletLogPrintf("%s\n", strErr);
                     return DBErrors::UNEXPECTED_LEGACY_ENTRY;
+                } else if (wss.descriptor_unknown) {
+                    strErr = strprintf("Error: Unrecognized descriptor found in wallet %s. ", pwallet->GetName());
+                    strErr += (last_client > CLIENT_VERSION) ? "The wallet might had been created on a newer version. "
+                                                             :
+                              "The database might be corrupted or the software version is not compatible with one of your wallet descriptors. ";
+                    strErr += "Please try running the latest software version";
+                    pwallet->WalletLogPrintf("%s\n", strErr);
+                    return DBErrors::UNKNOWN_DESCRIPTOR;
                 }
                 // losing keys is considered a catastrophic error, anything else
                 // we assume the user can live with:
-                if (IsKeyType(strType) || strType == DBKeys::DEFAULTKEY) {
+                else if (IsKeyType(strType) || strType == DBKeys::DEFAULTKEY) {
                     result = DBErrors::CORRUPT;
                 } else if (strType == DBKeys::FLAGS) {
                     // reading the wallet flags can only fail if unknown flags are present
@@ -874,13 +882,6 @@ DBErrors WalletBatch::LoadWallet(CWallet* pwallet)
                     // Set tx_corrupt back to false so that the error is only printed once (per corrupt tx)
                     wss.tx_corrupt = false;
                     result = DBErrors::CORRUPT;
-                } else if (wss.descriptor_unknown) {
-                    strErr = strprintf("Error: Unrecognized descriptor found in wallet %s. ", pwallet->GetName());
-                    strErr += (last_client > CLIENT_VERSION) ? "The wallet might had been created on a newer version. " :
-                            "The database might be corrupted or the software version is not compatible with one of your wallet descriptors. ";
-                    strErr += "Please try running the latest software version";
-                    pwallet->WalletLogPrintf("%s\n", strErr);
-                    return DBErrors::UNKNOWN_DESCRIPTOR;
                 } else {
                     // Leave other errors alone, if we try to fix them we might make things worse.
                     fNoncriticalErrors = true; // ... but do warn the user there is something wrong.
