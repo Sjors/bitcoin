@@ -664,6 +664,12 @@ ReadKeyValue(CWallet* pwallet, DataStream& ssKey, CDataStream& ssValue,
                 wss.m_descriptor_caches[id] = DescriptorCache();
             }
             pwallet->LoadDescriptorScriptPubKeyMan(id, desc);
+
+            // Prior to doing anything with this spkm, verify ID calculation is always the same.
+            if (id != pwallet->GetDescriptorScriptPubKeyMan(desc)->GetID()) {
+                strErr = "The descriptor ID calculated by the wallet differs from the one in DB";
+                return false;
+            }
         } else if (strType == DBKeys::WALLETDESCRIPTORCACHE) {
             bool parent = true;
             uint256 desc_id;
@@ -872,7 +878,7 @@ DBErrors WalletBatch::LoadWallet(CWallet* pwallet)
                 }
                 // losing keys is considered a catastrophic error, anything else
                 // we assume the user can live with:
-                else if (IsKeyType(strType) || strType == DBKeys::DEFAULTKEY) {
+                else if (IsKeyType(strType) || strType == DBKeys::DEFAULTKEY || strType == DBKeys::WALLETDESCRIPTOR) {
                     result = DBErrors::CORRUPT;
                 } else if (strType == DBKeys::FLAGS) {
                     // reading the wallet flags can only fail if unknown flags are present
