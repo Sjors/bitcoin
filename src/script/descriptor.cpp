@@ -209,6 +209,8 @@ public:
 
     /** Derive a private key, if private data is available in arg. */
     virtual bool GetPrivKey(int pos, const SigningProvider& arg, CKey& key) const = 0;
+
+    virtual uint256 GetID() const = 0;
 };
 
 class OriginPubkeyProvider final : public PubkeyProvider
@@ -260,6 +262,7 @@ public:
     {
         return m_provider->GetPrivKey(pos, arg, key);
     }
+    uint256 GetID() const override { return uint256(); }
 };
 
 /** An object representing a parsed constant public key in a descriptor. */
@@ -305,6 +308,7 @@ public:
     {
         return arg.GetKey(m_pubkey.GetID(), key);
     }
+    uint256 GetID() const override { return uint256(); }
 };
 
 enum class DeriveType {
@@ -520,6 +524,8 @@ public:
         key = extkey.key;
         return true;
     }
+
+    uint256 GetID() const override { return uint256(); }
 };
 
 /** Base class for all Descriptor implementations. */
@@ -702,6 +708,15 @@ public:
     }
 
     std::optional<OutputType> GetOutputType() const override { return std::nullopt; }
+
+    virtual uint256 GetID() const override {
+        // Always use the apostrophe for spkm ID
+        std::string desc_str = ToString(/*compat_format=*/true);
+        uint256 id;
+        CSHA256().Write((unsigned char*)desc_str.data(), desc_str.size()).Finalize(id.begin());
+        return id;
+    }
+
 };
 
 /** A parsed addr(A) descriptor. */

@@ -146,6 +146,13 @@ struct Descriptor {
 
     /** @return The OutputType of the scriptPubKey(s) produced by this descriptor. Or nullopt if indeterminate (multiple or none) */
     virtual std::optional<OutputType> GetOutputType() const = 0;
+
+
+    /* Unique identifier that may not change over time, unless explictly marked as not backwards compatible.
+       This is not part of BIP 380, not guaranteed to be interoperable and should not be exposed to the user.
+    */
+    virtual uint256 GetID() const = 0;
+
 };
 
 /** Parse a `descriptor` string. Included private keys are put in `out`.

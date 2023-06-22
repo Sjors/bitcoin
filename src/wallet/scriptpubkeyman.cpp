@@ -2584,11 +2584,7 @@ std::unique_ptr<CKeyMetadata> DescriptorScriptPubKeyMan::GetMetadata(const CTxDe
 uint256 DescriptorScriptPubKeyMan::GetID() const
 {
     LOCK(cs_desc_man);
-    // Always use the apostrophe for spkm ID
-    std::string desc_str = m_wallet_descriptor.descriptor->ToString(/*compat_format=*/true);
-    uint256 id;
-    CSHA256().Write((unsigned char*)desc_str.data(), desc_str.size()).Finalize(id.begin());
-    return id;
+    return m_wallet_descriptor.descriptor->GetID();
 }
 
 void DescriptorScriptPubKeyMan::SetCache(const DescriptorCache& cache)
