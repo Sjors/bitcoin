@@ -3832,6 +3832,7 @@ bool ChainstateManager::AcceptBlockHeader(const CBlockHeader& block, BlockValida
     if (ppindex)
         *ppindex = pindex;
 
+    LogPrintf("Saw new header hash=%s\n", header_hash.ToString());
     return true;
 }
 
