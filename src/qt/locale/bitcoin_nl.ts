@@ -3039,8 +3039,7 @@ Gebruik pijl omhoog en omlaag om geschiedenis te navigeren, en %2 om het scherm 
 Gebruik %3 en %4 om het lettertype te vergroten of verkleinen.
 Type %5 voor een overzicht van beschikbare commando's.
 Voor meer informatie over het gebruik van deze console, type %6.
-
-%7WAARSCHUWING: Er zijn oplichters actief, die gebruikers overhalen om hier commando's te typen, teneinde de inhoud van hun portemonnee te stelen. Gebruik de console niet, zonder de gevolgen van een commando volledig te begrijpen.%8</translation>
+</translation>
     </message>
     <message>
         <source>Executing…</source>
