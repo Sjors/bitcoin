@@ -582,6 +582,9 @@ private:
     // Fetch the SigningProvider for a given index and optionally include private keys. Called by the above functions.
     std::unique_ptr<FlatSigningProvider> GetSigningProvider(int32_t index, bool include_private = false) const EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man);
 
+    //! Same as 'TopUp' but designed for use within a batch transaction context
+    bool TopUpWithDb(WalletBatch& batch, unsigned int size = 0);
+
 protected:
   WalletDescriptor m_wallet_descriptor GUARDED_BY(cs_desc_man);
 
