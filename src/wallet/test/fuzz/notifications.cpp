@@ -105,7 +105,7 @@ struct FuzzedWallet {
     }
     CTxDestination GetDestination(FuzzedDataProvider& fuzzed_data_provider)
     {
-        auto type{fuzzed_data_provider.PickValueInArray(OUTPUT_TYPES)};
+        auto type{fuzzed_data_provider.PickValueInArray({OutputType::BECH32, OutputType::BECH32M, OutputType::LEGACY, OutputType::P2SH_SEGWIT})};
         if (fuzzed_data_provider.ConsumeBool()) {
             return *Assert(wallet->GetNewDestination(type, ""));
         } else {

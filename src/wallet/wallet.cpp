@@ -3729,6 +3729,7 @@ void CWallet::SetupDescriptorScriptPubKeyMans(const CExtKey& master_key)
 
     for (bool internal : {false, true}) {
         for (OutputType t : OUTPUT_TYPES) {
+            if (t == OutputType::SILENT_PAYMENT) continue;
             SetupDescriptorScriptPubKeyMan(batch, master_key, t, internal);
         }
     }
