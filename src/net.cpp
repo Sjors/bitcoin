@@ -457,7 +457,11 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
         }
     }
 
-    LogPrintLevel(BCLog::NET, BCLog::Level::Debug, "trying connection %s lastseen=%.1fhrs\n",
+    // Use v2 transport when both us and them signal NODE_P2P_V2.
+    const bool use_v2transport(addrConnect.nServices & GetLocalServices() & NODE_P2P_V2);
+
+    LogPrintLevel(BCLog::NET, BCLog::Level::Debug, "trying %s connection %s lastseen=%.1fhrs\n",
+        use_v2transport ? "v2" : "v1",
         pszDest ? pszDest : addrConnect.ToStringAddrPort(),
         Ticks<HoursDouble>(pszDest ? 0h : Now<NodeSeconds>() - addrConnect.nTime));
 
@@ -568,6 +572,7 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
     if (!addr_bind.IsValid()) {
         addr_bind = GetBindAddress(*sock);
     }
+
     CNode* pnode = new CNode(id,
                              std::move(sock),
                              addrConnect,
@@ -580,6 +585,7 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
                              CNodeOptions{
                                  .i2p_sam_session = std::move(i2p_transient_session),
                                  .recv_flood_size = nReceiveFloodSize,
+                                 .use_v2transport = use_v2transport,
                              });
     pnode->AddRef();
 
@@ -1794,6 +1800,10 @@ void CConnman::CreateNodeFromAcceptedSocket(std::unique_ptr<Sock>&& sock,
     }
 
     const bool inbound_onion = std::find(m_onion_binds.begin(), m_onion_binds.end(), addr_bind) != m_onion_binds.end();
+    // The V2Transport transparently falls back to V1 behavior when an incoming V1 connection is
+    // detected, so use it whenever we signal NODE_P2P_V2.
+    const bool use_v2transport(nodeServices & NODE_P2P_V2);
+
     CNode* pnode = new CNode(id,
                              std::move(sock),
                              addr,
@@ -1807,6 +1817,7 @@ void CConnman::CreateNodeFromAcceptedSocket(std::unique_ptr<Sock>&& sock,
                                  .permission_flags = permission_flags,
                                  .prefer_evict = discouraged,
                                  .recv_flood_size = nReceiveFloodSize,
+                                 .use_v2transport = use_v2transport,
                              });
     pnode->AddRef();
     m_msgproc->InitializeNode(*pnode, nodeServices);
@@ -3579,6 +3590,15 @@ ServiceFlags CConnman::GetLocalServices() const
     return nLocalServices;
 }
 
+static std::unique_ptr<Transport> MakeTransport(NodeId id, bool use_v2transport, bool inbound) noexcept
+{
+    if (use_v2transport) {
+        return std::make_unique<V2Transport>(id, /*initiating=*/!inbound, SER_NETWORK, INIT_PROTO_VERSION);
+    } else {
+        return std::make_unique<V1Transport>(id, SER_NETWORK, INIT_PROTO_VERSION);
+    }
+}
+
 CNode::CNode(NodeId idIn,
              std::shared_ptr<Sock> sock,
              const CAddress& addrIn,
@@ -3589,7 +3609,7 @@ CNode::CNode(NodeId idIn,
              ConnectionType conn_type_in,
              bool inbound_onion,
              CNodeOptions&& node_opts)
-    : m_transport{std::make_unique<V1Transport>(idIn, SER_NETWORK, INIT_PROTO_VERSION)},
+    : m_transport{MakeTransport(idIn, node_opts.use_v2transport, conn_type_in == ConnectionType::INBOUND)},
       m_permission_flags{node_opts.permission_flags},
       m_sock{sock},
       m_connected{GetTime<std::chrono::seconds>()},
