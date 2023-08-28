@@ -721,6 +721,10 @@ protected:
 public:
     SilentPaymentDescriptorScriptPubKeyMan(WalletStorage& storage, WalletDescriptor& descriptor);
 
+    SilentPaymentDescriptorScriptPubKeyMan(WalletStorage& storage)
+        :   DescriptorScriptPubKeyMan(storage, 0)
+        {}
+
     util::Result<CTxDestination> GetNewDestination(const OutputType type) override;
     util::Result<CTxDestination> GetReservedDestination(const OutputType type, bool internal, int64_t& index, CKeyPool& keypool) override;
     bool CanGetAddresses(bool internal) const override { return true; }

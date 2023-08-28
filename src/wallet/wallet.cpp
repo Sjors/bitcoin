@@ -3702,7 +3702,13 @@ DescriptorScriptPubKeyMan& CWallet::LoadDescriptorScriptPubKeyMan(uint256 id, Wa
 DescriptorScriptPubKeyMan& CWallet::SetupDescriptorScriptPubKeyMan(WalletBatch& batch, const CExtKey& master_key, const OutputType& output_type, bool internal)
 {
     AssertLockHeld(cs_wallet);
-    auto spk_manager = std::unique_ptr<DescriptorScriptPubKeyMan>(new DescriptorScriptPubKeyMan(*this, m_keypool_size));
+    std::unique_ptr<DescriptorScriptPubKeyMan> spk_manager;
+    if (output_type == OutputType::SILENT_PAYMENT) {
+        spk_manager = std::unique_ptr<DescriptorScriptPubKeyMan>(new SilentPaymentDescriptorScriptPubKeyMan(*this));
+    } else {
+        spk_manager = std::unique_ptr<DescriptorScriptPubKeyMan>(new DescriptorScriptPubKeyMan(*this, m_keypool_size));
+    }
+
     if (IsCrypted()) {
         if (IsLocked()) {
             throw std::runtime_error(std::string(__func__) + ": Wallet is locked, cannot setup new descriptors");
@@ -3729,7 +3735,7 @@ void CWallet::SetupDescriptorScriptPubKeyMans(const CExtKey& master_key)
 
     for (bool internal : {false, true}) {
         for (OutputType t : OUTPUT_TYPES) {
-            if (t == OutputType::SILENT_PAYMENT) continue;
+            if (t == OutputType::SILENT_PAYMENT && (!IsWalletFlagSet(WALLET_FLAG_SILENT_PAYMENTS) || internal == true)) continue;
             SetupDescriptorScriptPubKeyMan(batch, master_key, t, internal);
         }
     }
