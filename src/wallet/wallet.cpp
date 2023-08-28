@@ -1218,7 +1218,7 @@ bool CWallet::LoadToWallet(const uint256& hash, const UpdateWalletTxFn& fill_wtx
     return true;
 }
 
-bool CWallet::AddToWalletIfInvolvingMe(const CTransactionRef& ptx, const SyncTxState& state, bool fUpdate, bool rescanning_old_block)
+bool CWallet::AddToWalletIfInvolvingMe(const CTransactionRef& ptx, const std::map<COutPoint, Coin>& spent_coins, const SyncTxState& state, bool fUpdate, bool rescanning_old_block)
 {
     const CTransaction& tx = *ptx;
     {
@@ -1239,7 +1239,7 @@ bool CWallet::AddToWalletIfInvolvingMe(const CTransactionRef& ptx, const SyncTxS
 
         bool fExisted = mapWallet.count(tx.GetHash()) != 0;
         if (fExisted && !fUpdate) return false;
-        if (fExisted || IsMine(tx) || IsFromMe(tx))
+        if (fExisted || IsMine(tx, spent_coins) || IsFromMe(tx))
         {
             /* Check if any keys in the wallet keypool that were supposed to be unused
              * have appeared in a new transaction. If so, remove those keys from the keypool.
@@ -1411,9 +1411,9 @@ void CWallet::RecursiveUpdateTxState(WalletBatch* batch, const uint256& tx_hash,
     }
 }
 
-void CWallet::SyncTransaction(const CTransactionRef& ptx, const SyncTxState& state, bool update_tx, bool rescanning_old_block)
+void CWallet::SyncTransaction(const CTransactionRef& ptx, const SyncTxState& state, const std::map<COutPoint, Coin>& spent_coins, bool update_tx, bool rescanning_old_block)
 {
-    if (!AddToWalletIfInvolvingMe(ptx, state, update_tx, rescanning_old_block))
+    if (!AddToWalletIfInvolvingMe(ptx, spent_coins, state, update_tx, rescanning_old_block))
         return; // Not one of ours
 
     // If a transaction changes 'conflicted' state, that changes the balance
@@ -1424,7 +1424,7 @@ void CWallet::SyncTransaction(const CTransactionRef& ptx, const SyncTxState& sta
 
 void CWallet::transactionAddedToMempool(const CTransactionRef& tx, const std::map<COutPoint, Coin>& spent_coins) {
     LOCK(cs_wallet);
-    SyncTransaction(tx, TxStateInMempool{});
+    SyncTransaction(tx, TxStateInMempool{}, spent_coins);
 
     auto it = mapWallet.find(tx->GetHash());
     if (it != mapWallet.end()) {
@@ -1636,6 +1636,27 @@ bool CWallet::IsMine(const CTransaction& tx) const
     for (const CTxOut& txout : tx.vout)
         if (IsMine(txout))
             return true;
+    return false;
+}
+
+bool CWallet::IsMine(const CTransaction& tx, const std::map<COutPoint, Coin>& spent_coins)
+{
+    AssertLockHeld(cs_wallet);
+    if (IsMine(tx)) return true;
+
+    // Check for silent payments too
+    if (IsWalletFlagSet(WALLET_FLAG_SILENT_PAYMENTS) && !tx.IsCoinBase()) {
+        auto  sp_data = GetSilentPaymentsData(tx, spent_coins);
+        if (!sp_data.has_value()) {
+            return false;
+        }
+        for (SilentPaymentDescriptorScriptPubKeyMan* sp_spkm : GetSilentPaymentsSPKMs()) {
+            if (sp_spkm->IsMine(sp_data->first, sp_data->second)) {
+                return true;
+            }
+        }
+    }
+
     return false;
 }
 
@@ -1947,7 +1968,7 @@ CWallet::ScanResult CWallet::ScanForWalletTransactions(const uint256& start_bloc
                     break;
                 }
                 for (size_t posInBlock = 0; posInBlock < block.vtx.size(); ++posInBlock) {
-                    SyncTransaction(block.vtx[posInBlock], TxStateConfirmed{block_hash, block_height, static_cast<int>(posInBlock)}, fUpdate, /*rescanning_old_block=*/true);
+                    SyncTransaction(block.vtx[posInBlock], TxStateConfirmed{block_hash, block_height, static_cast<int>(posInBlock)}, {}, fUpdate, /*rescanning_old_block=*/true);
                 }
                 // scan succeeded, record block as most recent successfully scanned
                 result.last_scanned_block = block_hash;
@@ -3870,6 +3891,20 @@ DescriptorScriptPubKeyMan* CWallet::GetDescriptorScriptPubKeyMan(const WalletDes
     }
 
     return nullptr;
+}
+
+std::set<SilentPaymentDescriptorScriptPubKeyMan*> CWallet::GetSilentPaymentsSPKMs() const
+{
+    std::set<SilentPaymentDescriptorScriptPubKeyMan*> out;
+    for (auto& spk_man_pair : m_spk_managers) {
+        // Try to downcast to SilentPaymentDescriptorScriptPubKeyMan then check if the descriptors match
+        SilentPaymentDescriptorScriptPubKeyMan* spk_manager = dynamic_cast<SilentPaymentDescriptorScriptPubKeyMan*>(spk_man_pair.second.get());
+        if (spk_manager != nullptr) {
+            out.insert(spk_manager);
+        }
+    }
+
+    return out;
 }
 
 std::optional<bool> CWallet::IsInternalScriptPubKeyMan(ScriptPubKeyMan* spk_man) const
