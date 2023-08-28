@@ -442,9 +442,9 @@ public:
     explicit NotificationsProxy(std::shared_ptr<Chain::Notifications> notifications)
         : m_notifications(std::move(notifications)) {}
     virtual ~NotificationsProxy() = default;
-    void TransactionAddedToMempool(const NewMempoolTransactionInfo& tx, uint64_t mempool_sequence) override
+    void TransactionAddedToMempool(const NewMempoolTransactionInfo& tx, uint64_t mempool_sequence, const std::map<COutPoint, Coin>& spent_coins) override
     {
-        m_notifications->transactionAddedToMempool(tx.info.m_tx);
+        m_notifications->transactionAddedToMempool(tx.info.m_tx, spent_coins);
     }
     void TransactionRemovedFromMempool(const CTransactionRef& tx, MemPoolRemovalReason reason, uint64_t mempool_sequence) override
     {
@@ -823,7 +823,7 @@ public:
         if (!m_node.mempool) return;
         LOCK2(::cs_main, m_node.mempool->cs);
         for (const CTxMemPoolEntry& entry : m_node.mempool->entryAll()) {
-            notifications.transactionAddedToMempool(entry.GetSharedTx());
+            notifications.transactionAddedToMempool(entry.GetSharedTx(), {});
         }
     }
     bool hasAssumedValidChain() override
