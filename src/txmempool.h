@@ -40,6 +40,7 @@
 #include <vector>
 
 class CChain;
+class CTxMemPoolEntry;
 
 /** Fake height value used in Coin to signify they are only in the memory pool (since 0.8) */
 static const uint32_t MEMPOOL_HEIGHT = 0x7FFFFFFF;
@@ -48,6 +49,71 @@ static const uint32_t MEMPOOL_HEIGHT = 0x7FFFFFFF;
  * Test whether the LockPoints height and time are still valid on the current chain
  */
 bool TestLockPointValidity(CChain& active_chain, const LockPoints& lp) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+
+/**
+ * Data structure for managing clusters of transactions in the mempool.
+ *
+ * We can consider the graph of mempool transactions where edges connect
+ * transactions that have a parent/child relationship. Then two transactions
+ * are in a "cluster" if they are connected in this graph.
+ *
+ * Clusters are sorted for transaction selection/eviction purposes
+ * independently of each other.
+ */
+
+class CTxMemPool;
+
+class Cluster {
+public:
+    Cluster(int64_t id, CTxMemPool* mempool) : m_id(id), m_mempool(mempool) {}
+
+    void Clear() {
+        m_chunks.clear();
+        m_tx_count = 0;
+    }
+
+    // Add a transaction and update the sort.
+    void AddTransaction(const CTxMemPoolEntry& entry, bool sort);
+    void RemoveTransaction(const CTxMemPoolEntry& entry);
+
+    // Sort the cluster and partition into chunks.
+    void Sort(bool reassign_locations = true);
+
+    // Just rechunk the cluster using its existing linearization.
+    void Rechunk();
+
+    // Helper function
+    void RechunkFromLinearization(std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef>& txs, bool reassign_locations);
+
+    void Merge(std::vector<Cluster *>::iterator first, std::vector<Cluster*>::iterator last, bool this_cluster_first);
+
+    uint64_t GetMemoryUsage() const {
+        return memusage::DynamicUsage(m_chunks) + m_tx_count * sizeof(void*) * 3;
+    }
+
+    // The chunks of transactions which will be added to blocks or
+    // evicted from the mempool.
+    struct Chunk {
+        Chunk(CAmount _fee, int64_t _size) : fee(_fee), size(_size) {}
+        Chunk(Chunk&& other) = default;
+        Chunk& operator=(Cluster::Chunk&& other) = default;
+        Chunk& operator=(const Cluster::Chunk& other) = delete;
+
+        CAmount fee{0};
+        int64_t size{0};
+        std::list<CTxMemPoolEntry::CTxMemPoolEntryRef> txs;
+    };
+
+    typedef std::vector<Chunk>::iterator ChunkIter;
+    typedef std::pair<ChunkIter, Cluster*> HeapEntry;
+
+    std::vector<Chunk> m_chunks;
+    int64_t m_tx_count{0};
+
+    const int64_t m_id;
+    CTxMemPool* m_mempool;
+    mutable Epoch::Marker m_epoch_marker; //!< epoch when last touched
+};
 
 // extracts a transaction hash from CTxMemPoolEntry or CTransactionRef
 struct mempoolentry_txid
@@ -390,6 +456,10 @@ public:
      */
     mutable RecursiveMutex cs;
     indexed_transaction_set mapTx GUARDED_BY(cs);
+
+    // Clusters
+    std::unordered_map<int64_t, std::unique_ptr<Cluster>> m_cluster_map GUARDED_BY(cs);
+    int64_t m_next_cluster_id GUARDED_BY(cs){0};
 
     using txiter = indexed_transaction_set::nth_index<0>::type::const_iterator;
     std::vector<std::pair<uint256, txiter>> vTxHashes GUARDED_BY(cs); //!< All tx witness hashes/entries in mapTx, in random order
@@ -765,6 +835,9 @@ private:
      */
     void UpdateForDescendants(txiter updateIt, cacheMap& cachedDescendants,
                               const std::set<uint256>& setExclude, std::set<uint256>& descendants_to_remove) EXCLUSIVE_LOCKS_REQUIRED(cs);
+    // During reorg we add transactions back to mempool, must reconnect
+    // clusters with in-mempool descendants.
+    void UpdateClusterForDescendants(txiter updateIt) EXCLUSIVE_LOCKS_REQUIRED(cs);
     /** Update ancestors of hash to add/remove it as a descendant transaction. */
     void UpdateAncestorsOf(bool add, txiter hash, setEntries &setAncestors) EXCLUSIVE_LOCKS_REQUIRED(cs);
     /** Set ancestor state for an entry */
@@ -785,6 +858,11 @@ private:
      *  removal.
      */
     void removeUnchecked(txiter entry, MemPoolRemovalReason reason) EXCLUSIVE_LOCKS_REQUIRED(cs);
+
+    // Create a new (empty) cluster in the cluster map, and return a pointer to it.
+    Cluster* AssignCluster() EXCLUSIVE_LOCKS_REQUIRED(cs);
+    // Potentially split a cluster into smaller clusters (eg after transactions are removed)
+    void RecalculateClusterAndMaybeSort(Cluster *cluster, bool sort) EXCLUSIVE_LOCKS_REQUIRED(cs);
 public:
     /** visited marks a CTxMemPoolEntry as having been traversed
      * during the lifetime of the most recently created Epoch::Guard
@@ -794,6 +872,10 @@ public:
      * triggered.
      *
      */
+    bool visited(const CTxMemPoolEntry& entry) const EXCLUSIVE_LOCKS_REQUIRED(cs, m_epoch)
+    {
+        return m_epoch.visited(entry.m_epoch_marker);
+    }
     bool visited(const txiter it) const EXCLUSIVE_LOCKS_REQUIRED(cs, m_epoch)
     {
         return m_epoch.visited(it->m_epoch_marker);
@@ -804,6 +886,13 @@ public:
         assert(m_epoch.guarded()); // verify guard even when it==nullopt
         return !it || visited(*it);
     }
+
+    bool visited(Cluster *cluster) const EXCLUSIVE_LOCKS_REQUIRED(cs, m_epoch)
+    {
+        return m_epoch.visited(cluster->m_epoch_marker);
+    }
+
+    friend class Cluster;
 };
 
 /**
