@@ -686,6 +686,13 @@ public:
         const Limits& limits,
         bool fSearchForParents = true) const EXCLUSIVE_LOCKS_REQUIRED(cs);
 
+    void CalculateParents(CTxMemPoolEntry &entry) const EXCLUSIVE_LOCKS_REQUIRED(cs);
+
+    bool BuildClusterForTransaction(CTxMemPoolEntry& entry, const setEntries& all_conflicts, const Limits& limits, Cluster& temp_cluster) EXCLUSIVE_LOCKS_REQUIRED(cs);
+
+    util::Result<CFeeRate> CalculateMiningScoreOfReplacementTx(CTxMemPoolEntry& entry, CAmount modified_fee,
+                                                 const setEntries& all_conflicts, const Limits& limits) EXCLUSIVE_LOCKS_REQUIRED(cs);
+
     /** Collect the entire cluster of connected transactions for each transaction in txids.
      * All txids must correspond to transaction entries in the mempool, otherwise this returns an
      * empty vector. This call will also exit early and return an empty vector if it collects 500 or

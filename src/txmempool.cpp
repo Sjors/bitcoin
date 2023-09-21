@@ -322,6 +322,77 @@ bool CTxMemPool::CheckPackageLimits(const Package& package,
     return ancestors.has_value();
 }
 
+void CTxMemPool::CalculateParents(CTxMemPoolEntry &entry) const
+{
+    for (const CTxIn &txin : entry.GetTx().vin) {
+        std::optional<txiter> piter = GetIter(txin.prevout.hash);
+        if (piter) {
+            entry.GetMemPoolParents().insert(**piter);
+        }
+    }
+}
+
+bool CTxMemPool::BuildClusterForTransaction(CTxMemPoolEntry& entry, const setEntries& all_conflicts, const Limits& limits, Cluster& temp_cluster)
+{
+    // Start by calculating all parents, which much be in the same cluster as entry.
+    // Then, we repeat by walking all children of those parents, and add those to the cluster.
+    // For each child, walk its parents, and repeat until we have nothing left to walk, or until we exceed some limit.
+    // Return the built cluster.
+    temp_cluster.Clear();
+    temp_cluster.m_chunks.emplace_back(0, 0);
+    std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef> work_queue;
+
+    // Start by calculating the parents of this transaction, and adding them to the work queue.
+    {
+        WITH_FRESH_EPOCH(m_epoch);
+        CalculateParents(entry);
+        for (auto parent_iter : entry.GetMemPoolParentsConst()) {
+            work_queue.push_back(parent_iter);
+            visited(parent_iter.get());
+        }
+        while (!work_queue.empty()) {
+            auto next_entry = work_queue.back();
+            work_queue.pop_back();
+            if (all_conflicts.count(mapTx.iterator_to(next_entry))) {
+                // Skip entries that are in the conflicts list
+                continue;
+            }
+            temp_cluster.m_chunks[0].txs.push_back(next_entry);
+            temp_cluster.m_tx_count++;
+            temp_cluster.m_tx_size += next_entry.get().GetTxSize();
+            if (temp_cluster.m_tx_count > limits.cluster_count || temp_cluster.m_tx_size > limits.cluster_size_vbytes) {
+                return false;
+            }
+            auto next_children = next_entry.get().GetMemPoolChildrenConst();
+            for (auto descendant : next_children) {
+                if (!visited(descendant.get())) {
+                    work_queue.push_back(descendant);
+                }
+            }
+            auto next_parents = next_entry.get().GetMemPoolParentsConst();
+            for (auto parent : next_parents) {
+                if (!visited(parent.get())) {
+                    work_queue.push_back(parent);
+                }
+            }
+        }
+    }
+    temp_cluster.m_chunks[0].txs.emplace_back(entry);
+    temp_cluster.m_tx_count++;
+    temp_cluster.m_tx_size += entry.GetTxSize();
+
+    if (temp_cluster.m_tx_count > limits.cluster_count || temp_cluster.m_tx_size > limits.cluster_size_vbytes) {
+        return false;
+    }
+
+    temp_cluster.Sort(false);
+
+    // Undo the changes we made to the entry.
+    entry.GetMemPoolParents().clear();
+
+    return true;
+}
+
 util::Result<bool> CTxMemPool::CheckClusterSizeLimit(int64_t entry_size, size_t entry_count,
         const Limits& limits, const CTxMemPoolEntry::Parents& all_parents) const
 {
@@ -394,6 +465,40 @@ CTxMemPool::setEntries CTxMemPool::AssumeCalculateMemPoolAncestors(
                       calling_fn_name, util::ErrorString(result).original);
     }
     return std::move(result).value_or(CTxMemPool::setEntries{});
+}
+
+util::Result<CFeeRate> CTxMemPool::CalculateMiningScoreOfReplacementTx(CTxMemPoolEntry& entry, CAmount modified_fee, const setEntries& all_conflicts, const Limits& limits)
+{
+    Cluster temp_cluster(0, this);
+
+    // We sort based on the modified fee.
+    entry.UpdateModifiedFee(modified_fee - entry.GetFee());
+    if (!BuildClusterForTransaction(entry, all_conflicts, limits, temp_cluster)) {
+        // Check to see which limit was violated.
+        if (temp_cluster.m_tx_count > limits.cluster_count) {
+            return util::Error{Untranslated(strprintf("too many unconfirmed transactions in the cluster [limit: %ld]", limits.cluster_count))};
+        } else if (temp_cluster.m_tx_size > limits.cluster_size_vbytes) {
+            return util::Error{Untranslated(strprintf("exceeds cluster size limit [limit: %ld]", limits.cluster_size_vbytes))};
+        } else {
+            return util::Error{Untranslated("unknown error")};
+        }
+    }
+    entry.UpdateModifiedFee(entry.GetFee() - modified_fee);
+
+    // Return the feerate we calculated.
+    CAmount chunk_fees{0};
+    int64_t chunk_size{0};
+
+    for (const auto& chunk : temp_cluster.m_chunks) {
+        for (auto& txentry : chunk.txs) {
+            if (&(txentry.get()) == &entry) {
+                chunk_fees = chunk.fee;
+                chunk_size = chunk.size;
+                break;
+            }
+        }
+    }
+    return CFeeRate(chunk_fees, chunk_size);
 }
 
 void CTxMemPool::UpdateAncestorsOf(bool add, txiter it, setEntries &setAncestors)

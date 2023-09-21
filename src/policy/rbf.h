@@ -19,7 +19,7 @@
 class CFeeRate;
 class uint256;
 
-/** Maximum number of transactions that can be replaced by RBF (Rule #5). This includes all
+/** Maximum number of transactions that can be replaced by RBF (Rule #4). This includes all
  * mempool conflicts and their descendants. */
 static constexpr uint32_t MAX_REPLACEMENT_CANDIDATES{100};
 
@@ -60,14 +60,6 @@ RBFTransactionState IsRBFOptInEmptyMempool(const CTransaction& tx);
 std::optional<std::string> GetEntriesForConflicts(const CTransaction& tx, CTxMemPool& pool,
                                                   const CTxMemPool::setEntries& iters_conflicting,
                                                   CTxMemPool::setEntries& all_conflicts)
-    EXCLUSIVE_LOCKS_REQUIRED(pool.cs);
-
-/** The replacement transaction may only include an unconfirmed input if that input was included in
- * one of the original transactions.
- * @returns error message if tx spends unconfirmed inputs not also spent by iters_conflicting,
- * otherwise std::nullopt. */
-std::optional<std::string> HasNoNewUnconfirmed(const CTransaction& tx, const CTxMemPool& pool,
-                                               const CTxMemPool::setEntries& iters_conflicting)
     EXCLUSIVE_LOCKS_REQUIRED(pool.cs);
 
 /** Check the intersection between two sets of transactions (a set of mempool entries and a set of

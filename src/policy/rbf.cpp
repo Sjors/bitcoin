@@ -63,7 +63,7 @@ std::optional<std::string> GetEntriesForConflicts(const CTransaction& tx,
     uint64_t nConflictingCount = 0;
     for (const auto& mi : iters_conflicting) {
         nConflictingCount += mi->GetCountWithDescendants();
-        // Rule #5: don't consider replacing more than MAX_REPLACEMENT_CANDIDATES
+        // Rule #4: don't consider replacing more than MAX_REPLACEMENT_CANDIDATES
         // entries from the mempool. This potentially overestimates the number of actual
         // descendants (i.e. if multiple conflicts share a descendant, it will be counted multiple
         // times), but we just want to be conservative to avoid doing too much work.
@@ -77,38 +77,6 @@ std::optional<std::string> GetEntriesForConflicts(const CTransaction& tx,
     // Calculate the set of all transactions that would have to be evicted.
     for (CTxMemPool::txiter it : iters_conflicting) {
         pool.CalculateDescendants(it, all_conflicts);
-    }
-    return std::nullopt;
-}
-
-std::optional<std::string> HasNoNewUnconfirmed(const CTransaction& tx,
-                                               const CTxMemPool& pool,
-                                               const CTxMemPool::setEntries& iters_conflicting)
-{
-    AssertLockHeld(pool.cs);
-    std::set<uint256> parents_of_conflicts;
-    for (const auto& mi : iters_conflicting) {
-        for (const CTxIn& txin : mi->GetTx().vin) {
-            parents_of_conflicts.insert(txin.prevout.hash);
-        }
-    }
-
-    for (unsigned int j = 0; j < tx.vin.size(); j++) {
-        // Rule #2: We don't want to accept replacements that require low feerate junk to be
-        // mined first.  Ideally we'd keep track of the ancestor feerates and make the decision
-        // based on that, but for now requiring all new inputs to be confirmed works.
-        //
-        // Note that if you relax this to make RBF a little more useful, this may break the
-        // CalculateMempoolAncestors RBF relaxation which subtracts the conflict count/size from the
-        // descendant limit.
-        if (!parents_of_conflicts.count(tx.vin[j].prevout.hash)) {
-            // Rather than check the UTXO set - potentially expensive - it's cheaper to just check
-            // if the new input refers to a tx that's in the mempool.
-            if (pool.exists(GenTxid::Txid(tx.vin[j].prevout.hash))) {
-                return strprintf("replacement %s adds unconfirmed input, idx %d",
-                                 tx.GetHash().ToString(), j);
-            }
-        }
     }
     return std::nullopt;
 }
@@ -139,11 +107,11 @@ std::optional<std::string> PaysMoreThanConflicts(const CTxMemPool::setEntries& i
         // as that would lower the feerate of the next block. Requiring that the feerate always be
         // increased is also an easy-to-reason about way to prevent DoS attacks via replacements.
         //
-        // We only consider the feerates of transactions being directly replaced, not their indirect
-        // descendants. While that does mean high feerate children are ignored when deciding whether
-        // or not to replace, we do require the replacement to pay more overall fees too, mitigating
-        // most cases.
-        CFeeRate original_feerate(mi->GetModifiedFee(), mi->GetTxSize());
+        // We only need to consider the chunk feerates of transactions being
+        // directly replaced, because descendant transactions which pay for the
+        // parent will be reflected in the parent's chunk feerate.
+        Cluster::Chunk &chunk = mi->m_cluster->m_chunks[mi->m_loc.first];
+        CFeeRate original_feerate(chunk.fee, chunk.size);
         if (replacement_feerate <= original_feerate) {
             return strprintf("rejecting replacement %s; new feerate %s <= old feerate %s",
                              txid.ToString(),
@@ -160,7 +128,7 @@ std::optional<std::string> PaysForRBF(CAmount original_fees,
                                       CFeeRate relay_fee,
                                       const uint256& txid)
 {
-    // Rule #3: The replacement fees must be greater than or equal to fees of the
+    // Rule #2: The replacement fees must be greater than or equal to fees of the
     // transactions it replaces, otherwise the bandwidth used by those conflicting transactions
     // would not be paid for.
     if (replacement_fees < original_fees) {
@@ -168,7 +136,7 @@ std::optional<std::string> PaysForRBF(CAmount original_fees,
                          txid.ToString(), FormatMoney(replacement_fees), FormatMoney(original_fees));
     }
 
-    // Rule #4: The new transaction must pay for its own bandwidth. Otherwise, we have a DoS
+    // Rule #3: The new transaction must pay for its own bandwidth. Otherwise, we have a DoS
     // vector where attackers can cause a transaction to be replaced (and relayed) repeatedly by
     // increasing the fee by tiny amounts.
     CAmount additional_fees = replacement_fees - original_fees;

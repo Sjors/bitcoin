@@ -970,18 +970,6 @@ bool MemPoolAccept::ReplacementChecks(Workspace& ws)
     TxValidationState& state = ws.m_state;
 
     CFeeRate newFeeRate(ws.m_modified_fees, ws.m_vsize);
-    // Enforce Rule #6. The replacement transaction must have a higher feerate than its direct conflicts.
-    // - The motivation for this check is to ensure that the replacement transaction is preferable for
-    //   block-inclusion, compared to what would be removed from the mempool.
-    // - This logic predates ancestor feerate-based transaction selection, which is why it doesn't
-    //   consider feerates of descendants.
-    // - Note: Ancestor feerate-based transaction selection has made this comparison insufficient to
-    //   guarantee that this is incentive-compatible for miners, because it is possible for a
-    //   descendant transaction of a direct conflict to pay a higher feerate than the transaction that
-    //   might replace them, under these rules.
-    if (const auto err_string{PaysMoreThanConflicts(ws.m_iters_conflicting, newFeeRate, hash)}) {
-        return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "insufficient fee", *err_string);
-    }
 
     // Calculate all conflicting entries and enforce Rule #5.
     if (const auto err_string{GetEntriesForConflicts(tx, m_pool, ws.m_iters_conflicting, ws.m_all_conflicting)}) {
@@ -989,31 +977,28 @@ bool MemPoolAccept::ReplacementChecks(Workspace& ws)
                              "too many potential replacements", *err_string);
     }
 
-    // Require that the new transaction not exceed the cluster limits.
-    // In a later commit, we'll fix this to not include conflicting
-    // transactions in the cluster count.
-    CTxMemPoolEntry::Parents parents;
-    for (auto ancestor : ws.m_ancestors) parents.insert(*ancestor);
-    auto cluster_size_result{m_pool.CheckClusterSizeLimit(ws.m_entry->GetTxSize(), 1, m_pool.m_limits, parents)};
-    if (!cluster_size_result) {
-        return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "too-large-cluster", util::ErrorString(cluster_size_result).original);
+    auto replacement_feerate{m_pool.CalculateMiningScoreOfReplacementTx(*ws.m_entry, ws.m_modified_fees, ws.m_all_conflicting, m_pool.m_limits)};
+    if (!replacement_feerate) {
+        // If we can't calculate a feerate, it's because the cluster size limits were hit.
+        return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "too-large-cluster", util::ErrorString(replacement_feerate).original);
     }
 
-    // Enforce Rule #2.
-    if (const auto err_string{HasNoNewUnconfirmed(tx, m_pool, ws.m_iters_conflicting)}) {
-        return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY,
-                             "replacement-adds-unconfirmed", *err_string);
+    if (const auto err_string{PaysMoreThanConflicts(ws.m_all_conflicting, *replacement_feerate, hash)}) {
+        return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "insufficient fee", *err_string);
     }
+
     // Check if it's economically rational to mine this transaction rather than the ones it
     // replaces and pays for its own relay fees. Enforce Rules #3 and #4.
     for (CTxMemPool::txiter it : ws.m_all_conflicting) {
         ws.m_conflicting_fees += it->GetModifiedFee();
         ws.m_conflicting_size += it->GetTxSize();
     }
+
     if (const auto err_string{PaysForRBF(ws.m_conflicting_fees, ws.m_modified_fees, ws.m_vsize,
                                          m_pool.m_incremental_relay_feerate, hash)}) {
         return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "insufficient fee", *err_string);
     }
+
     return true;
 }
 
