@@ -613,6 +613,10 @@ public:
      */
     void RemoveStaged(setEntries& stage, bool updateDescendants, MemPoolRemovalReason reason) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
+    // Remove the given chunk (guaranteed to be last in the cluster)
+    // Leave the resulting cluster otherwise unchanged (ie don't repartition/re-sort).
+    void RemoveChunkForEviction(Cluster *cluster, std::list<CTxMemPoolEntry::CTxMemPoolEntryRef>& entries) EXCLUSIVE_LOCKS_REQUIRED(cs);
+
     /** UpdateTransactionsFromBlock is called when adding transactions from a
      * disconnected block back to the mempool, new mempool entries may have
      * children in the mempool (which is generally not the case when otherwise

@@ -1317,6 +1317,26 @@ void CTxMemPool::RemoveUnbroadcastTx(const uint256& txid, const bool unchecked) 
     }
 }
 
+void CTxMemPool::RemoveChunkForEviction(Cluster *cluster, std::list<CTxMemPoolEntry::CTxMemPoolEntryRef>& entries)
+{
+    AssertLockHeld(cs);
+
+    cachedInnerUsage -= cluster->GetMemoryUsage();
+
+    setEntries entriesToRemove;
+    for (auto entry_ref : entries) {
+        entriesToRemove.insert(mapTx.iterator_to(entry_ref.get()));
+    }
+    UpdateForRemoveFromMempool(entriesToRemove, false);
+    for (auto it : entriesToRemove) {
+        removeUnchecked(it, MemPoolRemovalReason::SIZELIMIT);
+    }
+
+    cachedInnerUsage += cluster->GetMemoryUsage();
+    // Note: at this point the clusters will still be sorted, but they may need
+    // to be split.
+}
+
 void CTxMemPool::RemoveStaged(setEntries &stage, bool updateDescendants, MemPoolRemovalReason reason) {
     AssertLockHeld(cs);
     UpdateForRemoveFromMempool(stage, updateDescendants);
@@ -1427,29 +1447,67 @@ void CTxMemPool::TrimToSize(size_t sizelimit, std::vector<COutPoint>* pvNoSpends
 
     unsigned nTxnRemoved = 0;
     CFeeRate maxFeeRateRemoved(0);
+
+    // Use a heap to determine which chunks to evict, but only make the heap if
+    // we're actually above the size limit.
+    std::vector<Cluster::HeapEntry> heap_chunks;
+    std::set<Cluster*> clusters_with_evictions;
     while (!mapTx.empty() && DynamicMemoryUsage() > sizelimit) {
-        indexed_transaction_set::index<descendant_score>::type::iterator it = mapTx.get<descendant_score>().begin();
+        if (heap_chunks.empty()) {
+            for (const auto & [id, cluster] : m_cluster_map) {
+                if (!cluster->m_chunks.empty()) {
+                    heap_chunks.emplace_back(cluster->m_chunks.end()-1, cluster.get());
+                }
+            }
+        }
+
+        // Define comparison operator on our heap entries (using feerate of chunks).
+        auto cmp = [](const Cluster::HeapEntry& a, const Cluster::HeapEntry& b) {
+            // TODO: branch on size of fee to do this as 32-bit calculation
+            // instead? etc
+            return a.first->fee*b.first->size > b.first->fee*a.first->size;
+        };
+
+        std::make_heap(heap_chunks.begin(), heap_chunks.end(), cmp);
+
+        // Remove the top element (lowest feerate) and evict.
+        auto worst_chunk = heap_chunks.front();
+
+        assert(worst_chunk.first->size > 0);
+
+        std::pop_heap(heap_chunks.begin(), heap_chunks.end(), cmp);
+        heap_chunks.pop_back();
+        if (worst_chunk.first != worst_chunk.second->m_chunks.begin()) {
+            // If we're not at the beginning of the cluster's chunk list, we can
+            // just decrement the iterator to get the next-lowest feerate chunk.
+            heap_chunks.emplace_back(worst_chunk.first-1, worst_chunk.second);
+            std::push_heap(heap_chunks.begin(), heap_chunks.end(), cmp);
+        }
+
+        clusters_with_evictions.insert(worst_chunk.second);
 
         // We set the new mempool min fee to the feerate of the removed set, plus the
         // "minimum reasonable fee rate" (ie some value under which we consider txn
         // to have 0 fee). This way, we don't allow txn to enter mempool with feerate
         // equal to txn which were removed with no block in between.
-        CFeeRate removed(it->GetModFeesWithDescendants(), it->GetSizeWithDescendants());
+        CFeeRate removed(worst_chunk.first->fee, worst_chunk.first->size);
         removed += m_incremental_relay_feerate;
         trackPackageRemoved(removed);
         maxFeeRateRemoved = std::max(maxFeeRateRemoved, removed);
 
-        setEntries stage;
-        CalculateDescendants(mapTx.project<0>(it), stage);
-        nTxnRemoved += stage.size();
+        nTxnRemoved += worst_chunk.first->txs.size();
 
         std::vector<CTransaction> txn;
         if (pvNoSpendsRemaining) {
-            txn.reserve(stage.size());
-            for (txiter iter : stage)
-                txn.push_back(iter->GetTx());
+            txn.reserve(worst_chunk.first->txs.size());
+            for (auto tx_entry_ref : worst_chunk.first->txs)
+                txn.push_back(tx_entry_ref.get().GetTx());
         }
-        RemoveStaged(stage, false, MemPoolRemovalReason::SIZELIMIT);
+
+        // We'll remove this chunk without otherwise updating the cluster (ie
+        // without trying to re-sort, and without trying to re-partition/split
+        // the cluster if it's no longer connected).
+        RemoveChunkForEviction(worst_chunk.second, worst_chunk.first->txs);
         if (pvNoSpendsRemaining) {
             for (const CTransaction& tx : txn) {
                 for (const CTxIn& txin : tx.vin) {
@@ -1457,6 +1515,21 @@ void CTxMemPool::TrimToSize(size_t sizelimit, std::vector<COutPoint>* pvNoSpends
                     pvNoSpendsRemaining->push_back(txin.prevout);
                 }
             }
+        }
+    }
+
+    // Before we can return, we have to clean up the clusters that saw
+    // evictions, because they will have stray chunks and may need to be
+    // re-partitioned.
+    // However, these clusters do not need to be re-sorted, because evicted
+    // chunks at the end can never change the relative ordering of transactions
+    // that come before them.
+    for (Cluster* cluster : clusters_with_evictions) {
+        cachedInnerUsage -= cluster->GetMemoryUsage();
+        if (cluster->m_tx_count == 0) {
+            m_cluster_map.erase(cluster->m_id);
+        } else {
+            RecalculateClusterAndMaybeSort(cluster, false);
         }
     }
 
