@@ -93,6 +93,8 @@ public:
         return memusage::DynamicUsage(m_chunks) + m_tx_count * sizeof(void*) * 3;
     }
 
+    CTxMemPoolEntry::CTxMemPoolEntryRef GetLastTransaction();
+
     // The chunks of transactions which will be added to blocks or
     // evicted from the mempool.
     struct Chunk {
@@ -631,6 +633,22 @@ public:
      *     disconnected block that have been accepted back into the mempool.
      */
     void UpdateTransactionsFromBlock(const std::vector<uint256>& vHashesToUpdate) EXCLUSIVE_LOCKS_REQUIRED(cs, cs_main) LOCKS_EXCLUDED(m_epoch);
+
+    /**
+     * Calculate whether cluster size limits would be exceeded if a new tx were
+     * added to the mempool (assuming no conflicts).
+     *
+     * @param[in] entry_size         vbytes of the new transaction(s)
+     * @param[in] entry_count        number of new transactions to be added
+     * @param[in] limits             Contains maximum cluster size/count
+     * @param[in] all_parents        All parents of entry/entries in the mempool
+     *
+     * @return true if cluster limits are respected, or an error if limits were
+     *         exceeded
+     */
+    util::Result<bool> CheckClusterSizeLimit(int64_t entry_size, size_t entry_count,
+            const Limits& limits, const CTxMemPoolEntry::Parents& all_parents) const
+        EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     /**
      * Try to calculate all in-mempool ancestors of entry.

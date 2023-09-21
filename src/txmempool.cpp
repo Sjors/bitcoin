@@ -120,19 +120,20 @@ void CTxMemPool::UpdateClusterForDescendants(txiter updateIt)
         // Merge the other clusters into this one, but keep this cluster as
         // first so that it's topologically sound.
         clusters_to_merge[0]->Merge(clusters_to_merge.begin()+1, clusters_to_merge.end(), true);
-        // TODO: limit the size of the cluster, in case it got too big.
         // Need to delete the other clusters.
         for (auto it=clusters_to_merge.begin()+1; it!= clusters_to_merge.end(); ++it) {
             m_cluster_map.erase((*it)->m_id);
         }
-        // Note: we cannot re-sort the cluster here, because we are not yet
+        // Note: we cannot re-sort the cluster here, because (a) we are not yet
         // finished merging connected clusters together, so some parents may be
-        // missing! Sorting should happen only after all clusters are cleaned
-        // up/merged where needed.
+        // missing, and (b) the cluster may be too large. Sorting should happen
+        // only after all clustering is complete, and the clusters have been
+        // trimmed down to our cluster count limit.
         clusters_to_merge[0]->Rechunk();
         // Add some assertion that topology is still valid?
     }
     cachedInnerUsage += clusters_to_merge[0]->GetMemoryUsage();
+    return;
 }
 
 void CTxMemPool::UpdateTransactionsFromBlock(const std::vector<uint256>& vHashesToUpdate)
@@ -189,17 +190,35 @@ void CTxMemPool::UpdateTransactionsFromBlock(const std::vector<uint256>& vHashes
         if (it == mapTx.end()) continue;
         UpdateClusterForDescendants(it);
     }
+    std::vector<Cluster *> unique_clusters_from_block;
     {
         WITH_FRESH_EPOCH(m_epoch);
         for (const uint256& hash : reverse_iterate(vHashesToUpdate)) {
             txiter it = mapTx.find(hash);
             if (it == mapTx.end()) continue;
             if (!visited(it->m_cluster)) {
-                // Sort() can change the memory usage of the cluster
-                cachedInnerUsage -= it->m_cluster->GetMemoryUsage();
-                it->m_cluster->Sort();
-                cachedInnerUsage += it->m_cluster->GetMemoryUsage();
+                unique_clusters_from_block.push_back(it->m_cluster);
             }
+        }
+    }
+    for (Cluster *cluster : unique_clusters_from_block) {
+        // If the cluster is too big, then we need to limit it by
+        // evicting transactions and then re-calculate the cluster (it
+        // may have split).  Otherwise, just sort.
+        if (cluster->m_tx_count > m_limits.cluster_count || cluster->m_tx_size > m_limits.cluster_size_vbytes) {
+            // Remove the last transaction in the cluster.
+            cachedInnerUsage -= cluster->GetMemoryUsage();
+            while (cluster->m_tx_count > m_limits.cluster_count ||
+                    cluster->m_tx_size > m_limits.cluster_size_vbytes) {
+                UpdateForRemoveFromMempool({mapTx.iterator_to(cluster->GetLastTransaction())}, false);
+                removeUnchecked(mapTx.iterator_to(cluster->GetLastTransaction()), MemPoolRemovalReason::SIZELIMIT);
+            }
+            RecalculateClusterAndMaybeSort(cluster, true);
+        } else {
+            // Sort() can change the memory usage of the cluster
+            cachedInnerUsage -= cluster->GetMemoryUsage();
+            cluster->Sort();
+            cachedInnerUsage += cluster->GetMemoryUsage();
         }
     }
 
@@ -288,6 +307,11 @@ bool CTxMemPool::CheckPackageLimits(const Package& package,
             }
         }
     }
+    auto cluster_result{CheckClusterSizeLimit(total_vsize, package.size(), m_limits, staged_ancestors)};
+    if (!cluster_result) {
+        errString = util::ErrorString(cluster_result).original;
+        return false;
+    }
     // When multiple transactions are passed in, the ancestors and descendants of all transactions
     // considered together must be within limits even if they are not interdependent. This may be
     // stricter than the limits for each individual transaction.
@@ -296,6 +320,34 @@ bool CTxMemPool::CheckPackageLimits(const Package& package,
     // It's possible to overestimate the ancestor/descendant totals.
     if (!ancestors.has_value()) errString = "possibly " + util::ErrorString(ancestors).original;
     return ancestors.has_value();
+}
+
+util::Result<bool> CTxMemPool::CheckClusterSizeLimit(int64_t entry_size, size_t entry_count,
+        const Limits& limits, const CTxMemPoolEntry::Parents& all_parents) const
+{
+    int64_t total_cluster_count = entry_count;
+    int64_t total_cluster_vbytes = entry_size;
+
+    {
+        WITH_FRESH_EPOCH(m_epoch);
+        for (auto ancestor_iter : all_parents) {
+            if (!visited(ancestor_iter.get().m_cluster)) {
+                total_cluster_count += ancestor_iter.get().m_cluster->m_tx_count;
+                total_cluster_vbytes += ancestor_iter.get().m_cluster->m_tx_size;
+                // Short-circuit the calculation if we're definitely going to exceed the cluster limits.
+                if (total_cluster_count > limits.cluster_count || total_cluster_vbytes > limits.cluster_size_vbytes) {
+                    break;
+                }
+            }
+        }
+    }
+    if (total_cluster_count > limits.cluster_count) {
+        return util::Error{Untranslated(strprintf("too many unconfirmed transactions in the cluster [limit: %ld]", limits.cluster_count))};
+    }
+    if (total_cluster_vbytes > limits.cluster_size_vbytes) {
+        return util::Error{Untranslated(strprintf("exceeds cluster size limit [limit: %d]", limits.cluster_size_vbytes))};
+    }
+    return true;
 }
 
 util::Result<CTxMemPool::setEntries> CTxMemPool::CalculateMemPoolAncestors(
@@ -1609,6 +1661,16 @@ std::vector<CTxMemPool::txiter> CTxMemPool::GatherClusters(const std::vector<uin
         }
     }
     return clustered_txs;
+}
+
+CTxMemPoolEntry::CTxMemPoolEntryRef Cluster::GetLastTransaction()
+{
+    assert(m_tx_count > 0);
+    for (auto chunkit = m_chunks.rbegin(); chunkit != m_chunks.rend(); ++chunkit) {
+        if (!chunkit->txs.empty()) return chunkit->txs.back();
+    }
+    // Unreachable
+    assert(false);
 }
 
 void Cluster::AddTransaction(const CTxMemPoolEntry& entry, bool sort)

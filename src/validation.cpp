@@ -634,6 +634,10 @@ private:
     // Run checks for mempool replace-by-fee.
     bool ReplacementChecks(Workspace& ws) EXCLUSIVE_LOCKS_REQUIRED(cs_main, m_pool.cs);
 
+    // Run cluster size checks (for non-rbf transactions -- RBF is handled
+    // separately in ReplacementChecks()).
+    bool ClusterSizeChecks(Workspace& ws) EXCLUSIVE_LOCKS_REQUIRED(cs_main, m_pool.cs);
+
     // Enforce package mempool ancestor/descendant limits (distinct from individual
     // ancestor/descendant limits done in PreChecks).
     bool PackageMempoolChecks(const std::vector<CTransactionRef>& txns,
@@ -960,6 +964,26 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     return true;
 }
 
+bool MemPoolAccept::ClusterSizeChecks(Workspace& ws)
+{
+    AssertLockHeld(cs_main);
+    AssertLockHeld(m_pool.cs);
+
+    const CTxMemPoolEntry &entry = *ws.m_entry;
+    const CTxMemPool::setEntries& ancestors = ws.m_ancestors;
+    TxValidationState& state = ws.m_state;
+
+    CTxMemPoolEntry::Parents parents;
+    for (auto ancestor : ancestors) {
+        parents.insert(*ancestor);
+    }
+    auto result{m_pool.CheckClusterSizeLimit(entry.GetTxSize(), 1, m_pool.m_limits, parents)};
+    if (!result) {
+        return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "too-large-cluster", util::ErrorString(result).original);
+    }
+    return true;
+}
+
 bool MemPoolAccept::ReplacementChecks(Workspace& ws)
 {
     AssertLockHeld(cs_main);
@@ -988,6 +1012,17 @@ bool MemPoolAccept::ReplacementChecks(Workspace& ws)
         return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY,
                              "too many potential replacements", *err_string);
     }
+
+    // Require that the new transaction not exceed the cluster limits.
+    // In a later commit, we'll fix this to not include conflicting
+    // transactions in the cluster count.
+    CTxMemPoolEntry::Parents parents;
+    for (auto ancestor : ws.m_ancestors) parents.insert(*ancestor);
+    auto cluster_size_result{m_pool.CheckClusterSizeLimit(ws.m_entry->GetTxSize(), 1, m_pool.m_limits, parents)};
+    if (!cluster_size_result) {
+        return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "too-large-cluster", util::ErrorString(cluster_size_result).original);
+    }
+
     // Enforce Rule #2.
     if (const auto err_string{HasNoNewUnconfirmed(tx, m_pool, ws.m_iters_conflicting)}) {
         return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY,
@@ -1229,6 +1264,8 @@ MempoolAcceptResult MemPoolAccept::AcceptSingleTransaction(const CTransactionRef
     if (!PreChecks(args, ws)) return MempoolAcceptResult::Failure(ws.m_state);
 
     if (m_rbf && !ReplacementChecks(ws)) return MempoolAcceptResult::Failure(ws.m_state);
+
+    if (!m_rbf && !ClusterSizeChecks(ws)) return MempoolAcceptResult::Failure(ws.m_state);
 
     // Perform the inexpensive checks first and avoid hashing and signature verification unless
     // those checks pass, to mitigate CPU exhaustion denial-of-service attacks.
