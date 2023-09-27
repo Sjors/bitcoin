@@ -1191,24 +1191,53 @@ void CTxMemPool::check(const CCoinsViewCache& active_coins_tip, int64_t spendhei
     assert(innerUsage == cachedInnerUsage);
 }
 
-bool CTxMemPool::CompareDepthAndScore(const uint256& hasha, const uint256& hashb, bool wtxid)
+// Return true if a comes before b in mempool sort order
+bool CTxMemPool::CompareMiningScore(txiter a, txiter b) const
+{
+    if (a == b) return false; // An element cannot be less than itself.
+
+    CAmount a_fee = a->m_cluster->m_chunks[a->m_loc.first].fee;
+    int64_t a_size = a->m_cluster->m_chunks[a->m_loc.first].size;
+    CAmount b_fee = b->m_cluster->m_chunks[b->m_loc.first].fee;
+    int64_t b_size = b->m_cluster->m_chunks[b->m_loc.first].size;
+
+    int64_t a_score = a_fee * b_size;
+    int64_t b_score = b_fee * a_size;
+    if (a_score != b_score) {
+        return a_score > b_score;
+    } else if (a->m_cluster != b->m_cluster) {
+        // Equal scores in different clusters; sort by cluster id.
+        return a->m_cluster->m_id < b->m_cluster->m_id;
+        //return a->GetTx().GetHash() < b->GetTx().GetHash();
+    } else if (a->m_loc.first != b->m_loc.first) {
+        // Equal scores in same cluster; sort by chunk index.
+        return a->m_loc.first < b->m_loc.first;
+    } else {
+        // Equal scores in same cluster and chunk; sort by position in chunk.
+        for (auto it = a->m_cluster->m_chunks[a->m_loc.first].txs.begin();
+                it != a->m_cluster->m_chunks[a->m_loc.first].txs.end(); ++it) {
+            if (&(it->get()) == &(*a)) return true;
+            if (&(it->get()) == &(*b)) return false;
+        }
+    }
+    Assume(false); // this should not be reachable.
+    return true;
+}
+
+bool CTxMemPool::CompareMiningScoreWithTopology(const uint256& hasha, const uint256& hashb, bool wtxid)
 {
     /* Return `true` if hasha should be considered sooner than hashb. Namely when:
      *   a is not in the mempool, but b is
-     *   both are in the mempool and a has fewer ancestors than b
-     *   both are in the mempool and a has a higher score than b
+     *   both are in the mempool and a has a higher mining score than b
+     *   both are in the mempool and a appears before b in the same cluster
      */
     LOCK(cs);
     indexed_transaction_set::const_iterator j = wtxid ? get_iter_from_wtxid(hashb) : mapTx.find(hashb);
     if (j == mapTx.end()) return false;
     indexed_transaction_set::const_iterator i = wtxid ? get_iter_from_wtxid(hasha) : mapTx.find(hasha);
     if (i == mapTx.end()) return true;
-    uint64_t counta = i->GetCountWithAncestors();
-    uint64_t countb = j->GetCountWithAncestors();
-    if (counta == countb) {
-        return CompareTxMemPoolEntryByScore()(*i, *j);
-    }
-    return counta < countb;
+
+    return CompareMiningScore(i, j);
 }
 
 namespace {
