@@ -1781,14 +1781,39 @@ uint64_t CTxMemPool::CalculateDescendantMaximum(txiter entry) const {
     return maximum;
 }
 
+void CTxMemPool::CalculateAncestorData(const CTxMemPoolEntry& entry, size_t& ancestor_count, size_t& ancestor_size, CAmount& ancestor_fees) const
+{
+    ancestor_count = 1;
+    ancestor_size = entry.GetTxSize();
+    ancestor_fees = entry.GetModifiedFee();
+    std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef> work_queue;
+
+    WITH_FRESH_EPOCH(m_epoch);
+    for (auto tx : entry.GetMemPoolParentsConst()) {
+        work_queue.push_back(tx);
+        visited(tx);
+    }
+    while (!work_queue.empty()) {
+        auto next_entry = work_queue.back();
+        work_queue.pop_back();
+        ancestor_size += next_entry.get().GetTxSize();
+        ++ancestor_count;
+        ancestor_fees += next_entry.get().GetModifiedFee();
+        for (auto tx : next_entry.get().GetMemPoolParentsConst()) {
+            if (!visited(tx)) work_queue.push_back(tx);
+        }
+    }
+}
+
 void CTxMemPool::GetTransactionAncestry(const uint256& txid, size_t& ancestors, size_t& descendants, size_t* const ancestorsize, CAmount* const ancestorfees) const {
     LOCK(cs);
     auto it = mapTx.find(txid);
     ancestors = descendants = 0;
     if (it != mapTx.end()) {
-        ancestors = it->GetCountWithAncestors();
-        if (ancestorsize) *ancestorsize = it->GetSizeWithAncestors();
-        if (ancestorfees) *ancestorfees = it->GetModFeesWithAncestors();
+        size_t dummysize{0};
+        CAmount dummyfees{0};
+        CalculateAncestorData(*it, ancestors, ancestorsize ? *ancestorsize :
+                dummysize, ancestorfees ? *ancestorfees : dummyfees);
         descendants = CalculateDescendantMaximum(it);
     }
 }
