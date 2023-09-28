@@ -376,6 +376,8 @@ public:
 
     bool CompareMiningScore(txiter a, txiter b) const EXCLUSIVE_LOCKS_REQUIRED(cs);
 
+    void TopoSort(std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef>& to_be_sorted) const;
+
 private:
     typedef std::map<txiter, setEntries, CompareIteratorByHash> cacheMap;
 

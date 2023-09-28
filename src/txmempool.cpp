@@ -1220,6 +1220,58 @@ bool CTxMemPool::CompareMiningScore(txiter a, txiter b) const
     return true;
 }
 
+void CTxMemPool::TopoSort(std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef>& to_be_sorted) const
+{
+    LOCK(cs);
+    std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef> sorted;
+    sorted.reserve(to_be_sorted.size());
+    std::vector<bool> already_added(to_be_sorted.size(), false);
+
+    WITH_FRESH_EPOCH(m_epoch);
+    for (size_t i=0; i<to_be_sorted.size(); ++i) {
+        auto tx = to_be_sorted[i];
+        // Check to see if this is already in the list.
+        if (m_epoch.is_visited(tx.get().m_epoch_marker)) continue;
+
+        // Gather the children for traversal.
+        std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef> work_queue;
+        for (auto child : tx.get().GetMemPoolChildrenConst()) {
+            if (!m_epoch.is_visited(child.get().m_epoch_marker)) {
+                work_queue.push_back(child);
+
+                while (!work_queue.empty()) {
+                    auto next_entry = work_queue.back();
+                    // Check to see if this entry is already added.
+                    if (m_epoch.is_visited(next_entry.get().m_epoch_marker)) {
+                        work_queue.pop_back();
+                        continue;
+                    }
+                    // Otherwise, check to see if all children have been walked.
+                    bool children_visited_already = true;
+                    for (auto child : next_entry.get().GetMemPoolChildrenConst()) {
+                        if (!m_epoch.is_visited(child.get().m_epoch_marker)) {
+                            children_visited_already = false;
+                            work_queue.push_back(child);
+                        }
+                    }
+                    // If children have all been walked, we can remove this entry and
+                    // add it to the list
+                    if (children_visited_already) {
+                        work_queue.pop_back();
+                        sorted.push_back(next_entry);
+                        visited(next_entry);
+                    }
+                }
+            }
+        }
+        // Now that the descendants are added, we can add this entry.
+        sorted.push_back(tx);
+        visited(tx);
+    }
+    std::reverse(sorted.begin(), sorted.end());
+    to_be_sorted.swap(sorted);
+}
+
 bool CTxMemPool::CompareMiningScoreWithTopology(const uint256& hasha, const uint256& hashb, bool wtxid)
 {
     /* Return `true` if hasha should be considered sooner than hashb. Namely when:
@@ -1938,9 +1990,7 @@ void Cluster::Sort(bool reassign_locations)
                 txs.emplace_back(chunk_tx.get());
             }
         }
-        std::sort(txs.begin(), txs.end(), [](const CTxMemPoolEntry::CTxMemPoolEntryRef& a, const CTxMemPoolEntry::CTxMemPoolEntryRef& b) {
-            return a.get().GetCountWithAncestors() < b.get().GetCountWithAncestors();
-        });
+        m_mempool->TopoSort(txs);
     }
     RechunkFromLinearization(txs, reassign_locations);
 }
