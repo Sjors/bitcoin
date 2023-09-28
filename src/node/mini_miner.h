@@ -26,12 +26,12 @@ class MiniMinerMempoolEntry
 // methods can be called without holding that lock.
 
 public:
-    explicit MiniMinerMempoolEntry(CTxMemPool::txiter entry) :
+    explicit MiniMinerMempoolEntry(CTxMemPool::txiter entry, int64_t ancestor_size, CAmount ancestor_fee) :
         fee_individual{entry->GetModifiedFee()},
         tx{entry->GetSharedTx()},
         vsize_individual(entry->GetTxSize()),
-        fee_with_ancestors{entry->GetModFeesWithAncestors()},
-        vsize_with_ancestors(entry->GetSizeWithAncestors())
+        fee_with_ancestors{ancestor_fee},
+        vsize_with_ancestors{ancestor_size}
     { }
 
     CAmount GetModifiedFee() const { return fee_individual; }

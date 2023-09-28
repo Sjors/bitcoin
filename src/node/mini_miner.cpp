@@ -72,7 +72,11 @@ MiniMiner::MiniMiner(const CTxMemPool& mempool, const std::vector<COutPoint>& ou
     // Add every entry to m_entries_by_txid and m_entries, except the ones that will be replaced.
     for (const auto& txiter : cluster) {
         if (!m_to_be_replaced.count(txiter->GetTx().GetHash())) {
-            auto [mapiter, success] = m_entries_by_txid.emplace(txiter->GetTx().GetHash(), MiniMinerMempoolEntry(txiter));
+            size_t ancestor_count{0};
+            size_t ancestor_size{0};
+            CAmount ancestor_fee{0};
+            mempool.CalculateAncestorData(*txiter, ancestor_count, ancestor_size, ancestor_fee);
+            auto [mapiter, success] = m_entries_by_txid.emplace(txiter->GetTx().GetHash(), MiniMinerMempoolEntry(txiter, int64_t(ancestor_size), ancestor_fee));
             m_entries.push_back(mapiter);
         } else {
             auto outpoints_it = m_requested_outpoints_by_txid.find(txiter->GetTx().GetHash());
