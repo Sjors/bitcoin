@@ -328,14 +328,19 @@ static void entryToJSON(const CTxMemPool& pool, UniValue& info, const CTxMemPool
 {
     AssertLockHeld(pool.cs);
 
+    size_t ancestor_size{0};
+    size_t ancestor_count{0};
+    CAmount ancestor_fees{0};
+    pool.CalculateAncestorData(e, ancestor_count, ancestor_size, ancestor_fees);
+
     info.pushKV("vsize", (int)e.GetTxSize());
     info.pushKV("weight", (int)e.GetTxWeight());
     info.pushKV("time", count_seconds(e.GetTime()));
     info.pushKV("height", (int)e.GetHeight());
     info.pushKV("descendantcount", e.GetCountWithDescendants());
     info.pushKV("descendantsize", e.GetSizeWithDescendants());
-    info.pushKV("ancestorcount", e.GetCountWithAncestors());
-    info.pushKV("ancestorsize", e.GetSizeWithAncestors());
+    info.pushKV("ancestorcount", ancestor_count);
+    info.pushKV("ancestorsize", ancestor_size);
     info.pushKV("wtxid", pool.vTxHashes[e.vTxHashesIdx].first.ToString());
     info.pushKV("chunksize", e.m_cluster->m_chunks[e.m_loc.first].size);
     info.pushKV("clusterid", e.m_cluster->m_id);
@@ -343,7 +348,7 @@ static void entryToJSON(const CTxMemPool& pool, UniValue& info, const CTxMemPool
     UniValue fees(UniValue::VOBJ);
     fees.pushKV("base", ValueFromAmount(e.GetFee()));
     fees.pushKV("modified", ValueFromAmount(e.GetModifiedFee()));
-    fees.pushKV("ancestor", ValueFromAmount(e.GetModFeesWithAncestors()));
+    fees.pushKV("ancestor", ValueFromAmount(ancestor_fees));
     fees.pushKV("descendant", ValueFromAmount(e.GetModFeesWithDescendants()));
     fees.pushKV("chunk", ValueFromAmount(e.m_cluster->m_chunks[e.m_loc.first].fee));
     info.pushKV("fees", fees);
