@@ -393,6 +393,7 @@ public:
         sem = other.sem;
         fHaveGrant = other.fHaveGrant;
         other.fHaveGrant = false;
+        // other.sem = nullptr;
     }
 
     CSemaphoreGrant& operator=(CSemaphoreGrant&& other) noexcept
@@ -401,6 +402,7 @@ public:
         sem = other.sem;
         fHaveGrant = other.fHaveGrant;
         other.fHaveGrant = false;
+        // other.sem = nullptr;
         return *this;
     }
 
