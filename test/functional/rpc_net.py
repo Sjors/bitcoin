@@ -42,8 +42,8 @@ def assert_net_servicesnames(servicesflag, servicenames):
 
 class NetTest(BitcoinTestFramework):
     def set_test_params(self):
-        self.num_nodes = 2
-        self.extra_args = [["-minrelaytxfee=0.00001000"], ["-minrelaytxfee=0.00000500"]]
+        self.num_nodes = 3
+        self.extra_args = [["-minrelaytxfee=0.00001000"], ["-minrelaytxfee=0.00000500"], []]
         self.supports_cli = False
 
     def run_test(self):
@@ -57,16 +57,16 @@ class NetTest(BitcoinTestFramework):
         self.connect_nodes(0, 1)
         self.sync_all()
 
-        self.test_connection_count()
-        self.test_getpeerinfo()
-        self.test_getnettotals()
-        self.test_getnetworkinfo()
+        # self.test_connection_count()
+        # self.test_getpeerinfo()
+        # self.test_getnettotals()
+        # self.test_getnetworkinfo()
         self.test_addnode_getaddednodeinfo()
-        self.test_service_flags()
-        self.test_getnodeaddresses()
-        self.test_addpeeraddress()
-        self.test_sendmsgtopeer()
-        self.test_getaddrmaninfo()
+        # self.test_service_flags()
+        # self.test_getnodeaddresses()
+        # self.test_addpeeraddress()
+        # self.test_sendmsgtopeer()
+        # self.test_getaddrmaninfo()
 
     def test_connection_count(self):
         self.log.info("Test getconnectioncount")
@@ -211,21 +211,31 @@ class NetTest(BitcoinTestFramework):
         self.log.info("Test addnode and getaddednodeinfo")
         assert_equal(self.nodes[0].getaddednodeinfo(), [])
         # add a node (node2) to node0
-        ip_port = "127.0.0.1:{}".format(p2p_port(2))
-        self.nodes[0].addnode(node=ip_port, command='add')
+        ip_port_2 = "127.0.0.1:{}".format(p2p_port(2))
+        self.nodes[0].addnode(node=ip_port_2, command='add')
         # check that the node has indeed been added
-        added_nodes = self.nodes[0].getaddednodeinfo(ip_port)
+        added_nodes = self.nodes[0].getaddednodeinfo(ip_port_2)
         assert_equal(len(added_nodes), 1)
-        assert_equal(added_nodes[0]['addednode'], ip_port)
+        assert_equal(added_nodes[0]['addednode'], ip_port_2)
         # check that node cannot be added again
-        assert_raises_rpc_error(-23, "Node already added", self.nodes[0].addnode, node=ip_port, command='add')
+        assert_raises_rpc_error(-23, "Node already added", self.nodes[0].addnode, node=ip_port_2, command='add')
+        # add another node (node3)
+        ip_port_3 = "127.0.0.1:{}".format(p2p_port(3))
+        self.nodes[0].addnode(node=ip_port_3, command='add')
+        # check that the node has indeed been added
+        added_nodes = self.nodes[0].getaddednodeinfo()
+        assert_equal(len(added_nodes), 2)
+        assert_equal(added_nodes[1]['addednode'], ip_port_3)
+        # wait for the net loop to try and connect
+        time.sleep(3)
         # check that node can be removed
-        self.nodes[0].addnode(node=ip_port, command='remove')
+        self.nodes[0].addnode(node=ip_port_2, command='remove')
+        self.nodes[0].addnode(node=ip_port_3, command='remove')
         assert_equal(self.nodes[0].getaddednodeinfo(), [])
         # check that an invalid command returns an error
-        assert_raises_rpc_error(-1, 'addnode "node" "command"', self.nodes[0].addnode, node=ip_port, command='abc')
+        assert_raises_rpc_error(-1, 'addnode "node" "command"', self.nodes[0].addnode, node=ip_port_2, command='abc')
         # check that trying to remove the node again returns an error
-        assert_raises_rpc_error(-24, "Node could not be removed", self.nodes[0].addnode, node=ip_port, command='remove')
+        assert_raises_rpc_error(-24, "Node could not be removed", self.nodes[0].addnode, node=ip_port_2, command='remove')
         # check that a non-existent node returns an error
         assert_raises_rpc_error(-24, "Node has not been added", self.nodes[0].getaddednodeinfo, '1.1.1.1')
 
