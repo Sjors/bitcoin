@@ -921,32 +921,8 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     }
 
     auto ancestors{m_pool.CalculateMemPoolAncestors(*entry, maybe_rbf_limits)};
-    if (!ancestors) {
-        // If CalculateMemPoolAncestors fails second time, we want the original error string.
-        // Contracting/payment channels CPFP carve-out:
-        // If the new transaction is relatively small (up to 40k weight)
-        // and has at most one ancestor (ie ancestor limit of 2, including
-        // the new transaction), allow it if its parent has exactly the
-        // descendant limit descendants.
-        //
-        // This allows protocols which rely on distrusting counterparties
-        // being able to broadcast descendants of an unconfirmed transaction
-        // to be secure by simply only having two immediately-spendable
-        // outputs - one for each counterparty. For more info on the uses for
-        // this, see https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2018-November/016518.html
-        CTxMemPool::Limits cpfp_carve_out_limits{
-            .ancestor_count = 2,
-            .ancestor_size_vbytes = maybe_rbf_limits.ancestor_size_vbytes,
-            .descendant_count = maybe_rbf_limits.descendant_count + 1,
-            .descendant_size_vbytes = maybe_rbf_limits.descendant_size_vbytes + EXTRA_DESCENDANT_TX_SIZE_LIMIT,
-        };
-        const auto error_message{util::ErrorString(ancestors).original};
-        if (ws.m_vsize > EXTRA_DESCENDANT_TX_SIZE_LIMIT) {
-            return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "too-long-mempool-chain", error_message);
-        }
-        ancestors = m_pool.CalculateMemPoolAncestors(*entry, cpfp_carve_out_limits);
-        if (!ancestors) return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "too-long-mempool-chain", error_message);
-    }
+
+    if (!ancestors) return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "too-long-mempool-chain", util::ErrorString(ancestors).original);
 
     ws.m_ancestors = *ancestors;
 
