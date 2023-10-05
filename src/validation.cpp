@@ -3748,6 +3748,7 @@ bool ChainstateManager::AcceptBlockHeader(const CBlockHeader& block, BlockValida
 
     // Check for duplicate
     uint256 hash = block.GetHash();
+    LogPrintf("test", hash.ToString());
     BlockMap::iterator miSelf{m_blockman.m_block_index.find(hash)};
     if (hash != GetConsensus().hashGenesisBlock) {
         if (miSelf != m_blockman.m_block_index.end()) {
