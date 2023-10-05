@@ -1086,7 +1086,7 @@ bool MemPoolAccept::Finalize(const ATMPArgs& args, Workspace& ws)
     bool validForFeeEstimation = !bypass_limits && !args.m_package_submission && IsCurrentForFeeEstimation(m_active_chainstate) && m_pool.HasNoInputsOf(tx);
 
     // Store transaction in memory
-    m_pool.addUnchecked(*entry, ws.m_ancestors, validForFeeEstimation);
+    m_pool.addUnchecked(*entry, validForFeeEstimation);
 
     // trim mempool and check if tx was trimmed
     // If we are validating a package, don't trim here because we could evict a previous transaction
