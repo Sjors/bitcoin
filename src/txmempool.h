@@ -220,64 +220,58 @@ struct TxMempoolInfo
  * requirements as defined in doc/policy/mempool-replacements.md.
  * - a non-standard transaction.
  *
- * CTxMemPool::mapTx, and CTxMemPoolEntry bookkeeping:
+ * CTxMemPool::mapTx, CTxMemPoolEntry, and CTxMemPool::m_cluster_map
+ * bookkeeping:
  *
- * mapTx is a boost::multi_index that sorts the mempool on 5 criteria:
+ * mapTx is a boost::multi_index that sorts the mempool on 3 criteria:
  * - transaction hash (txid)
  * - witness-transaction hash (wtxid)
- * - descendant feerate [we use max(feerate of tx, feerate of tx with all descendants)]
  * - time in mempool
- * - ancestor feerate [we use min(feerate of tx, feerate of tx with all unconfirmed ancestors)]
  *
- * Note: the term "descendant" refers to in-mempool transactions that depend on
- * this one, while "ancestor" refers to in-mempool transactions that a given
- * transaction depends on.
+ * We additionally partition the mempool transactions into clusters, in which
+ * any two transactions that have a parent/child relationship are assigned to
+ * the same cluster. Clusters are stored in m_cluster_map. Every
+ * CTxMemPoolEntry has a reference to the cluster to which it belongs, along
+ * with a location within the cluster. Clusters themselves are sorted
+ * ("linearized") as optimally as we are able to maximize mining income, using
+ * algorithms implemented in cluster_linearize.h.
  *
- * In order for the feerate sort to remain correct, we must update transactions
- * in the mempool when new descendants arrive.  To facilitate this, we track
- * the set of in-mempool direct parents and direct children in mapLinks.  Within
- * each CTxMemPoolEntry, we track the size and fees of all descendants.
+ * To facilitate graph traversal algorithms, we cache within each
+ * CTxMemPoolEntry the set of in-mempool direct parents and children.
  *
  * Usually when a new transaction is added to the mempool, it has no in-mempool
  * children (because any such children would be an orphan).  So in
  * addUnchecked(), we:
  * - update a new entry's setMemPoolParents to include all in-mempool parents
  * - update the new entry's direct parents to include the new tx as a child
- * - update all ancestors of the transaction to include the new tx's size/fee
  *
  * When a transaction is removed from the mempool, we must:
  * - update all in-mempool parents to not track the tx in setMemPoolChildren
- * - update all ancestors to not include the tx's size/fees in descendant state
  * - update all in-mempool children to not include it as a parent
  *
- * These happen in UpdateForRemoveFromMempool().  (Note that when removing a
- * transaction along with its descendants, we must calculate that set of
- * transactions to be removed before doing the removal, or else the mempool can
- * be in an inconsistent state where it's impossible to walk the ancestors of
- * a transaction.)
+ * These happen in UpdateForRemoveFromMempool().
  *
  * In the event of a reorg, the assumption that a newly added tx has no
  * in-mempool children is false.  In particular, the mempool is in an
  * inconsistent state while new transactions are being added, because there may
- * be descendant transactions of a tx coming from a disconnected block that are
+ * be child transactions of a tx coming from a disconnected block that are
  * unreachable from just looking at transactions in the mempool (the linking
  * transactions may also be in the disconnected block, waiting to be added).
  * Because of this, there's not much benefit in trying to search for in-mempool
  * children in addUnchecked().  Instead, in the special case of transactions
  * being added from a disconnected block, we require the caller to clean up the
- * state, to account for in-mempool, out-of-block descendants for all the
+ * state, to account for in-mempool, out-of-block children for all the
  * in-block transactions by calling UpdateTransactionsFromBlock().  Note that
  * until this is called, the mempool state is not consistent, and in particular
- * mapLinks may not be correct (and therefore functions like
+ * the cached parents/children stored in CTxMemPoolEntry are not correct (so
  * CalculateMemPoolAncestors() and CalculateDescendants() that rely
  * on them to walk the mempool are not generally safe to use).
  *
  * Computational limits:
  *
- * Updating all in-mempool ancestors of a newly added transaction can be slow,
- * if no bound exists on how many in-mempool ancestors there may be.
- * CalculateMemPoolAncestors() takes configurable limits that are designed to
- * prevent these calculations from being too CPU intensive.
+ * Optimizing a cluster for mining revenue can be CPU intensive, so the mempool
+ * should operate in a context where the maximum number of transactions in a
+ * cluster is bounded.
  *
  */
 class CTxMemPool
@@ -440,10 +434,8 @@ public:
      */
     void check(const CCoinsViewCache& active_coins_tip, int64_t spendheight) const EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
-    // addUnchecked must updated state for all ancestors of a given transaction,
-    // to track size/count of descendant transactions.  First version of
-    // addUnchecked can be used to have it call CalculateMemPoolAncestors(), and
-    // then invoke the second version.
+    // First version of addUnchecked can be used to have it call
+    // CalculateMemPoolAncestors(), and then invoke the second version.
     // Note that addUnchecked is ONLY called from ATMP outside of tests
     // and any other callers may break wallet's in-mempool tracking (due to
     // lack of CValidationInterface::TransactionAddedToMempool callbacks).
@@ -511,8 +503,6 @@ public:
      *  If a transaction is in this set, then all in-mempool descendants must
      *  also be in the set, unless this transaction is being removed for being
      *  in a block.
-     *  Set updateDescendants to true when removing a tx that was in a block, so
-     *  that any in-mempool descendants have their ancestor state updated.
      */
     void RemoveStaged(setEntries& stage, bool updateDescendants, MemPoolRemovalReason reason) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
@@ -524,11 +514,9 @@ public:
      * disconnected block back to the mempool, new mempool entries may have
      * children in the mempool (which is generally not the case when otherwise
      * adding transactions).
-     *  @post updated descendant state for descendants of each transaction in
-     *        vHashesToUpdate (excluding any child transactions present in
-     *        vHashesToUpdate, which are already accounted for). Updated state
-     *        includes add fee/size information for such descendants to the
-     *        parent and updated ancestor state to include the parent.
+     *  @post parent/children state in all CTxMemPoolEntry is updated, and
+     *        clusters are recomputed and re-sorted. Too-large clusters are
+     *        trimmed.
      *
      * @param[in] vHashesToUpdate          The set of txids from the
      *     disconnected block that have been accepted back into the mempool.
@@ -589,6 +577,14 @@ public:
 
     void CalculateParents(CTxMemPoolEntry &entry) const EXCLUSIVE_LOCKS_REQUIRED(cs);
 
+    /**
+     * Temporarily construct the cluster that would correspond to a
+     * hypothetical new mempool transaction ("entry"). Take into account the
+     * removal of all transactions in "all_conflicts" for the purposes of
+     * determining which transactions would be in the hypothetical cluster.
+     * Sort the cluster as well so that the mining score of the transaction can
+     * be determined by the caller.
+     */
     bool BuildClusterForTransaction(CTxMemPoolEntry& entry, const setEntries& all_conflicts, const Limits& limits, Cluster& temp_cluster) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     util::Result<CFeeRate> CalculateMiningScoreOfReplacementTx(CTxMemPoolEntry& entry, CAmount modified_fee,
@@ -601,11 +597,7 @@ public:
     std::vector<txiter> GatherClusters(const std::vector<uint256>& txids) const EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     /** Calculate all in-mempool ancestors of a set of transactions not already in the mempool and
-     * check ancestor and descendant limits. Heuristics are used to estimate the ancestor and
-     * descendant count of all entries if the package were to be added to the mempool.  The limits
-     * are applied to the union of all package transactions. For example, if the package has 3
-     * transactions and limits.ancestor_count = 25, the union of all 3 sets of ancestors (including the
-     * transactions themselves) must be <= 22.
+     * check cluster limits.
      * @param[in]       package                 Transaction package being evaluated for acceptance
      *                                          to mempool. The transactions need not be direct
      *                                          ancestors/descendants of each other.
