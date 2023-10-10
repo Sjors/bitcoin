@@ -3758,7 +3758,7 @@ bool ChainstateManager::AcceptBlockHeader(const CBlockHeader& block, BlockValida
             if (pindex->nStatus & BLOCK_FAILED_MASK) {
                 LogPrint(BCLog::VALIDATION, "%s: block %s is marked invalid\n", __func__, header_hash.ToString());
                 return state.Invalid(BlockValidationResult::BLOCK_CACHED_INVALID, "duplicate");
-            }
+            }            
             return true;
         }
 
@@ -3822,6 +3822,8 @@ bool ChainstateManager::AcceptBlockHeader(const CBlockHeader& block, BlockValida
                 }
             }
         }
+
+
     }
     if (!min_pow_checked) {
         LogPrint(BCLog::VALIDATION, "%s: not adding new block header %s, missing anti-dos proof-of-work validation\n", __func__, header_hash.ToString());
@@ -3831,6 +3833,8 @@ bool ChainstateManager::AcceptBlockHeader(const CBlockHeader& block, BlockValida
 
     if (ppindex)
         *ppindex = pindex;
+
+    LogPrintf("Saw new header hash=%s\n", header_hash.ToString());
 
     return true;
 }
