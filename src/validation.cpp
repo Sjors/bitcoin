@@ -3745,7 +3745,7 @@ static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& stat
 bool ChainstateManager::AcceptBlockHeader(const CBlockHeader& block, BlockValidationState& state, CBlockIndex** ppindex, bool min_pow_checked)
 {
     AssertLockHeld(cs_main);
-
+    
     // Check for duplicate
     uint256 header_hash = block.GetHash();
     BlockMap::iterator miSelf{m_blockman.m_block_index.find(header_hash)};
@@ -3828,6 +3828,7 @@ bool ChainstateManager::AcceptBlockHeader(const CBlockHeader& block, BlockValida
         return state.Invalid(BlockValidationResult::BLOCK_HEADER_LOW_WORK, "too-little-chainwork");
     }
     CBlockIndex* pindex{m_blockman.AddToBlockIndex(block, m_best_header)};
+    LogPrintf("Saw new header hash=%s\n", header_hash.ToString());
 
     if (ppindex)
         *ppindex = pindex;
