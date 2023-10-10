@@ -2490,8 +2490,7 @@ Use up and down arrows to navigate history, and %2 to clear screen.
 Use %3 and %4 to increase or decrease the font size.
 Type %5 for an overview of available commands.
 For more information on using this console, type %6.
-
-%7WARNING: Scammers have been active, telling users to type commands here, stealing their wallet contents. Do not use this console without fully understanding the ramifications of a command.%8</source>
+    </source>
         <extracomment>RPC console welcome message. Placeholders %7 and %8 are style tags for the warning content, and they are not space separated from the rest of the text intentionally.</extracomment>
         <translation type="unfinished">Welkom bij de %1 RPC console.
 Gebruik pijl omhoog en omlaag om geschiedenis te navigeren, en %2 om het scherm te legen.
