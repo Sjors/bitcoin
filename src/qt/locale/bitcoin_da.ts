@@ -2420,7 +2420,7 @@ Use %3 and %4 to increase or decrease the font size.
 Type %5 for an overview of available commands.
 For more information on using this console, type %6.
 
-%7WARNING: Scammers have been active, telling users to type commands here, stealing their wallet contents. Do not use this console without fully understanding the ramifications of a command.%8</source>
+</source>
         <extracomment>RPC console welcome message. Placeholders %7 and %8 are style tags for the warning content, and they are not space separated from the rest of the text intentionally.</extracomment>
         <translation type="unfinished">Velkommen til %1 RPC-konsollen.
 Brug op- og nedpilene til at navigere i historikken og %2 til at rydde skærmen.
@@ -2428,7 +2428,7 @@ Brug %3 og %4 til at øge eller formindske skriftstørrelsen.
 Skriv %5 for at få en oversigt over tilgængelige kommandoer.
 For mere information om brug af denne konsol, skriv %6.
 
-%7 ADVARSEL: Svindlere har været aktive og bedt brugerne om at skrive kommandoer her og stjæle deres tegnebogsindhold. Brug ikke denne konsol uden fuldt ud at forstå konsekvenserne af en kommando.%8</translation>
+</translation>
     </message>
     <message>
         <source>Executing…</source>
