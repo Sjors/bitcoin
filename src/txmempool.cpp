@@ -782,24 +782,49 @@ void CTxMemPool::removeForBlock(const std::vector<CTransactionRef>& vtx, unsigne
 {
     AssertLockHeld(cs);
     std::vector<const CTxMemPoolEntry*> entries;
+    std::vector<txiter> entry_iters;
     for (const auto& tx : vtx)
     {
         uint256 hash = tx->GetHash();
 
         indexed_transaction_set::iterator i = mapTx.find(hash);
-        if (i != mapTx.end())
+        if (i != mapTx.end()) {
             entries.push_back(&*i);
+            entry_iters.push_back(i);
+        }
     }
     // Before the txs in the new block have been removed from the mempool, update policy estimates
     if (minerPolicyEstimator) {minerPolicyEstimator->processBlock(nBlockHeight, entries);}
-    for (const auto& tx : vtx)
+    static std::vector<Cluster *> cluster_clean_up;
+    cluster_clean_up.clear();
     {
-        txiter it = mapTx.find(tx->GetHash());
-        if (it != mapTx.end()) {
-            setEntries stage;
-            stage.insert(it);
-            RemoveStaged(stage, true, MemPoolRemovalReason::BLOCK);
+        WITH_FRESH_EPOCH(m_epoch);
+        for (auto it : entry_iters)
+        {
+            bool delete_now{false};
+            Cluster *cluster = it->m_cluster;
+            if (!visited(cluster)) {
+                if (cluster->m_tx_count > 1) {
+                    cluster_clean_up.push_back(cluster);
+                } else {
+                    delete_now = true;
+                }
+                cachedInnerUsage -= cluster->GetMemoryUsage();
+            }
+            RemoveSingleTxForBlock(it);
+            if (delete_now) {
+                m_cluster_map.erase(cluster->m_id);
+            }
         }
+    }
+    for (auto c : cluster_clean_up) {
+        if (c->m_tx_count == 0) {
+            m_cluster_map.erase(c->m_id);
+        } else {
+            RecalculateClusterAndMaybeSort(c, true);
+        }
+    }
+    for (const auto& tx : vtx) {
         removeConflicts(*tx);
         ClearPrioritisation(tx->GetHash());
     }
@@ -1312,6 +1337,14 @@ void CTxMemPool::RemoveChunkForEviction(Cluster *cluster, std::list<CTxMemPoolEn
     cachedInnerUsage += cluster->GetMemoryUsage();
     // Note: at this point the clusters will still be sorted, but they may need
     // to be split.
+}
+
+void CTxMemPool::RemoveSingleTxForBlock(txiter it)
+{
+    UpdateParentsOf(false, it);
+    UpdateChildrenForRemoval(it);
+
+    removeUnchecked(it, MemPoolRemovalReason::BLOCK);
 }
 
 void CTxMemPool::RemoveStaged(setEntries &stage, bool updateDescendants, MemPoolRemovalReason reason) {

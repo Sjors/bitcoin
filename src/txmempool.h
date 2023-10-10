@@ -498,6 +498,7 @@ public:
      *  in a block.
      */
     void RemoveStaged(setEntries& stage, bool updateDescendants, MemPoolRemovalReason reason) EXCLUSIVE_LOCKS_REQUIRED(cs);
+    void RemoveSingleTxForBlock(txiter it) EXCLUSIVE_LOCKS_REQUIRED(cs);
 
     // Remove the given chunk (guaranteed to be last in the cluster)
     // Leave the resulting cluster otherwise unchanged (ie don't repartition/re-sort).
