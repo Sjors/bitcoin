@@ -156,11 +156,7 @@ void CTxMemPool::UpdateTransactionsFromBlock(const std::vector<uint256>& vHashes
     }
 }
 
-util::Result<CTxMemPool::setEntries> CTxMemPool::CalculateAncestorsAndCheckLimits(
-    int64_t entry_size,
-    size_t entry_count,
-    CTxMemPoolEntry::Parents& staged_ancestors,
-    const Limits& limits) const
+util::Result<CTxMemPool::setEntries> CTxMemPool::CalculateAncestors(CTxMemPoolEntry::Parents& staged_ancestors) const
 {
     setEntries ancestors;
 
@@ -203,11 +199,7 @@ bool CTxMemPool::CheckPackageLimits(const Package& package,
         errString = util::ErrorString(cluster_result).original;
         return false;
     }
-    // When multiple transactions are passed in, the ancestors and descendants of all transactions
-    // considered together must be within limits even if they are not interdependent. This may be
-    // stricter than the limits for each individual transaction.
-    const auto ancestors{CalculateAncestorsAndCheckLimits(total_vsize, package.size(),
-                                                          staged_ancestors, m_limits)};
+    const auto ancestors{CalculateAncestors(staged_ancestors)};
     // It's possible to overestimate the ancestor/descendant totals.
     if (!ancestors.has_value()) errString = "possibly " + util::ErrorString(ancestors).original;
     return ancestors.has_value();
@@ -314,7 +306,6 @@ util::Result<bool> CTxMemPool::CheckClusterSizeLimit(int64_t entry_size, size_t 
 
 util::Result<CTxMemPool::setEntries> CTxMemPool::CalculateMemPoolAncestors(
     const CTxMemPoolEntry &entry,
-    const Limits& limits,
     bool fSearchForParents /* = true */) const
 {
     CTxMemPoolEntry::Parents staged_ancestors;
@@ -337,17 +328,15 @@ util::Result<CTxMemPool::setEntries> CTxMemPool::CalculateMemPoolAncestors(
         staged_ancestors = it->GetMemPoolParentsConst();
     }
 
-    return CalculateAncestorsAndCheckLimits(entry.GetTxSize(), /*entry_count=*/1, staged_ancestors,
-                                            limits);
+    return CalculateAncestors(staged_ancestors);
 }
 
 CTxMemPool::setEntries CTxMemPool::AssumeCalculateMemPoolAncestors(
     std::string_view calling_fn_name,
     const CTxMemPoolEntry &entry,
-    const Limits& limits,
     bool fSearchForParents /* = true */) const
 {
-    auto result{CalculateMemPoolAncestors(entry, limits, fSearchForParents)};
+    auto result{CalculateMemPoolAncestors(entry, fSearchForParents)};
     if (!Assume(result)) {
         LogPrintLevel(BCLog::MEMPOOL, BCLog::Level::Error, "%s: CalculateMemPoolAncestors failed unexpectedly, continuing with empty ancestor set (%s)\n",
                       calling_fn_name, util::ErrorString(result).original);
