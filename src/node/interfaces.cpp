@@ -705,13 +705,9 @@ public:
         const CTxMemPool::Limits& limits{m_node.mempool->m_limits};
         LOCK(m_node.mempool->cs);
         auto ancestors = m_node.mempool->CalculateMemPoolAncestors(entry);
-        if (ancestors.has_value()) {
-            CTxMemPoolEntry::Parents parents;
-            for (auto ancestor : *ancestors) parents.insert(*ancestor);
-            return m_node.mempool->CheckClusterSizeLimit(entry.GetTxSize(), 1, limits, parents).has_value();
-        } else {
-            return false;
-        }
+        CTxMemPoolEntry::Parents parents;
+        for (auto ancestor : ancestors) parents.insert(*ancestor);
+        return m_node.mempool->CheckClusterSizeLimit(entry.GetTxSize(), 1, limits, parents).has_value();
     }
     CFeeRate estimateSmartFee(int num_blocks, bool conservative, FeeCalculation* calc) override
     {

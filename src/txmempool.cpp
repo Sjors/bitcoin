@@ -156,7 +156,7 @@ void CTxMemPool::UpdateTransactionsFromBlock(const std::vector<uint256>& vHashes
     }
 }
 
-util::Result<CTxMemPool::setEntries> CTxMemPool::CalculateAncestors(CTxMemPoolEntry::Parents& staged_ancestors) const
+CTxMemPool::setEntries CTxMemPool::CalculateAncestors(CTxMemPoolEntry::Parents& staged_ancestors) const
 {
     setEntries ancestors;
 
@@ -199,10 +199,7 @@ bool CTxMemPool::CheckPackageLimits(const Package& package,
         errString = util::ErrorString(cluster_result).original;
         return false;
     }
-    const auto ancestors{CalculateAncestors(staged_ancestors)};
-    // It's possible to overestimate the ancestor/descendant totals.
-    if (!ancestors.has_value()) errString = "possibly " + util::ErrorString(ancestors).original;
-    return ancestors.has_value();
+    return true;
 }
 
 void CTxMemPool::CalculateParents(CTxMemPoolEntry &entry) const
@@ -304,7 +301,7 @@ util::Result<bool> CTxMemPool::CheckClusterSizeLimit(int64_t entry_size, size_t 
     return true;
 }
 
-util::Result<CTxMemPool::setEntries> CTxMemPool::CalculateMemPoolAncestors(
+CTxMemPool::setEntries CTxMemPool::CalculateMemPoolAncestors(
     const CTxMemPoolEntry &entry,
     bool fSearchForParents /* = true */) const
 {
@@ -329,19 +326,6 @@ util::Result<CTxMemPool::setEntries> CTxMemPool::CalculateMemPoolAncestors(
     }
 
     return CalculateAncestors(staged_ancestors);
-}
-
-CTxMemPool::setEntries CTxMemPool::AssumeCalculateMemPoolAncestors(
-    std::string_view calling_fn_name,
-    const CTxMemPoolEntry &entry,
-    bool fSearchForParents /* = true */) const
-{
-    auto result{CalculateMemPoolAncestors(entry, fSearchForParents)};
-    if (!Assume(result)) {
-        LogPrintLevel(BCLog::MEMPOOL, BCLog::Level::Error, "%s: CalculateMemPoolAncestors failed unexpectedly, continuing with empty ancestor set (%s)\n",
-                      calling_fn_name, util::ErrorString(result).original);
-    }
-    return std::move(result).value_or(CTxMemPool::setEntries{});
 }
 
 util::Result<CFeeRate> CTxMemPool::CalculateMiningScoreOfReplacementTx(CTxMemPoolEntry& entry, CAmount modified_fee, const setEntries& all_conflicts, const Limits& limits)
