@@ -67,7 +67,7 @@ std::optional<std::string> GetEntriesForConflicts(const CTransaction& tx,
         }
         // The cluster count limit ensures that we won't do too much work on a
         // single invocation of this function.
-        pool.CalculateDescendants(it, all_conflicts);
+        pool.CalculateDescendantsSlow(it, all_conflicts);
     }
     if (all_conflicts.size() > MAX_REPLACEMENT_CANDIDATES) {
         // Rule #4: don't consider replacing more than MAX_REPLACEMENT_CANDIDATES
