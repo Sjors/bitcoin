@@ -704,7 +704,7 @@ public:
         CTxMemPoolEntry entry(tx, 0, 0, 0, 0, false, 0, lp);
         const CTxMemPool::Limits& limits{m_node.mempool->m_limits};
         LOCK(m_node.mempool->cs);
-        auto ancestors = m_node.mempool->CalculateMemPoolAncestors(entry);
+        auto ancestors = m_node.mempool->CalculateMemPoolAncestors(entry, true);
         CTxMemPoolEntry::Parents parents;
         for (auto ancestor : ancestors) parents.insert(*ancestor);
         return m_node.mempool->CheckClusterSizeLimit(entry.GetTxSize(), 1, limits, parents).has_value();

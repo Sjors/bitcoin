@@ -156,24 +156,26 @@ void CTxMemPool::UpdateTransactionsFromBlock(const std::vector<uint256>& vHashes
     }
 }
 
-CTxMemPool::setEntries CTxMemPool::CalculateAncestors(CTxMemPoolEntry::Parents& staged_ancestors) const
+CTxMemPool::Entries CTxMemPool::CalculateAncestors(const Entries& parents) const
 {
-    setEntries ancestors;
+    Entries ancestors{}, work_queue{};
 
-    while (!staged_ancestors.empty()) {
-        const CTxMemPoolEntry& stage = staged_ancestors.begin()->get();
-        txiter stageit = mapTx.iterator_to(stage);
+    WITH_FRESH_EPOCH(m_epoch);
+    for (auto p : parents) {
+        if (!visited(p)) {
+            work_queue.push_back(p);
+        }
+    }
 
-        ancestors.insert(stageit);
-        staged_ancestors.erase(stage);
+    while (!work_queue.empty()) {
+        auto it = work_queue.back();
+        work_queue.pop_back();
+        ancestors.push_back(it);
 
-        const CTxMemPoolEntry::Parents& parents = stageit->GetMemPoolParentsConst();
-        for (const CTxMemPoolEntry& parent : parents) {
-            txiter parent_it = mapTx.iterator_to(parent);
-
-            // If this is a new ancestor, add it.
-            if (ancestors.count(parent_it) == 0) {
-                staged_ancestors.insert(parent);
+        for (auto parent : it->GetMemPoolParentsConst()) {
+            auto parent_it = mapTx.iterator_to(parent);
+            if (!visited(parent_it)) {
+                work_queue.push_back(parent_it);
             }
         }
     }
@@ -202,14 +204,19 @@ bool CTxMemPool::CheckPackageLimits(const Package& package,
     return true;
 }
 
-void CTxMemPool::CalculateParents(CTxMemPoolEntry &entry) const
+CTxMemPool::Entries CTxMemPool::CalculateParents(const CTxMemPoolEntry &entry) const
 {
-    for (const CTxIn &txin : entry.GetTx().vin) {
-        std::optional<txiter> piter = GetIter(txin.prevout.hash);
-        if (piter) {
-            entry.GetMemPoolParents().insert(**piter);
+    Entries ret;
+    {
+        WITH_FRESH_EPOCH(m_epoch);
+        for (const CTxIn &txin : entry.GetTx().vin) {
+            std::optional<txiter> piter = GetIter(txin.prevout.hash);
+            if (piter && !visited(*piter)) {
+                ret.push_back(*piter);
+            }
         }
     }
+    return ret;
 }
 
 bool CTxMemPool::BuildClusterForTransaction(CTxMemPoolEntry& entry, const setEntries& all_conflicts, const Limits& limits, Cluster& temp_cluster)
@@ -224,8 +231,15 @@ bool CTxMemPool::BuildClusterForTransaction(CTxMemPoolEntry& entry, const setEnt
 
     // Start by calculating the parents of this transaction, and adding them to the work queue.
     {
+        Entries parents = CalculateParents(entry);
+        // The parents need to be in the CTxMemPoolEntry for the Sort() below
+        // to work.
+        for (auto it : parents) {
+            entry.GetMemPoolParents().insert(*it);
+        }
+
         WITH_FRESH_EPOCH(m_epoch);
-        CalculateParents(entry);
+
         for (auto parent_iter : entry.GetMemPoolParentsConst()) {
             work_queue.push_back(parent_iter);
             visited(parent_iter.get());
@@ -301,31 +315,29 @@ util::Result<bool> CTxMemPool::CheckClusterSizeLimit(int64_t entry_size, size_t 
     return true;
 }
 
-CTxMemPool::setEntries CTxMemPool::CalculateMemPoolAncestors(
+CTxMemPool::Entries CTxMemPool::CalculateMemPoolAncestors(const CTxMemPoolEntry& entry, bool fSearchForParents) const
+{
+    Entries parents;
+    if (fSearchForParents) {
+        parents = CalculateParents(entry);
+    } else {
+        for (auto p : entry.GetMemPoolParentsConst()) {
+            parents.push_back(mapTx.iterator_to(p.get()));
+        }
+    }
+
+    return CalculateAncestors(parents);
+}
+
+CTxMemPool::setEntries CTxMemPool::CalculateMemPoolAncestorsSlow(
     const CTxMemPoolEntry &entry,
     bool fSearchForParents /* = true */) const
 {
-    CTxMemPoolEntry::Parents staged_ancestors;
-    const CTransaction &tx = entry.GetTx();
+    auto ancestors = CalculateMemPoolAncestors(entry, fSearchForParents);
 
-    if (fSearchForParents) {
-        // Get parents of this transaction that are in the mempool
-        // GetMemPoolParents() is only valid for entries in the mempool, so we
-        // iterate mapTx to find parents.
-        for (unsigned int i = 0; i < tx.vin.size(); i++) {
-            std::optional<txiter> piter = GetIter(tx.vin[i].prevout.hash);
-            if (piter) {
-                staged_ancestors.insert(**piter);
-            }
-        }
-    } else {
-        // If we're not searching for parents, we require this to already be an
-        // entry in the mempool and use the entry's cached parents.
-        txiter it = mapTx.iterator_to(entry);
-        staged_ancestors = it->GetMemPoolParentsConst();
-    }
-
-    return CalculateAncestors(staged_ancestors);
+    setEntries ret;
+    ret.insert(ancestors.begin(), ancestors.end());
+    return ret;
 }
 
 util::Result<CFeeRate> CTxMemPool::CalculateMiningScoreOfReplacementTx(CTxMemPoolEntry& entry, CAmount modified_fee, const setEntries& all_conflicts, const Limits& limits)
