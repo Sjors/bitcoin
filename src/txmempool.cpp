@@ -571,36 +571,46 @@ void CTxMemPool::removeUnchecked(txiter it, MemPoolRemovalReason reason)
 // can save time by not iterating over those entries.
 void CTxMemPool::CalculateDescendants(txiter entryit, setEntries& setDescendants) const
 {
-    setEntries stage;
-    if (setDescendants.count(entryit) == 0) {
-        stage.insert(entryit);
-    }
-    // Traverse down the children of entry, only adding children that are not
-    // accounted for in setDescendants already (because those children have either
-    // already been walked, or will be walked in this iteration).
-    while (!stage.empty()) {
-        txiter it = *stage.begin();
-        setDescendants.insert(it);
-        stage.erase(it);
+    auto descendants = CalculateDescendants({entryit});
+    setDescendants.insert(descendants.begin(), descendants.end());
+}
 
-        const CTxMemPoolEntry::Children& children = it->GetMemPoolChildrenConst();
-        for (const CTxMemPoolEntry& child : children) {
-            txiter childiter = mapTx.iterator_to(child);
-            if (!setDescendants.count(childiter)) {
-                stage.insert(childiter);
+CTxMemPool::Entries CTxMemPool::CalculateDescendants(Entries txs) const
+{
+    Entries result{}, work_queue{};
+
+    WITH_FRESH_EPOCH(m_epoch);
+    for (auto it: txs) {
+        if (!visited(it)) {
+            work_queue.push_back(it);
+        }
+    }
+
+    while (!work_queue.empty()) {
+        auto it = work_queue.back();
+        work_queue.pop_back();
+        result.push_back(it);
+        for (auto& child: it->GetMemPoolChildrenConst()) {
+            if (!visited(child)) {
+                work_queue.push_back(mapTx.iterator_to(child));
             }
         }
     }
+    return result;
 }
 
 void CTxMemPool::removeRecursive(const CTransaction &origTx, MemPoolRemovalReason reason)
 {
     // Remove transaction from memory pool
     AssertLockHeld(cs);
-        setEntries txToRemove;
-        txiter origit = mapTx.find(origTx.GetHash());
+    Entries txToRemove;
+    txiter origit = mapTx.find(origTx.GetHash());
+
+    {
+        WITH_FRESH_EPOCH(m_epoch);
         if (origit != mapTx.end()) {
-            txToRemove.insert(origit);
+            visited(origit);
+            txToRemove.push_back(origit);
         } else {
             // When recursively removing but origTx isn't in the mempool
             // be sure to remove any children that are in the pool. This can
@@ -612,15 +622,18 @@ void CTxMemPool::removeRecursive(const CTransaction &origTx, MemPoolRemovalReaso
                     continue;
                 txiter nextit = mapTx.find(it->second->GetHash());
                 assert(nextit != mapTx.end());
-                txToRemove.insert(nextit);
+                if (!visited(nextit)) {
+                    txToRemove.push_back(nextit);
+                }
             }
         }
-        setEntries setAllRemoves;
-        for (txiter it : txToRemove) {
-            CalculateDescendants(it, setAllRemoves);
-        }
+    }
+    setEntries setAllRemoves;
+    auto all_removes = CalculateDescendants(txToRemove);
 
-        RemoveStaged(setAllRemoves, false, reason);
+    setAllRemoves.insert(all_removes.begin(), all_removes.end());
+
+    RemoveStaged(setAllRemoves, false, reason);
 }
 
 Cluster* CTxMemPool::AssignCluster()
@@ -728,14 +741,15 @@ void CTxMemPool::removeForReorg(CChain& chain, std::function<bool(txiter)> check
     AssertLockHeld(cs);
     AssertLockHeld(::cs_main);
 
-    setEntries txToRemove;
+    Entries txToRemove;
     for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
-        if (check_final_and_mature(it)) txToRemove.insert(it);
+        if (check_final_and_mature(it)) txToRemove.push_back(it);
     }
+    auto descendants = CalculateDescendants(txToRemove);
+
     setEntries setAllRemoves;
-    for (txiter it : txToRemove) {
-        CalculateDescendants(it, setAllRemoves);
-    }
+    setAllRemoves.insert(descendants.begin(), descendants.end());
+
     RemoveStaged(setAllRemoves, false, MemPoolRemovalReason::REORG);
     for (indexed_transaction_set::const_iterator it = mapTx.begin(); it != mapTx.end(); it++) {
         assert(TestLockPointValidity(chain, it->GetLockPoints()));
@@ -1363,15 +1377,16 @@ int CTxMemPool::Expire(std::chrono::seconds time)
 {
     AssertLockHeld(cs);
     indexed_transaction_set::index<entry_time>::type::iterator it = mapTx.get<entry_time>().begin();
-    setEntries toremove;
+    Entries toremove;
     while (it != mapTx.get<entry_time>().end() && it->GetTime() < time) {
-        toremove.insert(mapTx.project<0>(it));
+        toremove.push_back(mapTx.project<0>(it));
         it++;
     }
+    auto descendants = CalculateDescendants(toremove);
+
     setEntries stage;
-    for (txiter removeit : toremove) {
-        CalculateDescendants(removeit, stage);
-    }
+    stage.insert(descendants.begin(), descendants.end());
+
     RemoveStaged(stage, false, MemPoolRemovalReason::EXPIRY);
     return stage.size();
 }
