@@ -357,14 +357,25 @@ BOOST_FIXTURE_TEST_CASE(miniminer_overlap, TestChain100Setup)
     BOOST_CHECK(tx2_feerate > tx3_feerate);
     const auto tx3_anc_feerate = CFeeRate(low_fee + med_fee + high_fee + high_fee, tx_vsizes[0] + tx_vsizes[1] + tx_vsizes[2] + tx_vsizes[3]);
     const auto tx3_iter = pool.GetIter(tx3->GetHash());
-    BOOST_CHECK(tx3_anc_feerate == CFeeRate(tx3_iter.value()->GetModFeesWithAncestors(), tx3_iter.value()->GetSizeWithAncestors()));
+
+    // Check that ancestor feerate is calculated correctly.
+    size_t dummy_count{0};
+    CAmount mod_fees{0};
+    size_t ancestor_vsize{0};
+    pool.CalculateAncestorData(*tx3_iter.value(), dummy_count, ancestor_vsize, mod_fees);
+    BOOST_CHECK(tx3_anc_feerate == CFeeRate(mod_fees, ancestor_vsize));
+
     const auto tx4_feerate = CFeeRate(high_fee, tx_vsizes[4]);
     const auto tx6_anc_feerate = CFeeRate(high_fee + low_fee + med_fee, tx_vsizes[4] + tx_vsizes[5] + tx_vsizes[6]);
     const auto tx6_iter = pool.GetIter(tx6->GetHash());
-    BOOST_CHECK(tx6_anc_feerate == CFeeRate(tx6_iter.value()->GetModFeesWithAncestors(), tx6_iter.value()->GetSizeWithAncestors()));
+
+    pool.CalculateAncestorData(*tx6_iter.value(), dummy_count, ancestor_vsize, mod_fees);
+    BOOST_CHECK(tx6_anc_feerate == CFeeRate(mod_fees, ancestor_vsize));
+
     const auto tx7_anc_feerate = CFeeRate(high_fee + low_fee + high_fee, tx_vsizes[4] + tx_vsizes[5] + tx_vsizes[7]);
     const auto tx7_iter = pool.GetIter(tx7->GetHash());
-    BOOST_CHECK(tx7_anc_feerate == CFeeRate(tx7_iter.value()->GetModFeesWithAncestors(), tx7_iter.value()->GetSizeWithAncestors()));
+    pool.CalculateAncestorData(*tx7_iter.value(), dummy_count, ancestor_vsize, mod_fees);
+    BOOST_CHECK(tx7_anc_feerate == CFeeRate(mod_fees, ancestor_vsize));
     BOOST_CHECK(tx4_feerate > tx6_anc_feerate);
     BOOST_CHECK(tx4_feerate > tx7_anc_feerate);
 
