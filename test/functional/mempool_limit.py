@@ -89,7 +89,7 @@ class MempoolLimitTest(BitcoinTestFramework):
         # B: First transaction in package, RBFs A by itself under individual evaluation, which would give it +1 descendant limit
         # C: Second transaction in package, spends B. If the +1 descendant limit persisted, would make it into mempool
 
-        self.restart_node(0, extra_args=self.extra_args[0] + ["-limitancestorcount=2", "-limitdescendantcount=1"])
+        self.restart_node(0, extra_args=self.extra_args[0] + ["-limitclustercount=1"])
 
         # Generate a confirmed utxo we will double-spend
         rbf_utxo = self.wallet.send_self_transfer(
@@ -126,7 +126,7 @@ class MempoolLimitTest(BitcoinTestFramework):
             confirmed_only=True
         )
 
-        assert_raises_rpc_error(-26, "too-long-mempool-chain", node.submitpackage, [tx_B["hex"], tx_C["hex"]])
+        assert_raises_rpc_error(-26, "too-large-cluster", node.submitpackage, [tx_B["hex"], tx_C["hex"]])
 
     def test_mid_package_eviction(self):
         node = self.nodes[0]
