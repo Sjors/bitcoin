@@ -104,7 +104,23 @@ class MempoolPackagesTest(BitcoinTestFramework):
         tx1 = self.wallet.send_self_transfer(from_node=self.nodes[0], utxo_to_spend=tx0["new_utxos"][0])
 
         # Create tx2-9
-        tx9 = self.wallet.send_self_transfer_chain(from_node=self.nodes[0], utxo_to_spend=tx0["new_utxos"][1], chain_length=8)[-1]
+        txs = self.wallet.send_self_transfer_chain(from_node=self.nodes[0], utxo_to_spend=tx0["new_utxos"][1], chain_length=8)
+        tx9 = txs[-1]
+
+        # Check the ancestors and descendants look right.
+        ancestors = self.nodes[0].getmempoolancestors(tx9["txid"])
+        expected_ancestors = [t["txid"] for t in [tx0] + txs[0:-1]]
+        assert sorted(ancestors) == sorted(expected_ancestors)
+
+        descendants = self.nodes[0].getmempooldescendants(tx0["txid"])
+        expected_descendants = [t["txid"] for t in [tx1] + txs]
+        assert sorted(descendants) == sorted(expected_descendants)
+
+        # Check the fee/size chunks match the totals
+        chunks = self.nodes[0].getmempoolfeesize()
+        # Check that the sum of the fees matches the total
+        fee_sum = sum([c["fee"] for c in chunks])
+        assert(fee_sum == self.nodes[0].getmempoolinfo()["total_fee"])
 
         # Mine these in a block
         self.generate(self.nodes[0], 1)
