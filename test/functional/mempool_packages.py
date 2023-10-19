@@ -120,7 +120,7 @@ class MempoolPackagesTest(BitcoinTestFramework):
         chunks = self.nodes[0].getmempoolfeesize()
         # Check that the sum of the fees matches the total
         fee_sum = sum([c["fee"] for c in chunks])
-        assert(fee_sum == self.nodes[0].getmempoolinfo()["total_fee"])
+        assert fee_sum == self.nodes[0].getmempoolinfo()["total_fee"]
 
         # Mine these in a block
         self.generate(self.nodes[0], 1)
