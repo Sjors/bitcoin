@@ -438,7 +438,20 @@ static RPCHelpMan getmempoolfeesize()
     return RPCHelpMan{"getmempoolfeesize",
         "Returns fee/size data for the whole mempool.",
         {},
-        {},
+        {
+            RPCResult{"mempool chunks",
+                RPCResult::Type::ARR, "", "",
+                {
+                    {
+                        RPCResult::Type::OBJ, "", "",
+                        {
+                            {RPCResult::Type::NUM, "size", ""},
+                            {RPCResult::Type::NUM, "fee", ""}
+                        }
+                    }
+                }
+            }
+        },
         RPCExamples{
             HelpExampleCli("getmempoolfeesize", "")
             + HelpExampleRpc("getmempoolfeesize", "")
