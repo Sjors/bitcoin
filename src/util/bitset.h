@@ -81,7 +81,7 @@ unsigned inline CountTrailingZeroes(I v) noexcept
             0x1F, 0x17, 0x12, 0x05, 0x15, 0x09, 0x0F, 0x0B,
             0x1E, 0x11, 0x08, 0x0E, 0x1D, 0x0D, 0x1C, 0x1B
         };
-        return DEBRUIJN[(uint32_t)((v & uint32_t(-v)) * uint32_t{0x04D7651FU}) >> 27];
+        return DEBRUIJN[(uint32_t)((v & uint32_t(~v+1U)) * uint32_t{0x04D7651FU}) >> 27];
     } else {
         static_assert(BITS <= 64);
         static constexpr uint8_t DEBRUIJN[64] = {
@@ -90,7 +90,7 @@ unsigned inline CountTrailingZeroes(I v) noexcept
             63, 52, 6, 26, 37, 40, 33, 47, 61, 45, 43, 21, 23, 58, 17, 10,
             51, 25, 36, 32, 60, 20, 57, 16, 50, 31, 19, 15, 30, 14, 13, 12
         };
-        return DEBRUIJN[(uint64_t)((v & uint64_t(-v)) * uint64_t{0x022FDD63CC95386D}) >> 58];
+        return DEBRUIJN[(uint64_t)((v & uint64_t(~v+1U)) * uint64_t{0x022FDD63CC95386D}) >> 58];
     }
 }
 
