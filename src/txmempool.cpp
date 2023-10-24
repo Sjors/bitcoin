@@ -1726,7 +1726,7 @@ void Cluster::RechunkFromLinearization(std::vector<CTxMemPoolEntry::CTxMemPoolEn
 namespace {
 
 template <typename SetType>
-std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef> InvokeSort(bool reassign_locations, size_t tx_count, const std::vector<Cluster::Chunk>& chunks)
+std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef> InvokeSort(size_t tx_count, const std::vector<Cluster::Chunk>& chunks)
 {
     std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef> txs;
     cluster_linearize::Cluster<SetType> cluster;
@@ -1742,7 +1742,7 @@ std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef> InvokeSort(bool reassign_locati
     for (auto &chunk : chunks) {
         for (auto tx : chunk.txs) {
             orig_txs.emplace_back(tx);
-            cluster.emplace_back(FeeFrac(tx.get().GetModifiedFee(), tx.get().GetTxSize()), SetType{});
+            cluster.emplace_back(FeeFrac(uint64_t(tx.get().GetModifiedFee()+1000000*tx.get().GetTxSize()), tx.get().GetTxSize()), SetType{});
             entry_to_index.emplace_back(&(tx.get()), cluster.size() - 1);
         }
     }
@@ -1784,21 +1784,21 @@ void Cluster::Sort(bool reassign_locations)
 {
     std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef> txs;
     if (m_tx_count <= 32) {
-        txs = InvokeSort<BitSet<32>>(reassign_locations, m_tx_count, m_chunks);
+        txs = InvokeSort<BitSet<32>>(m_tx_count, m_chunks);
     } else if (m_tx_count <= 64) {
-        txs = InvokeSort<BitSet<64>>(reassign_locations, m_tx_count, m_chunks);
+        txs = InvokeSort<BitSet<64>>(m_tx_count, m_chunks);
     } else if (m_tx_count <= 128) {
-        txs = InvokeSort<BitSet<128>>(reassign_locations, m_tx_count, m_chunks);
+        txs = InvokeSort<BitSet<128>>(m_tx_count, m_chunks);
     } else if (m_tx_count <= 192) {
-        txs = InvokeSort<BitSet<192>>(reassign_locations, m_tx_count, m_chunks);
+        txs = InvokeSort<BitSet<192>>(m_tx_count, m_chunks);
     } else if (m_tx_count <= 256) {
-        txs = InvokeSort<BitSet<256>>(reassign_locations, m_tx_count, m_chunks);
+        txs = InvokeSort<BitSet<256>>(m_tx_count, m_chunks);
     } else if (m_tx_count <= 320) {
-        txs = InvokeSort<BitSet<320>>(reassign_locations, m_tx_count, m_chunks);
+        txs = InvokeSort<BitSet<320>>(m_tx_count, m_chunks);
     } else if (m_tx_count <= 384) {
-        txs = InvokeSort<BitSet<384>>(reassign_locations, m_tx_count, m_chunks);
+        txs = InvokeSort<BitSet<384>>(m_tx_count, m_chunks);
     } else if (m_tx_count <= 1280) {
-        txs = InvokeSort<BitSet<1280>>(reassign_locations, m_tx_count, m_chunks);
+        txs = InvokeSort<BitSet<1280>>(m_tx_count, m_chunks);
     } else {
         // Only do the topological sort for big clusters
         for (auto &chunk : m_chunks) {
