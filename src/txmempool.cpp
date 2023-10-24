@@ -1463,13 +1463,6 @@ void CTxMemPool::TrimToSize(size_t sizelimit, std::vector<COutPoint>* pvNoSpends
     std::vector<Cluster::HeapEntry> heap_chunks;
     std::set<Cluster*> clusters_with_evictions;
     while (!mapTx.empty() && DynamicMemoryUsage() > sizelimit) {
-        if (heap_chunks.empty()) {
-            for (const auto & [id, cluster] : m_cluster_map) {
-                if (!cluster->m_chunks.empty()) {
-                    heap_chunks.emplace_back(cluster->m_chunks.end()-1, cluster.get());
-                }
-            }
-        }
 
         // Define comparison operator on our heap entries (using feerate of chunks).
         auto cmp = [](const Cluster::HeapEntry& a, const Cluster::HeapEntry& b) {
@@ -1478,7 +1471,15 @@ void CTxMemPool::TrimToSize(size_t sizelimit, std::vector<COutPoint>* pvNoSpends
             return a.first->fee*b.first->size > b.first->fee*a.first->size;
         };
 
-        std::make_heap(heap_chunks.begin(), heap_chunks.end(), cmp);
+        if (heap_chunks.empty()) {
+            for (const auto & [id, cluster] : m_cluster_map) {
+                if (!cluster->m_chunks.empty()) {
+                    heap_chunks.emplace_back(cluster->m_chunks.end()-1, cluster.get());
+                }
+            }
+
+            std::make_heap(heap_chunks.begin(), heap_chunks.end(), cmp);
+        }
 
         // Remove the top element (lowest feerate) and evict.
         auto worst_chunk = heap_chunks.front();
