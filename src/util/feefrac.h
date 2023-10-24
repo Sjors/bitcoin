@@ -38,7 +38,7 @@
 struct FeeFrac
 {
     /** Fee. */
-    int64_t fee;
+    uint64_t fee;
     /** Size. */
     uint32_t size;
 
@@ -46,7 +46,7 @@ struct FeeFrac
     inline FeeFrac() noexcept : fee{0}, size{0} {}
 
     /** Construct a FeeFrac with specified fee and size. */
-    inline FeeFrac(int64_t s, uint32_t b) noexcept : fee{s}, size{b}
+    inline FeeFrac(uint64_t s, uint32_t b) noexcept : fee{s}, size{b}
     {
         // If size==0, fee must be 0 as well.
         assert(size != 0 || fee == 0);
@@ -102,8 +102,8 @@ struct FeeFrac
     /** Check if a FeeFrac object is worse than another. */
     friend inline bool operator<(const FeeFrac& a, const FeeFrac& b) noexcept
     {
-        int64_t a_val = a.fee * b.size;
-        int64_t b_val = b.fee * a.size;
+        uint64_t a_val = a.fee * b.size;
+        uint64_t b_val = b.fee * a.size;
         if (a_val != b_val) return a_val < b_val;
         return a.size > b.size;
     }
@@ -111,8 +111,8 @@ struct FeeFrac
     /** Check if a FeeFrac object is worse or equal than another. */
     friend inline bool operator<=(const FeeFrac& a, const FeeFrac& b) noexcept
     {
-        int64_t a_val = a.fee * b.size;
-        int64_t b_val = b.fee * a.size;
+        uint64_t a_val = a.fee * b.size;
+        uint64_t b_val = b.fee * a.size;
         if (a_val != b_val) return a_val < b_val;
         return a.size >= b.size;
     }
@@ -120,8 +120,8 @@ struct FeeFrac
     /** Check if a FeeFrac object is better than another. */
     friend inline bool operator>(const FeeFrac& a, const FeeFrac& b) noexcept
     {
-        int64_t a_val = a.fee * b.size;
-        int64_t b_val = b.fee * a.size;
+        uint64_t a_val = a.fee * b.size;
+        uint64_t b_val = b.fee * a.size;
         if (a_val != b_val) return a_val > b_val;
         return a.size < b.size;
     }
@@ -129,8 +129,8 @@ struct FeeFrac
     /** Check if a FeeFrac object is better or equal than another. */
     friend inline bool operator>=(const FeeFrac& a, const FeeFrac& b) noexcept
     {
-        int64_t a_val = a.fee * b.size;
-        int64_t b_val = b.fee * a.size;
+        uint64_t a_val = a.fee * b.size;
+        uint64_t b_val = b.fee * a.size;
         if (a_val != b_val) return a_val > b_val;
         return a.size <= b.size;
     }
