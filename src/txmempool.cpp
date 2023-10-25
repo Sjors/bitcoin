@@ -1743,7 +1743,7 @@ std::vector<CTxMemPoolEntry::CTxMemPoolEntryRef> InvokeSort(size_t tx_count, con
     for (auto &chunk : chunks) {
         for (auto tx : chunk.txs) {
             orig_txs.emplace_back(tx);
-            cluster.emplace_back(FeeFrac(uint64_t(tx.get().GetModifiedFee()+1000000*uint64_t(tx.get().GetTxSize())), tx.get().GetTxSize()), SetType{});
+            cluster.emplace_back(FeeFrac(uint64_t(tx.get().GetModifiedFee()+1000000*int64_t(tx.get().GetTxSize())), tx.get().GetTxSize()), SetType{});
             entry_to_index.emplace_back(&(tx.get()), cluster.size() - 1);
         }
     }
