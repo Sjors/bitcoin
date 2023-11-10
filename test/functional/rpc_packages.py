@@ -304,6 +304,7 @@ class RPCPackagesTest(BitcoinTestFramework):
         submitpackage_result = node.submitpackage(package=[tx["hex"] for tx in package_txns])
 
         # Check that each result is present, with the correct size and fees
+        assert_equal(submitpackage_result["package_msg"], "success")
         for package_txn in package_txns:
             tx = package_txn["tx"]
             assert tx.getwtxid() in submitpackage_result["tx-results"]
@@ -334,8 +335,10 @@ class RPCPackagesTest(BitcoinTestFramework):
 
         self.log.info("Submitpackage only allows packages of 1 child with its parents")
         # Chain of 3 transactions has too many generations
+        legacy_pool = node.getrawmempool()
         chain_hex = [t["hex"] for t in self.wallet.create_self_transfer_chain(chain_length=25)]
         assert_raises_rpc_error(-25, "package topology disallowed", node.submitpackage, chain_hex)
+        assert_equal(legacy_pool, node.getrawmempool())
 
 
 if __name__ == "__main__":
