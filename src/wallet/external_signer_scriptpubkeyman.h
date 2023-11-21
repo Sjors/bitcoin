@@ -23,7 +23,7 @@ class ExternalSignerScriptPubKeyMan : public DescriptorScriptPubKeyMan
   /** Provide a descriptor at setup time
   * Returns false if already setup or setup fails, true if setup is successful
   */
-  bool SetupDescriptor(std::unique_ptr<Descriptor>desc);
+  bool SetupDescriptorWithDB(WalletBatch& batch, std::unique_ptr<Descriptor>desc);
 
   static ExternalSigner GetExternalSigner();
 
