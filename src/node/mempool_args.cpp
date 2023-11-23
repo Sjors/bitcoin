@@ -68,6 +68,8 @@ util::Result<void> ApplyArgsManOptions(const ArgsManager& argsman, const CChainP
         LogPrintf("Increasing minrelaytxfee to %s to match incrementalrelayfee\n", mempool_opts.min_relay_feerate.ToString());
     }
 
+    mempool_opts.allow_package_below_min_relay_feerate = argsman.GetBoolArg("-allowpackagebelowminrelayfeerate", DEFAULT_ALLOW_PACKAGE_BELOW_MIN_RELAY_FEE_RATE);
+
     // Feerate used to define dust.  Shouldn't be changed lightly as old
     // implementations may inadvertently create non-standard transactions
     if (argsman.IsArgSet("-dustrelayfee")) {

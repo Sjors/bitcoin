@@ -441,6 +441,7 @@ public:
     const std::chrono::seconds m_expiry;
     const CFeeRate m_incremental_relay_feerate;
     const CFeeRate m_min_relay_feerate;
+    const bool m_allow_package_below_min_relay_feerate;
     const CFeeRate m_dust_relay_feerate;
     const bool m_permit_bare_multisig;
     const std::optional<unsigned> m_max_datacarrier_bytes;

@@ -407,6 +407,7 @@ CTxMemPool::CTxMemPool(const Options& opts)
       m_expiry{opts.expiry},
       m_incremental_relay_feerate{opts.incremental_relay_feerate},
       m_min_relay_feerate{opts.min_relay_feerate},
+      m_allow_package_below_min_relay_feerate{opts.allow_package_below_min_relay_feerate},
       m_dust_relay_feerate{opts.dust_relay_feerate},
       m_permit_bare_multisig{opts.permit_bare_multisig},
       m_max_datacarrier_bytes{opts.max_datacarrier_bytes},

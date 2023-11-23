@@ -170,7 +170,7 @@ class MempoolLimitTest(BitcoinTestFramework):
             confirmed_only=True)
         package_hex.append(cpfp_parent["hex"])
         parent_utxos.append(cpfp_parent["new_utxo"])
-        assert_equal(node.testmempoolaccept([cpfp_parent["hex"]])[0]["reject-reason"], "mempool min fee not met")
+        assert_equal(node.testmempoolaccept([cpfp_parent["hex"]])[0]["reject-reason"], "mempool min fee not met for package")
 
         self.wallet.rescan_utxos()
 

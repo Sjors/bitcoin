@@ -25,6 +25,8 @@ static constexpr unsigned int DEFAULT_MEMPOOL_EXPIRY_HOURS{336};
 static constexpr bool DEFAULT_MEMPOOL_FULL_RBF{false};
 /** Default for -acceptnonstdtxn */
 static constexpr bool DEFAULT_ACCEPT_NON_STD_TXN{false};
+/** Default for -allowpackagebelowminrelayfeerate */
+static constexpr bool DEFAULT_ALLOW_PACKAGE_BELOW_MIN_RELAY_FEE_RATE{false};
 
 namespace kernel {
 /**
@@ -44,6 +46,7 @@ struct MemPoolOptions {
     CFeeRate incremental_relay_feerate{DEFAULT_INCREMENTAL_RELAY_FEE};
     /** A fee rate smaller than this is considered zero fee (for relaying, mining and transaction creation) */
     CFeeRate min_relay_feerate{DEFAULT_MIN_RELAY_TX_FEE};
+    bool allow_package_below_min_relay_feerate{DEFAULT_ALLOW_PACKAGE_BELOW_MIN_RELAY_FEE_RATE};
     CFeeRate dust_relay_feerate{DUST_RELAY_TX_FEE};
     /**
      * A data carrying output is an unspendable output containing data. The script

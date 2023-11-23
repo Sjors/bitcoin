@@ -670,11 +670,11 @@ private:
         AssertLockHeld(m_pool.cs);
         CAmount mempoolRejectFee = m_pool.GetMinFee().GetFee(package_size);
         if (mempoolRejectFee > 0 && package_fee < mempoolRejectFee) {
-            return state.Invalid(TxValidationResult::TX_RECONSIDERABLE, "mempool min fee not met", strprintf("%d < %d", package_fee, mempoolRejectFee));
+            return state.Invalid(TxValidationResult::TX_RECONSIDERABLE, "mempool min fee not met for package", strprintf("%d < %d", package_fee, mempoolRejectFee));
         }
 
         if (package_fee < m_pool.m_min_relay_feerate.GetFee(package_size)) {
-            return state.Invalid(TxValidationResult::TX_RECONSIDERABLE, "min relay fee not met",
+            return state.Invalid(TxValidationResult::TX_RECONSIDERABLE, "min relay fee not met for pacage",
                                  strprintf("%d < %d", package_fee, m_pool.m_min_relay_feerate.GetFee(package_size)));
         }
         return true;
@@ -866,7 +866,7 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     // while a tx could be package CPFP'd when entering the mempool, we do not have a DoS-resistant
     // method of ensuring the tx remains bumped. For example, the fee-bumping child could disappear
     // due to a replacement.
-    if (!bypass_limits && ws.m_modified_fees < m_pool.m_min_relay_feerate.GetFee(ws.m_vsize)) {
+    if (!bypass_limits && !m_pool.m_allow_package_below_min_relay_feerate && ws.m_modified_fees < m_pool.m_min_relay_feerate.GetFee(ws.m_vsize)) {
         // Even though this is a fee-related failure, this result is TX_MEMPOOL_POLICY, not
         // TX_RECONSIDERABLE, because it cannot be bypassed using package validation.
         return state.Invalid(TxValidationResult::TX_MEMPOOL_POLICY, "min relay fee not met",
