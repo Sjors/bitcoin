@@ -116,6 +116,7 @@ bool Sv2TemplateProvider::Start(const Sv2TemplateProviderOptions& options)
 
 void Sv2TemplateProvider::Init(const Sv2TemplateProviderOptions& options)
 {
+    m_minimum_fee_delta = gArgs.GetIntArg("-sv2feedelta", DEFAULT_SV2_FEE_DELTA);
     m_port = options.port;
     m_protocol_version = options.protocol_version;
     m_optional_features = options.optional_features;
@@ -180,6 +181,27 @@ std::shared_ptr<Sock> Sv2TemplateProvider::BindListenPort(uint16_t port) const
 
     return sock;
 }
+class Timer {
+private:
+    std::chrono::seconds m_interval;
+    std::chrono::seconds m_last_triggered;
+
+public:
+    Timer() {
+        m_interval = std::chrono::seconds(gArgs.GetIntArg("-sv2interval", DEFAULT_SV2_INTERVAL));
+        // Initialize the timer to a time point far in the past
+        m_last_triggered = GetTime<std::chrono::seconds>() - std::chrono::hours(1);
+    }
+
+    bool trigger() {
+        auto now{GetTime<std::chrono::seconds>()};
+        if (now - m_last_triggered >= m_interval) {
+            m_last_triggered = now;
+            return true;
+        }
+        return false;
+    }
+};
 
 void Sv2TemplateProvider::DisconnectFlagged()
 {
@@ -192,6 +214,10 @@ void Sv2TemplateProvider::DisconnectFlagged()
 
 void Sv2TemplateProvider::ThreadSv2Handler()
 {
+    Timer timer;
+    unsigned int mempool_last_update = 0;
+    unsigned int template_last_update = 0;
+
     while (!m_flag_interrupt_sv2) {
         if (m_chainman.IsInitialBlockDownload()) {
             m_interrupt_sv2.sleep_for(std::chrono::milliseconds(100));
@@ -225,12 +251,24 @@ void Sv2TemplateProvider::ThreadSv2Handler()
             return false;
         }();
 
+
+        /** TODO: only look for mempool updates that (likely) impact the next block.
+         *        See `doc/stratum-v2.md#mempool-monitoring`
+         */
+        mempool_last_update = m_mempool.GetTransactionsUpdated();
         bool should_make_template = false;
 
         if (best_block_changed) {
-            m_last_block_time = std::chrono::steady_clock::now().time_since_epoch();
+            m_last_block_time = GetTime<std::chrono::seconds>();
+
+            for (auto& client : m_sv2_clients) {
+                client->m_latest_submitted_template_fees = 0;
+            }
 
             // Build a new best template, best prev hash and update the block cache.
+            should_make_template = true;
+            template_last_update = mempool_last_update;
+        } else if (timer.trigger() && mempool_last_update > template_last_update) {
             should_make_template = true;
         }
 
@@ -243,6 +281,8 @@ void Sv2TemplateProvider::ThreadSv2Handler()
                 // CoinbaseOutputDataSize.
                 if (client->m_coinbase_tx_outputs_size == 0) continue;
                 if (!SendWork(*client.get(), /*send_new_prevhash=*/best_block_changed)) {
+                    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Disconnecting client id=%zu\n",
+                                  client->m_id);
                     client->m_disconnect_flag = true;
                     continue;
                 }
@@ -446,6 +486,15 @@ bool Sv2TemplateProvider::SendWork(Sv2Client& client, bool send_new_prevhash)
     ++m_template_id;
     auto new_work_set = BuildNewWorkSet(/*future_template=*/send_new_prevhash, client.m_coinbase_tx_outputs_size);
 
+    // Do not submit new template if the fee increase is insufficient:
+    CAmount fees = 0;
+    for (CAmount fee : new_work_set.block_template->vTxFees) {
+        // Skip coinbase
+        if (fee < 0) continue;
+        fees += fee;
+    }
+    if (!send_new_prevhash && client.m_latest_submitted_template_fees + m_minimum_fee_delta > fees) return true;
+
     m_block_template_cache.insert({m_template_id, std::move(new_work_set.block_template)});
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Send 0x71 NewTemplate to client id=%zu\n", client.m_id);
@@ -455,6 +504,8 @@ bool Sv2TemplateProvider::SendWork(Sv2Client& client, bool send_new_prevhash)
         LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Send 0x72 SetNewPrevHash to client id=%zu\n", client.m_id);
         client.m_send_messages.emplace_back(new_work_set.prev_hash);
     }
+
+    client.m_latest_submitted_template_fees = fees;
 
     return true;
 }
