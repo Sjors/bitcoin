@@ -12,6 +12,7 @@
 
 #include <secp256k1.h>
 #include <secp256k1_ellswift.h>
+#include <secp256k1_ecdh.h>
 #include <secp256k1_extrakeys.h>
 #include <secp256k1_recovery.h>
 #include <secp256k1_schnorrsig.h>
@@ -331,6 +332,36 @@ bool CKey::Derive(CKey& keyChild, ChainCode &ccChild, unsigned int nChild, const
     bool ret = secp256k1_ec_seckey_tweak_add(secp256k1_context_sign, (unsigned char*)keyChild.begin(), vout.data());
     if (!ret) keyChild.ClearKeyData();
     return ret;
+}
+
+bool CKey::ECDH(const XOnlyPubKey& pubkey, unsigned char* output) const {
+    secp256k1_xonly_pubkey xonly_pubkey;
+    if (!secp256k1_xonly_pubkey_parse(secp256k1_context_sign, &xonly_pubkey, pubkey.begin())) {
+        return false;
+    }
+
+    uint8_t buf[33] = {};
+    buf[0] = 0x02;
+
+    if (!secp256k1_xonly_pubkey_serialize(secp256k1_context_sign, &buf[1], &xonly_pubkey)) {
+        return false;
+    }
+
+    secp256k1_pubkey secp_pubkey;
+    if (!secp256k1_ec_pubkey_parse(secp256k1_context_sign, &secp_pubkey, &buf[0], 33)) {
+        return false;
+    }
+
+    if (!secp256k1_ecdh(secp256k1_context_sign, output, &secp_pubkey, keydata->data(), nullptr, nullptr)) {
+        return false;
+    }
+
+    return true;
+}
+
+bool CKey::HasEvenY() const {
+    assert(IsValid());
+    return GetPubKey().data()[0] == 0x02;
 }
 
 EllSwiftPubKey CKey::EllSwiftCreate(Span<const std::byte> ent32) const
