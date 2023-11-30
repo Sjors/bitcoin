@@ -85,6 +85,26 @@ std::shared_ptr<Sock> Sv2TemplateProvider::BindListenPort(uint16_t port) const
 
     return sock;
 }
+class Timer {
+private:
+    std::chrono::steady_clock::time_point last_triggered;
+    const std::chrono::seconds interval = std::chrono::seconds(30);
+
+public:
+    Timer() {
+        // Initialize the timer to a time point far in the past
+        last_triggered = std::chrono::steady_clock::now() - std::chrono::hours(1);
+    }
+
+    bool trigger() {
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_triggered >= interval) {
+            last_triggered = now;
+            return true;
+        }
+        return false;
+    }
+};
 
 void Sv2TemplateProvider::DisconnectFlagged()
 {
@@ -97,6 +117,10 @@ void Sv2TemplateProvider::DisconnectFlagged()
 
 void Sv2TemplateProvider::ThreadSv2Handler()
 {
+    Timer timer;
+    unsigned int mempool_last_update = 0;
+    unsigned int template_last_update = 0;
+
     while (!m_flag_interrupt_sv2) {
         if (m_chainman.IsInitialBlockDownload()) {
             m_interrupt_sv2.sleep_for(std::chrono::milliseconds(100));
@@ -130,6 +154,10 @@ void Sv2TemplateProvider::ThreadSv2Handler()
             return false;
         }();
 
+
+        // TODO: this is triggered far more often than necessary, and should
+        // only happen when changes (likely) impact the next block.
+        mempool_last_update = m_mempool.GetTransactionsUpdated();
         bool should_make_template = false;
 
         if (best_block_changed) {
@@ -140,6 +168,9 @@ void Sv2TemplateProvider::ThreadSv2Handler()
 
             // Build a new best template, best prev hash and update the block cache.
             should_make_template = true;
+            template_last_update = mempool_last_update;
+        } else if (timer.trigger() && mempool_last_update > template_last_update) {
+            should_make_template = true;
         }
 
         if (should_make_template) {
@@ -148,6 +179,7 @@ void Sv2TemplateProvider::ThreadSv2Handler()
                 // For newly connected clients, we call SendWork after receiving
                 // CoinbaseOutputDataSize.
                 if (client->m_coinbase_tx_outputs_size == 0) continue;
+                // TODO: check if the new template has more fees (if !best_block_changed)
                 if (!SendWork(*client.get(), /*send_new_prevhash=*/best_block_changed)) {
                     client->m_disconnect_flag = true;
                     continue;
