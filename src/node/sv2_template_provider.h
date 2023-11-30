@@ -45,6 +45,11 @@ struct Sv2Client
     unsigned int m_coinbase_tx_outputs_size;
 
     /**
+     * Fees in sat paid by the last submitted template
+     */
+    CAmount m_latest_submitted_template_fees = 0;
+
+    /**
      * The noise sessions for secure communication for this client and the template
      * provider server.
      */
@@ -108,6 +113,12 @@ private:
      * The main listening socket for new stratum v2 connections.
      */
     std::shared_ptr<Sock> m_listening_socket;
+
+    /**
+    * Minimum fee delta required before submitting an updated template.
+    * This may be negative.
+    */
+    int m_minimum_fee_delta;
 
     /**
      * The main thread for the template provider.
