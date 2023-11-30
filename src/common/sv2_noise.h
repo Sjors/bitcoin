@@ -12,6 +12,7 @@
 static constexpr size_t POLY1305_TAGLEN{16};
 static constexpr size_t KEY_SIZE = 32;
 static constexpr size_t ECDH_OUTPUT_SIZE = 32;
+static constexpr size_t SV2_FRAME_CHUNK_SIZE = 65535;
 
 // Sha256 hash of the ascii encoding - "Noise_NX_secp256k1_ChaChaPoly_SHA256".
 // This is the first step required when setting up the chaining key.

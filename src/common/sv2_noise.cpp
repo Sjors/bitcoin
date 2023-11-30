@@ -29,19 +29,41 @@ void Sv2CipherState::EncryptWithAd(Span<const std::byte> associated_data, Span<s
     aead.Encrypt(Span(msg.begin(), msg.end() - POLY1305_TAGLEN), associated_data, nonce, msg);
 }
 
-ssize_t Sv2CipherState::WriteMsg(Span<std::byte> msg)
-{
-   std::vector<std::byte> empty;
-   EncryptWithAd(empty, msg);
-   return msg.size();
+// Messages must be already chunked, every SV2_FRAME_CHUNK_SIZE we want 16 bytes reserved for the
+// mac
+ssize_t Sv2CipherState::WriteMsg(Span<std::byte> msg) {
+
+    const size_t max_chunk_size = SV2_FRAME_CHUNK_SIZE;
+    size_t processed = 0;
+    std::vector<std::byte> empty;
+
+    while (processed < msg.size()) {
+        size_t chunk_size = std::min(msg.size() - processed, max_chunk_size);
+        Span<std::byte> chunk = msg.subspan(processed, chunk_size);
+        EncryptWithAd(empty, chunk);
+        processed += chunk_size;
+    }
+
+    return msg.size();
+}
+ssize_t Sv2CipherState::ReadMsg(Span<std::byte> msg) {
+    const size_t max_chunk_size = SV2_FRAME_CHUNK_SIZE;
+    size_t processed = 0;
+    std::vector<std::byte> empty;
+    auto decrypted_size = msg.size();
+
+    while (processed < msg.size()) {
+        size_t chunk_size = std::min(msg.size() - processed, max_chunk_size);
+        Span<std::byte> chunk = msg.subspan(processed, chunk_size);
+        std::vector<std::byte> decrypted_chunk;
+        DecryptWithAd(empty, chunk);
+        processed += chunk_size;
+        decrypted_size -= POLY1305_TAGLEN;
+    }
+
+    return decrypted_size;
 }
 
-ssize_t Sv2CipherState::ReadMsg(Span<std::byte> msg)
-{
-   std::vector<std::byte> empty;
-   DecryptWithAd(empty, msg);
-   return msg.size();
-}
 
 void Sv2SymmetricState::MixHash(const Span<const std::byte> input)
 {

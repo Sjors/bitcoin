@@ -248,11 +248,9 @@ void Sv2TemplateProvider::ThreadSv2Handler()
                 try
                 {
                     if (!client->m_noise->HandshakeComplete()) {
-                        auto headers_recv = ReadSv2NoiseHeaders(Span(bytes_received_buf), num_bytes_received);
-                        for (auto& header : headers_recv)
-                        {
-                            ProcessSv2Noise(*client.get(), header.m_payload);
-                        }
+                        auto msg_ = Span(bytes_received_buf, num_bytes_received);
+                        std::span<std::byte> msg(reinterpret_cast<std::byte*>(msg_.data()), msg_.size());
+                        ProcessSv2Noise(*client.get(), msg);
                     } else {
                         auto sv2_msgs = ReadAndDecryptSv2NetMsgs(*client.get(), Span(bytes_received_buf), num_bytes_received);
 
@@ -280,12 +278,11 @@ void Sv2TemplateProvider::ProcessSv2Noise(Sv2Client& client, Span<std::byte> buf
             client.m_noise->ReadMsg(buffer);
 
             // Send the Msg ES.
-            Sv2NoiseHeader msg_es;
-            auto num_bytes = client.m_noise->SendMsg(msg_es.m_payload);
-            msg_es.m_header = num_bytes;
-            msg_es.m_payload.resize(num_bytes);
+            std::byte msg_es[170];
+            std::span<std::byte> msg_es_span(msg_es, 170);
+            auto _num_bytes = client.m_noise->SendMsg(msg_es);
 
-            if (!Send(client, msg_es)) {
+            if (!SendBuf(client, msg_es_span)) {
                 throw std::runtime_error("Sv2TemplateProvider::ProcessSv2Message(): Failed to send Msg ES to client\n");
             }
             break;
@@ -640,9 +637,23 @@ std::vector<std::byte> Sv2TemplateProvider::BuildEncryptedHeader(const node::Sv2
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "To encrypt: %s\n", HexStr(net_msg.m_msg));
 
+    size_t num_chunks = net_msg.m_msg.size() / (SV2_FRAME_CHUNK_SIZE - POLY1305_TAGLEN);
+    if (net_msg.m_msg.size() % (SV2_FRAME_CHUNK_SIZE - POLY1305_TAGLEN) != 0) {
+        num_chunks++;
+    }
+
+    size_t total_size = net_msg.m_msg.size() + (num_chunks * POLY1305_TAGLEN);
+    std::vector<uint8_t> buffer;
+    buffer.reserve(total_size);
+
+    for (size_t i = 0; i < num_chunks; ++i) {
+        size_t chunk_start = i * (SV2_FRAME_CHUNK_SIZE - POLY1305_TAGLEN);
+        size_t chunk_end = std::min(chunk_start + (SV2_FRAME_CHUNK_SIZE - POLY1305_TAGLEN), net_msg.m_msg.size());
+        buffer.insert(buffer.end(), net_msg.m_msg.begin() + chunk_start, net_msg.m_msg.begin() + chunk_end);
+        buffer.insert(buffer.end(), POLY1305_TAGLEN, 0);
+    }
     DataStream ss_payload {};
-    ss_payload.write(MakeByteSpan(net_msg.m_msg));
-    ss_payload.resize(net_msg.m_msg.size() + POLY1305_TAGLEN);
+    ss_payload.write(MakeByteSpan(buffer));
     noise.SendMsg(ss_payload);
 
     std::vector<std::byte> msg_buf;
@@ -652,23 +663,6 @@ std::vector<std::byte> Sv2TemplateProvider::BuildEncryptedHeader(const node::Sv2
 
     return msg_buf;
 };
-
-std::vector<Sv2NoiseHeader> Sv2TemplateProvider::ReadSv2NoiseHeaders(Span<uint8_t> buffer, ssize_t num_bytes)
-{
-    auto bytes_read = 0;
-    DataStream ss (buffer);
-    std::vector<Sv2NoiseHeader> headers;
-    while (bytes_read < num_bytes)
-    {
-        Sv2NoiseHeader header;
-        ss >> header;
-
-        bytes_read += header.m_header + 2;
-        headers.push_back(std::move(header));
-    }
-
-    return headers;
-}
 
 std::vector<node::Sv2NetMsg> Sv2TemplateProvider::ReadAndDecryptSv2NetMsgs(Sv2Client& client, Span<uint8_t> buffer, ssize_t num_bytes)
 {
@@ -688,12 +682,19 @@ std::vector<node::Sv2NetMsg> Sv2TemplateProvider::ReadAndDecryptSv2NetMsgs(Sv2Cl
 
         bytes_read += header_and_mac_size;
 
+        size_t num_chunks = header.m_msg_len / (SV2_FRAME_CHUNK_SIZE - POLY1305_TAGLEN);
+        if (header.m_msg_len % (SV2_FRAME_CHUNK_SIZE - POLY1305_TAGLEN) != 0) {
+            num_chunks++;
+        }
+
+        size_t total_size = header.m_msg_len + (num_chunks * POLY1305_TAGLEN);
+
         // Decrypt the payload.
-        DataStream ss_payload (Span(&buffer[bytes_read], header.m_msg_len + POLY1305_TAGLEN));
+        DataStream ss_payload (Span(&buffer[bytes_read], total_size));
 
         ProcessSv2Noise(client, ss_payload);
 
-        bytes_read += header.m_msg_len + POLY1305_TAGLEN;
+        bytes_read += total_size;
 
         std::vector<uint8_t> msg_payload(ss_payload.size());
         std::transform(ss_payload.begin(), ss_payload.end(), msg_payload.begin(),
