@@ -30,6 +30,7 @@ void Sv2TemplateProvider::Init(const Sv2TemplateProviderOptions& options)
     m_port = options.port;
     m_protocol_version = options.protocol_version;
     m_optional_features = options.optional_features;
+    m_default_coinbase_tx_additional_output_size = options.default_coinbase_tx_additional_output_size;
 }
 
 Sv2TemplateProvider::~Sv2TemplateProvider()
@@ -324,7 +325,31 @@ void Sv2TemplateProvider::ProcessSv2Message(const node::Sv2NetMsg& sv2_net_msg, 
 
         break;
     }
+    case node::Sv2MsgType::COINBASE_OUTPUT_DATA_SIZE:
+    {
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Received 0x70 CoinbaseOutputDataSize\n");
 
+        if (!client.m_setup_connection_confirmed) {
+            client.m_disconnect_flag = true;
+            return;
+        }
+
+        node::Sv2CoinbaseOutputDataSizeMsg coinbase_output_data_size;
+        try {
+            ss >> coinbase_output_data_size;
+            client.m_coinbase_output_data_size_recv = true;
+        } catch (const std::exception& e) {
+            LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received invalid CoinbaseOutputDataSize message: %s\n", e.what());
+            client.m_disconnect_flag = true;
+            return;
+        }
+
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "coinbase_output_max_additional_size=%d bytes\n", coinbase_output_data_size.m_coinbase_output_max_additional_size);
+
+        client.m_coinbase_tx_outputs_size = coinbase_output_data_size.m_coinbase_output_max_additional_size;
+
+        break;
+    }
     default: {
         uint8_t msg_type[1]{uint8_t(sv2_net_msg.m_sv2_header.m_msg_type)};
         LogPrintLevel(BCLog::SV2, BCLog::Level::Warning, "Received unknown message type 0x%s\n", HexStr(msg_type));

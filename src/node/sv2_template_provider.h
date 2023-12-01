@@ -29,6 +29,16 @@ struct Sv2Client
     bool m_disconnect_flag;
 
     /**
+     * Whether the client has received CoinbaseOutputDataSize message.
+     */
+    bool m_coinbase_output_data_size_recv;
+
+    /**
+     * Specific additional coinbase tx output size required for the client.
+     */
+    unsigned int m_coinbase_tx_outputs_size;
+
+    /**
      * The noise sessions for secure communication for this client and the template
      * provider server.
      */
@@ -64,6 +74,10 @@ struct Sv2TemplateProviderOptions
      */
     uint16_t optional_features = 0;
 
+    /**
+     * The default option for the additional space required for coinbase output.
+     */
+    unsigned int default_coinbase_tx_additional_output_size = 0;
 };
 
 /**
@@ -112,6 +126,11 @@ private:
      * The currently supported optional features.
      */
     uint16_t m_optional_features;
+
+    /**
+     * The default additional size output required for NewTemplates.
+     */
+    unsigned int m_default_coinbase_tx_additional_output_size;
 
     /**
      * The configured port to listen for new connections.
