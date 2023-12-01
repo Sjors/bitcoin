@@ -1,5 +1,7 @@
 #include <node/sv2_template_provider.h>
 
+#include <consensus/merkle.h>
+#include <txmempool.h>
 #include <util/thread.h>
 #include <validation.h>
 
@@ -25,6 +27,7 @@ void Sv2TemplateProvider::Init(const Sv2TemplateProviderOptions& options)
     m_protocol_version = options.protocol_version;
     m_optional_features = options.optional_features;
     m_default_coinbase_tx_additional_output_size = options.default_coinbase_tx_additional_output_size;
+    m_default_future_templates = options.default_future_templates;
 }
 
 Sv2TemplateProvider::~Sv2TemplateProvider()
@@ -115,6 +118,42 @@ void Sv2TemplateProvider::ThreadSv2Handler()
         }
 
         DisconnectFlagged();
+
+        bool best_block_changed = [this]() {
+            WAIT_LOCK(g_best_block_mutex, lock);
+            auto checktime = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+            g_best_block_cv.wait_until(lock, checktime);
+            if (m_best_prev_hash.m_prev_hash != g_best_block) {
+                m_best_prev_hash.m_prev_hash = g_best_block;
+                return true;
+            }
+            return false;
+        }();
+
+        bool should_make_template = false;
+
+        if (best_block_changed) {
+            // Clear the block cache when the best known block changes since all
+            // previous work is now invalid.
+            BlockCache block_cache;
+            m_block_cache.swap(block_cache);
+
+            // Build a new best template, best prev hash and update the block cache.
+            should_make_template = true;
+        }
+
+        if (should_make_template) {
+            // Update all clients with the new template and prev hash.
+            for (const auto& client : m_sv2_clients) {
+                // For newly connected clients, we call SendWork after receiving
+                // CoinbaseOutputDataSize.
+                if (client->m_coinbase_tx_outputs_size == 0) continue;
+                if (!SendWork(*client.get(), /*send_new_prevhash=*/best_block_changed)) {
+                    client->m_disconnect_flag = true;
+                    continue;
+                }
+            }
+        }
 
         // Poll/Select the sockets that need handling.
         Sock::EventsPerSock events_per_sock = GenerateWaitSockets(m_listening_socket, m_sv2_clients);
@@ -229,6 +268,72 @@ void Sv2TemplateProvider::ProcessSv2Noise(Sv2Client& client, Span<std::byte> buf
             break;
         }
     }
+}
+
+Sv2TemplateProvider::NewWorkSet Sv2TemplateProvider::BuildNewWorkSet(bool future_template, unsigned int coinbase_output_max_additional_size)
+{
+    node::BlockAssembler::Options options;
+
+    // Reducing the size of nBlockMaxWeight by the coinbase output additional size allows the miner extra weighted bytes in their coinbase space.
+    options.nBlockMaxWeight = MAX_BLOCK_WEIGHT - coinbase_output_max_additional_size;
+    options.blockMinFeeRate = CFeeRate(DEFAULT_BLOCK_MIN_TX_FEE);
+
+    const auto time_start{SteadyClock::now()};
+    auto blocktemplate = node::BlockAssembler(m_chainman.ActiveChainstate(), &m_mempool, options).CreateNewBlock(CScript());
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Assemble template: %.2fms\n",
+        Ticks<MillisecondsDouble>(SteadyClock::now() - time_start));
+    node::Sv2NewTemplateMsg new_template{blocktemplate->block, m_template_id, future_template};
+    node::Sv2SetNewPrevHashMsg set_new_prev_hash{blocktemplate->block, m_template_id};
+
+    return NewWorkSet { new_template, std::move(blocktemplate), set_new_prev_hash};
+}
+
+bool Sv2TemplateProvider::SendWork(const Sv2Client& client, bool send_new_prevhash)
+{
+    // The current implementation doesn't create templates for future empty
+    // or speculative blocks. Despite that, we first send NewTemplate with
+    // future_template set to true, followed by SetNewPrevHash. We do this
+    // both when first connecting and when a new block is found.
+    //
+    // When the template is update to take newer mempool transactions into
+    // account, we set future_template to false and don't send SetNewPrevHash.
+
+    // TODO: reuse template_id for clients with the same m_default_coinbase_tx_additional_output_size
+    ++m_template_id;
+    auto new_work_set = BuildNewWorkSet(/*future_template=*/send_new_prevhash, client.m_coinbase_tx_outputs_size);
+    m_block_cache.insert({m_template_id, std::move(new_work_set.block_template)});
+
+    try {
+        auto msg = node::Sv2NetMsg{new_work_set.new_template};
+        auto msg_buf = BuildEncryptedHeader(msg, *client.m_noise.get());
+
+        if (!SendBuf(client, msg_buf)) {
+            LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Error sending NewTemplate message\n");
+            return false;
+        }
+    } catch (const std::exception& e) {
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Failed to serialize new template: %s\n", e.what());
+        return false;
+    }
+
+    if (send_new_prevhash) {
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Send 0x20 SetNewPrevHash\n");
+
+        try {
+            auto msg = node::Sv2NetMsg{new_work_set.prev_hash};
+            auto msg_buf = BuildEncryptedHeader(msg, *client.m_noise.get());
+
+            if (!SendBuf(client, msg_buf)) {
+                LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Error sending SetNewPrevHash message\n");
+                return false;
+            }
+        } catch (const std::exception& e) {
+            LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Failed to serialize new prev hash: %s\n", e.what());
+            return false;
+        }
+    }
+
+    return true;
 }
 
 Sock::EventsPerSock Sv2TemplateProvider::GenerateWaitSockets(const std::shared_ptr<Sock>& listen_socket, const Clients& sv2_clients) const
@@ -354,8 +459,114 @@ void Sv2TemplateProvider::ProcessSv2Message(const node::Sv2NetMsg& sv2_net_msg, 
 
         client.m_coinbase_tx_outputs_size = coinbase_output_data_size.m_coinbase_output_max_additional_size;
 
+        // Send new template and prevout
+        if (!SendWork(client, /*send_new_prevhash=*/true)) {
+            return;
+        }
+
         break;
     }
+    case node::Sv2MsgType::SUBMIT_SOLUTION: {
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Received 0x60 SubmitSolution\n");
+
+        if (!client.m_setup_connection_confirmed && !client.m_coinbase_output_data_size_recv) {
+            client.m_disconnect_flag = true;
+            return;
+        }
+
+        node::Sv2SubmitSolutionMsg submit_solution;
+        try {
+            ss >> submit_solution;
+        } catch (const std::exception& e) {
+            LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received invalid SubmitSolution message: %e\n", e.what());
+            return;
+        }
+
+        auto cached_block = m_block_cache.find(submit_solution.m_template_id);
+        if (cached_block != m_block_cache.end()) {
+            CBlock& block = (*cached_block->second).block;
+
+            auto coinbase_tx = CTransaction(std::move(submit_solution.m_coinbase_tx));
+            auto cb = MakeTransactionRef(std::move(coinbase_tx));
+
+            if (block.vtx.size() == 0) {
+                block.vtx.push_back(cb);
+            } else {
+                block.vtx[0] = cb;
+            }
+
+            block.nVersion = submit_solution.m_version;
+            block.nTime = submit_solution.m_header_timestamp;
+            block.nNonce = submit_solution.m_header_nonce;
+            block.hashMerkleRoot = BlockMerkleRoot(block);
+
+            auto blockptr = std::make_shared<CBlock>(std::move(block));
+            bool new_block{true};
+
+            m_chainman.ProcessNewBlock(blockptr, true /* force_processing */, true /* min_pow_checked */, &new_block);
+        }
+
+        break;
+    }
+
+    case node::Sv2MsgType::REQUEST_TRANSACTION_DATA:
+    {
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Received 0x73 RequestTransactionData\n");
+
+        node::Sv2RequestTransactionDataMsg request_tx_data;
+
+        try {
+            ss >> request_tx_data;
+        } catch (const std::exception& e) {
+            LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received invalid RequestTransactionData message: %e\n", e.what());
+            return;
+        }
+
+        auto cached_block = m_block_cache.find(request_tx_data.m_template_id);
+        if (cached_block != m_block_cache.end()) {
+            CBlock& block = (*cached_block->second).block;
+
+            std::vector<uint8_t> witness_reserve_value;
+            if (!block.IsNull()) {
+                auto scriptWitness = block.vtx[0]->vin[0].scriptWitness;
+                if (!scriptWitness.IsNull()) {
+                    std::copy(scriptWitness.stack[0].begin(), scriptWitness.stack[0].end(), std::back_inserter(witness_reserve_value));
+                }
+            }
+std::vector<CTransactionRef> txs;
+            if (block.vtx.size() > 0) {
+                std::copy(block.vtx.begin() + 1, block.vtx.end(), std::back_inserter(txs));
+            }
+
+            node::Sv2RequestTransactionDataSuccessMsg request_tx_data_success{request_tx_data.m_template_id, std::move(witness_reserve_value), std::move(txs)};
+
+            auto msg = node::Sv2NetMsg{request_tx_data_success};
+            auto msg_buf = BuildEncryptedHeader(msg, *client.m_noise.get());
+
+            LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Send 0x74 RequestTransactionData.Success\n");
+
+            if (!SendBuf(client, msg_buf)) {
+                LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Error sending RequestTransactionData.Success message\n");
+                client.m_disconnect_flag = true;
+                return;
+            }
+        } else {
+            node::Sv2RequestTransactionDataErrorMsg request_tx_data_error{request_tx_data.m_template_id, "template-id-not-found"};
+            auto msg = node::Sv2NetMsg{request_tx_data_error};
+            auto msg_buf = BuildEncryptedHeader(msg, *client.m_noise.get());
+
+            LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Send 0x75 RequestTransactionData.Error\n");
+
+            if (!SendBuf(client, msg_buf)) {
+                LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Error sending RequestTransactionData.Error message\n");
+                client.m_disconnect_flag = true;
+                return;
+            }
+        }
+
+        break;
+    }
+
     default: {
         uint8_t msg_type[1]{uint8_t(sv2_net_msg.m_sv2_header.m_msg_type)};
         LogPrintLevel(BCLog::SV2, BCLog::Level::Warning, "Received unknown message type 0x%s\n", HexStr(msg_type));
@@ -366,6 +577,8 @@ void Sv2TemplateProvider::ProcessSv2Message(const node::Sv2NetMsg& sv2_net_msg, 
 
 std::vector<std::byte> Sv2TemplateProvider::BuildEncryptedHeader(const node::Sv2NetMsg& net_msg, Sv2NoiseSession& noise)
 {
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "To encrypt: %s\n", HexStr(net_msg.m_msg));
+
     DataStream ss_header{};
     ss_header << net_msg.m_sv2_header;
 
