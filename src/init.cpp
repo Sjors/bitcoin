@@ -1902,9 +1902,8 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     if (args.GetBoolArg("-stratumv2", false)) {
         assert(!node.sv2_template_provider);
         assert(node.chainman);
-        assert(node.mempool);
 
-        node.sv2_template_provider = std::make_unique<Sv2TemplateProvider>();
+        node.sv2_template_provider = std::make_unique<Sv2TemplateProvider>(*node.chainman);
 
         uint16_t sv2_port;
         const std::string sv2_port_arg = args.GetArg("-stratumv2port", "");
