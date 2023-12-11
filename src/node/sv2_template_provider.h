@@ -277,6 +277,22 @@ private:
      */
     std::vector<node::Sv2NetMsg> ReadAndDecryptSv2NetMsgs(Sv2Client& client, Span<uint8_t> buffer, ssize_t num_bytes);
 
+    /**
+     * A helper method that will serialize and send a message to an Sv2Client.
+     */
+    template <typename T>
+    [[nodiscard]] bool Send(const Sv2Client& client, const T& sv2_msg) {
+        DataStream ss{};
+
+        try {
+            ss << sv2_msg;
+        } catch (const std::exception& e) {
+            LogPrintf("Error serializing Sv2NetMsg: %s\n", e.what());
+            return false;
+        }
+
+        return SendBuf(client, ss);
+    }
 
     /**
      * A helper method that will send a buffer of bytes to an Sv2Client.

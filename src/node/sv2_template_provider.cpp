@@ -635,8 +635,6 @@ std::vector<std::byte> Sv2TemplateProvider::BuildEncryptedHeader(const node::Sv2
     ss_header.resize(header_and_mac_size);
     noise.SendMsg(ss_header);
 
-    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "To encrypt: %s\n", HexStr(net_msg.m_msg));
-
     size_t num_chunks = net_msg.m_msg.size() / (SV2_FRAME_CHUNK_SIZE - POLY1305_TAGLEN);
     if (net_msg.m_msg.size() % (SV2_FRAME_CHUNK_SIZE - POLY1305_TAGLEN) != 0) {
         num_chunks++;
@@ -663,6 +661,23 @@ std::vector<std::byte> Sv2TemplateProvider::BuildEncryptedHeader(const node::Sv2
 
     return msg_buf;
 };
+
+std::vector<Sv2NoiseHeader> Sv2TemplateProvider::ReadSv2NoiseHeaders(Span<uint8_t> buffer, ssize_t num_bytes)
+{
+    auto bytes_read = 0;
+    DataStream ss (buffer);
+    std::vector<Sv2NoiseHeader> headers;
+    while (bytes_read < num_bytes)
+    {
+        Sv2NoiseHeader header;
+        ss >> header;
+
+        bytes_read += header.m_header + 2;
+        headers.push_back(std::move(header));
+    }
+
+    return headers;
+}
 
 std::vector<node::Sv2NetMsg> Sv2TemplateProvider::ReadAndDecryptSv2NetMsgs(Sv2Client& client, Span<uint8_t> buffer, ssize_t num_bytes)
 {
