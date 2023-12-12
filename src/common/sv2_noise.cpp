@@ -281,26 +281,6 @@ ssize_t Sv2NoiseSession::ProcessMsg(Span<std::byte> msg, bool send)
            m_cs1 = std::move(cs1);
            m_cs2 = std::move(cs2);
 
-           m_session_state = SessionState::CIPHER_CONFIRMATION;
-           break;
-        }
-        case SessionState::CIPHER_CONFIRMATION:
-        {
-           num_bytes = 1; // Cipher choice by default only serializes on byte for Bitcoin.
-           DataStream ss_output{};
-           if (send) {
-               CipherChoice cipher_choice;
-               ss_output << cipher_choice;
-               std::memcpy(&msg[0], &ss_output[0], num_bytes);
-           } else {
-               AeadCiphers ciphers;
-               DataStream ss_received_ciphers(msg);
-               ss_received_ciphers >> ciphers;
-
-               CipherChoice cipher_choice;
-               ss_output << cipher_choice;
-               std::memcpy(&msg[0], &ss_output[0], num_bytes);
-           }
 
            m_session_state = SessionState::TRANSPORT;
            break;

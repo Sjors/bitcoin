@@ -282,18 +282,6 @@ void Sv2TemplateProvider::ProcessSv2Noise(Sv2Client& client, Span<std::byte> buf
         {
             break;
         }
-        case SessionState::CIPHER_CONFIRMATION:
-        {
-            client.m_noise->ReadMsg(buffer);
-
-            CipherChoice cipher_choice;
-            auto cipher_choice_header = Sv2NoiseHeader(cipher_choice, false);
-            if (!Send(client, cipher_choice_header)) {
-                throw std::runtime_error("Sv2TemplateProvider::ProcessSv2Message(): Failed to send CipherConfirmation to client\n");
-            }
-
-            break;
-        }
         case SessionState::TRANSPORT:
         {
             client.m_noise->ReadMsg(buffer);
