@@ -635,6 +635,8 @@ std::vector<std::byte> Sv2TemplateProvider::BuildEncryptedHeader(const node::Sv2
     ss_header.resize(header_and_mac_size);
     noise.SendMsg(ss_header);
 
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "To encrypt: %s\n", HexStr(net_msg.m_msg));
+
     size_t num_chunks = net_msg.m_msg.size() / (SV2_FRAME_CHUNK_SIZE - POLY1305_TAGLEN);
     if (net_msg.m_msg.size() % (SV2_FRAME_CHUNK_SIZE - POLY1305_TAGLEN) != 0) {
         num_chunks++;
