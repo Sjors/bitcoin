@@ -57,7 +57,7 @@ BOOST_AUTO_TEST_CASE(handshake_test)
 
     // Send the first part of the handshake: e ->
     Sv2NoiseHeader msg_e;
-    noise_initiator.ProcessMaybeHandshake(msg_e.m_payload, /*send=*/true);
+    BOOST_REQUIRE(noise_initiator.ProcessMaybeHandshake(msg_e.m_payload, /*send=*/true));
 
     auto valid_pubkey_bytes = UCharSpanCast(Span(msg_e.m_payload));
     XOnlyPubKey valid_pubkey(Span(&valid_pubkey_bytes[0], XOnlyPubKey::size()));
@@ -73,7 +73,7 @@ BOOST_AUTO_TEST_CASE(handshake_test)
     BOOST_CHECK(responder_static_key.HasEvenY());
 
     Sv2NoiseSession noise_responder{false /*initiator*/, std::move(responder_static_key)};
-    noise_responder.ProcessMaybeHandshake(msg_e.m_payload, /*send=*/false);
+    BOOST_REQUIRE(noise_responder.ProcessMaybeHandshake(msg_e.m_payload, /*send=*/false));
 
     // Assert that the responder receives the same key that was sent.
     BOOST_CHECK(XOnlyPubKey(noise_initiator.m_handshake_state.m_ephemeral_key.GetPubKey()) == noise_responder.m_handshake_state.m_remote_ephemeral_key);
@@ -85,10 +85,10 @@ BOOST_AUTO_TEST_CASE(handshake_test)
 
     // Responder send back the second part of the handshake: <- e, ee, s, es
     Sv2NoiseHeader msg_es;
-    noise_responder.ProcessMaybeHandshake(msg_e.m_payload, /*send=*/true);
+    BOOST_REQUIRE(noise_responder.ProcessMaybeHandshake(msg_e.m_payload, /*send=*/true));
 
     // Initiator receives the send part of the handshake and generates symmetric states.
-    noise_initiator.ProcessMaybeHandshake(msg_e.m_payload, /*send=*/false);
+    BOOST_REQUIRE(noise_initiator.ProcessMaybeHandshake(msg_e.m_payload, /*send=*/false));
     BOOST_CHECK(noise_initiator.m_handshake_state.m_remote_ephemeral_key == XOnlyPubKey(noise_responder.m_handshake_state.m_ephemeral_key.GetPubKey()));
     BOOST_CHECK_EQUAL(noise_responder.GetSessionState(), SessionState::TRANSPORT);
     BOOST_CHECK_EQUAL(noise_initiator.GetSymmetricStateHash(), noise_responder.GetSymmetricStateHash());
@@ -110,7 +110,7 @@ BOOST_AUTO_TEST_CASE(handshake_test)
     BOOST_CHECK(!std::equal(transport_header.m_payload.begin(), transport_header.m_payload.end(), payload_encrypted.begin()));
 
     // It should decrypt the bytes back to the plainted. The HMAC is validated within calls of ReadMsg.
-    noise_responder.DecryptMessage(payload_encrypted);
+    BOOST_REQUIRE(noise_responder.DecryptMessage(payload_encrypted));
     BOOST_CHECK_EQUAL(transport_header.m_payload.size(), plaintext.size());
     BOOST_CHECK(std::equal(transport_header.m_payload.begin(), transport_header.m_payload.end() - 16, plaintext.begin()));
 }

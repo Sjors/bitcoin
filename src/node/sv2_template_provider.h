@@ -10,10 +10,6 @@
 #include <util/time.h>
 #include <streams.h>
 
-static constexpr size_t SV2_HEADER_PLAIN_SIZE{6};
-static constexpr size_t SV2_HEADER_ENCRYPTED_SIZE{SV2_HEADER_PLAIN_SIZE + POLY1305_TAGLEN};
-
-
 class ChainstateManager;
 class CTxMemPool;
 
@@ -59,9 +55,6 @@ struct Sv2Client
     {
         CKey static_key;
         static_key.MakeNewKey(true);
-        while (!static_key.HasEvenY()) {
-            static_key.MakeNewKey(true);
-        }
 
         m_noise = std::make_unique<Sv2NoiseSession>(Sv2NoiseSession(false /* initiator */, std::move(static_key)));
     };

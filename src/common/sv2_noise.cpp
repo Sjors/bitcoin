@@ -42,16 +42,13 @@ Sv2CipherState::Sv2CipherState(uint8_t key[KEY_SIZE])
     std::copy(key, key + KEY_SIZE, m_key);
 }
 
-void Sv2CipherState::DecryptWithAd(Span<const std::byte> associated_data, Span<std::byte> msg)
+bool Sv2CipherState::DecryptWithAd(Span<const std::byte> associated_data, Span<std::byte> msg)
 {
     AEADChaCha20Poly1305::Nonce96 nonce = {0, ++m_nonce};
 
     auto key = MakeByteSpan(Span(m_key));
     AEADChaCha20Poly1305 aead{key};
-    bool res = aead.Decrypt(msg, associated_data, nonce, Span(msg.begin(), msg.end() - POLY1305_TAGLEN));
-    if (!res) {
-        throw std::runtime_error("Sv2CipherState::DecryptWithAd(): Failed to decrypt message.\n");
-    }
+    return aead.Decrypt(msg, associated_data, nonce, Span(msg.begin(), msg.end() - POLY1305_TAGLEN));
 }
 
 // The encryption assumes that the msg variable has sufficient space for a 16 byte MAC.
@@ -104,18 +101,19 @@ void Sv2CipherState::EncryptMessage(Span<std::byte> input, Span<std::byte> outpu
     Assume(bytes_written == output.size());
 }
 
-void Sv2CipherState::DecryptMessage(Span<std::byte> message) {
+bool Sv2CipherState::DecryptMessage(Span<std::byte> message) {
     size_t processed = 0;
     std::vector<std::byte> ad; // No associated data
 
     while (processed < message.size()) {
         size_t chunk_size = std::min(message.size() - processed, NOISE_MAX_CHUNK_SIZE);
         Span<std::byte> chunk = message.subspan(processed, chunk_size);
-        DecryptWithAd(ad, chunk);
+        if (!DecryptWithAd(ad, chunk)) return false;
         processed += chunk_size;
     }
-}
 
+    return true;
+}
 
 void Sv2SymmetricState::MixHash(const Span<const std::byte> input)
 {
@@ -131,6 +129,11 @@ void Sv2SymmetricState::MixKey(const Span<const uint8_t> input_key_material)
     std::memset(m_chaining_key, 0, sizeof(m_chaining_key));
     std::copy(out0, out0 + KEY_SIZE, m_chaining_key);
     m_cipher_state = Sv2CipherState{out1};
+}
+
+void Sv2SymmetricState::LogChainingKey()
+{
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Chaining key: %s\n", HexStr(m_chaining_key));
 }
 
 void Sv2SymmetricState::HKDF2(const Span<const uint8_t> input_key_material, uint8_t out0[KEY_SIZE], uint8_t out1[KEY_SIZE])
@@ -161,13 +164,15 @@ void Sv2SymmetricState::EncryptAndHash(Span<std::byte> data)
     MixHash(data);
 }
 
-void Sv2SymmetricState::DecryptAndHash(Span<std::byte> data)
+bool Sv2SymmetricState::DecryptAndHash(Span<std::byte> data)
 {
     // The handshake requires mix hashing the cipher text NOT the decrypted
     // plaintext.
     std::vector<std::byte> cipher_text(data.begin(), data.end());
-    m_cipher_state.DecryptWithAd(MakeByteSpan(m_hash_output), data);
+    bool res = m_cipher_state.DecryptWithAd(MakeByteSpan(m_hash_output), data);
+    if (!res) return false;
     MixHash(cipher_text);
+    return true;
 }
 
 std::array<Sv2CipherState, 2> Sv2SymmetricState::Split()
@@ -190,9 +195,7 @@ void Sv2HandshakeState::WriteMsgEphemeralPK(Span<std::byte> msg)
         throw std::runtime_error(strprintf("Invalid message size: %d bytes < %d", msg.size(), KEY_SIZE));
     }
 
-    if (!GenerateEvenYCoordinateKey(m_ephemeral_key)) {
-        throw std::runtime_error("Failed to generate a ephemeral key with a even Y coordinate");
-    }
+    GenerateEphemeralKey(m_ephemeral_key);
 
     auto ephemeral_pk = XOnlyPubKey(m_ephemeral_key.GetPubKey());
     std::transform(ephemeral_pk.begin(), ephemeral_pk.end(), msg.begin(),
@@ -221,37 +224,53 @@ void Sv2HandshakeState::WriteMsgES(Span<std::byte> msg)
 {
     ssize_t bytes_written = 0;
 
-    if (!GenerateEvenYCoordinateKey(m_ephemeral_key)) {
-        throw std::runtime_error("Failed to generate a ephemeral key with a even Y coordinate");
-    }
+    Assume(m_remote_ephemeral_key.IsFullyValid());
+
+    GenerateEphemeralKey(m_ephemeral_key);
 
     // Send our ephemeral pk.
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Write our ephemeral key\n");
     auto ephemeral_pk = XOnlyPubKey(m_ephemeral_key.GetPubKey());
+    Assume(ephemeral_pk.IsFullyValid());
     std::transform(ephemeral_pk.begin(), ephemeral_pk.end(), msg.begin(),
                [](unsigned char b) { return static_cast<std::byte>(b); });
 
     m_symmetric_state.MixHash(Span(msg.begin(), KEY_SIZE));
     bytes_written += KEY_SIZE;
 
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix hash: %s\n", HexStr(m_symmetric_state.m_hash_output));
+
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Perform ECDH with the remote ephemeral key\n");
     uint8_t ecdh_output[ECDH_OUTPUT_SIZE] = {};
     if (!m_ephemeral_key.ECDH(m_remote_ephemeral_key, ecdh_output)) {
         throw std::runtime_error("Failed to perform ECDH on the remote ephemeral key using our ephemeral key");
     }
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix key with ECDH result: ephemeral ours -- remote ephemeral\n");
     m_symmetric_state.MixKey(Span(ecdh_output));
+    m_symmetric_state.LogChainingKey();
 
     // Send our static pk.
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Encrypt and write our static key\n");
     auto static_pk = XOnlyPubKey(m_static_key.GetPubKey());
+    Assume(static_pk.IsFullyValid());
     std::transform(static_pk.begin(), static_pk.end(), msg.begin() + KEY_SIZE,
                [](unsigned char b) { return static_cast<std::byte>(b); });
     m_symmetric_state.EncryptAndHash(Span(msg.begin() + KEY_SIZE, KEY_SIZE + POLY1305_TAGLEN));
     bytes_written += KEY_SIZE + POLY1305_TAGLEN;
 
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix hash: %s\n", HexStr(m_symmetric_state.m_hash_output));
+
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Perform ECDH between our static and remote ephemeral key\n");
     uint8_t ecdh_output_remote[ECDH_OUTPUT_SIZE];
     if (!m_static_key.ECDH(m_remote_ephemeral_key, ecdh_output_remote)) {
         throw std::runtime_error("Failed to perform ECDH on the remote ephemeral key using our static key");
     }
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "ECDH result: %s\n", HexStr(ecdh_output_remote));
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix key with ECDH result: static ours -- remote ephemeral\n");
     m_symmetric_state.MixKey(Span(ecdh_output_remote));
+    m_symmetric_state.LogChainingKey();
 
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Generate certificate\n");
     // Add our digital signature noise message.
     auto epoch_now = std::chrono::system_clock::now().time_since_epoch();
     uint32_t valid_from = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::seconds>(epoch_now).count());
@@ -265,59 +284,130 @@ void Sv2HandshakeState::WriteMsgES(Span<std::byte> msg)
     // Serialize our digital signature noise message and encrypt.
     DataStream ss{};
     ss << sig_noise_msg;
-    auto sig_noise_size = ss.size();
+    Assume(ss.size() == SIGNATURE_NOISE_MESSAGE_SIZE);
     std::copy(ss.begin(), ss.end(), msg.begin() + bytes_written);
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Our certificate: %s\n", HexStr(Span(msg.begin() + bytes_written, SIGNATURE_NOISE_MESSAGE_SIZE)));
 
-    m_symmetric_state.EncryptAndHash(Span(msg.begin() + bytes_written, sig_noise_size + POLY1305_TAGLEN));
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Encrypt certificate\n");
+    m_symmetric_state.EncryptAndHash(Span(msg.begin() + bytes_written, SIGNATURE_NOISE_MESSAGE_SIZE + POLY1305_TAGLEN));
 
-    bytes_written += sig_noise_size + POLY1305_TAGLEN;
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix hash: %s\n", HexStr(m_symmetric_state.m_hash_output));
+
+    bytes_written += SIGNATURE_NOISE_MESSAGE_SIZE + POLY1305_TAGLEN;
+    Assume(bytes_written == INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH);
 }
 
 // This should not be used outside of test code without further scrutiny.
-void Sv2HandshakeState::ReadMsgES(Span<std::byte> msg)
+bool Sv2HandshakeState::ReadMsgES(Span<std::byte> msg)
 {
-   ssize_t bytes_read = 0;
+    Assume(msg.size() == INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH);
+    ssize_t bytes_read = 0;
 
-   // Read the remote ephmeral key from the msg and decrypt.
-   auto remote_ephemeral_key_span = UCharSpanCast(Span(msg.begin(), KEY_SIZE));
-   m_remote_ephemeral_key = XOnlyPubKey(remote_ephemeral_key_span);
+    // Read the remote ephmeral key from the msg and decrypt.
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Read remote ephemeral key\n");
+    auto remote_ephemeral_key_span = UCharSpanCast(Span(msg.begin(), KEY_SIZE));
+    m_remote_ephemeral_key = XOnlyPubKey(remote_ephemeral_key_span);
     if (!m_remote_ephemeral_key.IsFullyValid()) {
-       throw std::runtime_error("Sv2HandshakeState::ReadMsgES(): Received invalid remote ephemeral key");
+    throw std::runtime_error("Sv2HandshakeState::ReadMsgES(): Received invalid remote ephemeral key");
     }
-   bytes_read += KEY_SIZE;
+    bytes_read += KEY_SIZE;
 
-   m_symmetric_state.MixHash(Span(msg.begin(), KEY_SIZE));
+    m_symmetric_state.MixHash(Span(msg.begin(), KEY_SIZE));
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix hash: %s\n", HexStr(m_symmetric_state.m_hash_output));
 
-   uint8_t ecdh_output[ECDH_OUTPUT_SIZE];
-   m_ephemeral_key.ECDH(m_remote_ephemeral_key, ecdh_output);
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Perform ECDH with the remote ephemeral key\n");
+    uint8_t ecdh_output[ECDH_OUTPUT_SIZE];
+    m_ephemeral_key.ECDH(m_remote_ephemeral_key, ecdh_output);
 
-   m_symmetric_state.MixKey(Span(ecdh_output));
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix key with ECDH result: ephemeral ours -- remote ephemeral\n");
+    m_symmetric_state.MixKey(Span(ecdh_output));
+    m_symmetric_state.LogChainingKey();
 
-   m_symmetric_state.DecryptAndHash(Span(msg.begin() + KEY_SIZE, KEY_SIZE + POLY1305_TAGLEN));
-   bytes_read += KEY_SIZE + POLY1305_TAGLEN;
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Decrypt remote static key\n");
+    bool res = m_symmetric_state.DecryptAndHash(Span(msg.begin() + KEY_SIZE, KEY_SIZE + POLY1305_TAGLEN));
+    if (!res) return false;
+    bytes_read += KEY_SIZE + POLY1305_TAGLEN;
 
-   // Read the remote static key from the msg and decrypt.
-   auto remote_static_key_span = UCharSpanCast(Span(msg.begin() + KEY_SIZE, KEY_SIZE));
-   m_remote_static_key = XOnlyPubKey(remote_static_key_span);
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix hash: %s\n", HexStr(m_symmetric_state.m_hash_output));
 
-   if (!m_remote_static_key.IsFullyValid()) {
-       throw std::runtime_error("Sv2HandshakeState::ReadMsgES(): Received invalid remote static key");
-   }
+    // Load remote static key from the decryted msg
+    auto remote_static_key_span = UCharSpanCast(Span(msg.begin() + KEY_SIZE, KEY_SIZE));
+    m_remote_static_key = XOnlyPubKey(remote_static_key_span);
 
-   uint8_t ecdh_output_remote[ECDH_OUTPUT_SIZE];
-   if (!m_ephemeral_key.ECDH(m_remote_static_key, ecdh_output_remote)) {
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Check if remote static key is valid\n");
+    if (!m_remote_static_key.IsFullyValid()) {
+        throw std::runtime_error("Sv2HandshakeState::ReadMsgES(): Received invalid remote static key");
+    }
+
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Perform ECDH on the remote static key\n");
+    uint8_t ecdh_output_remote[ECDH_OUTPUT_SIZE];
+    if (!m_ephemeral_key.ECDH(m_remote_static_key, ecdh_output_remote)) {
         throw std::runtime_error("Failed to perform ECDH on the remote static key using our ephemeral key");
+    }
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "ECDH result: %s\n", HexStr(ecdh_output_remote));
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix key with ECDH result: ephemeral ours -- remote static\n");
+    m_symmetric_state.MixKey(Span(ecdh_output_remote));
+    m_symmetric_state.LogChainingKey();
 
-   }
-   m_symmetric_state.MixKey(Span(ecdh_output_remote));
 
-   // TODO: Validate the decrypted digital signature noise message
-   auto constexpr digital_sig_len = 74;
-   m_symmetric_state.DecryptAndHash(Span(msg.begin() + bytes_read, digital_sig_len + POLY1305_TAGLEN));
-   bytes_read += (digital_sig_len + POLY1305_TAGLEN);
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Decrypt remote certificate\n");
+    res = m_symmetric_state.DecryptAndHash(Span(msg.begin() + bytes_read, SIGNATURE_NOISE_MESSAGE_SIZE + POLY1305_TAGLEN));
+    if (!res) return false;
+    bytes_read += (SIGNATURE_NOISE_MESSAGE_SIZE + POLY1305_TAGLEN);
+
+    // TODO: Validate the decrypted digital signature noise message
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Validate remote certificate (not implemented)\n");
+
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix hash: %s\n", HexStr(m_symmetric_state.m_hash_output));
+
+    Assume(bytes_read == INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH);
+    return true;
 }
 
-void Sv2NoiseSession::ProcessMaybeHandshake(Span<std::byte> msg, bool send)
+Sv2Cipher::Sv2Cipher(CKey&& static_key, bool initiator)
+{
+    m_handshake_state = Sv2HandshakeState(std::move(static_key));
+    m_initiator = initiator;
+}
+
+
+void Sv2Cipher::FinishHandshake()
+{
+    Assume(m_handshake_state);
+
+    auto cipher_state = m_handshake_state->m_symmetric_state.Split();
+    auto cs1 = cipher_state[0];
+    auto cs2 = cipher_state[1];
+
+    m_hash = std::move(m_handshake_state->m_symmetric_state.m_hash_output);
+
+    m_cs1 = std::move(cs1);
+    m_cs2 = std::move(cs2);
+
+    m_handshake_state.reset();
+}
+
+bool Sv2Cipher::DecryptMessage(Span<std::byte> message)
+{
+    if (m_initiator) {
+        return m_cs2.DecryptMessage(message);
+    } else {
+        return m_cs1.DecryptMessage(message);
+    }
+}
+
+void Sv2Cipher::EncryptMessage(Span<std::byte> input, Span<std::byte> output)
+{
+    Assume(output.size() == Sv2NoiseSession::EncryptedMessageSize(input.size()));
+
+    if (m_initiator) {
+        m_cs1.EncryptMessage(input, output);
+    } else {
+        m_cs2.EncryptMessage(input, output);
+    }
+}
+
+bool Sv2NoiseSession::ProcessMaybeHandshake(Span<std::byte> msg, bool send)
 {
     switch (m_session_state)
     {
@@ -338,7 +428,8 @@ void Sv2NoiseSession::ProcessMaybeHandshake(Span<std::byte> msg, bool send)
             if (send) {
                 m_handshake_state.WriteMsgES(msg);
             } else {
-                m_handshake_state.ReadMsgES(msg);
+                bool res = m_handshake_state.ReadMsgES(msg);
+                if (!res) return false;
             }
 
             auto cipher_state = m_handshake_state.m_symmetric_state.Split();
@@ -359,6 +450,7 @@ void Sv2NoiseSession::ProcessMaybeHandshake(Span<std::byte> msg, bool send)
             break;
         }
     }
+    return true;
 }
 
 Sv2NoiseSession::Sv2NoiseSession(bool initiator, CKey&& static_key): m_initiator{initiator}
@@ -380,14 +472,14 @@ void Sv2NoiseSession::EncryptMessage(Span<std::byte> input, Span<std::byte> outp
     }
 }
 
-void Sv2NoiseSession::DecryptMessage(Span<std::byte> message)
+bool Sv2NoiseSession::DecryptMessage(Span<std::byte> message)
 {
     Assume(m_session_state == SessionState::TRANSPORT);
 
     if (m_initiator) {
-        m_cs2.DecryptMessage(message);
+        return m_cs2.DecryptMessage(message);
     } else {
-        m_cs1.DecryptMessage(message);
+        return m_cs1.DecryptMessage(message);
     }
 }
 
@@ -401,20 +493,11 @@ const SessionState& Sv2NoiseSession::GetSessionState() const
     return m_session_state;
 }
 
-bool Sv2HandshakeState::GenerateEvenYCoordinateKey(CKey& key)
+void Sv2HandshakeState::GenerateEphemeralKey(CKey& key) noexcept
 {
-    if (!key.IsValid()) {
-        key.MakeNewKey(true);
-    }
-
-    // Set an upper bound on the number of attempts.
-    constexpr int maxAttempts = 1000;
-    int attempts = 0;
-    while (!key.HasEvenY() && attempts < maxAttempts) {
-        key.MakeNewKey(true);
-    }
-
-    return key.HasEvenY();
+    Assume(!key.size());
+    key.MakeNewKey(true);
+    Assume(XOnlyPubKey(key.GetPubKey()).IsFullyValid());
 };
 
 size_t Sv2NoiseSession::EncryptedMessageSize(size_t msg_len) {

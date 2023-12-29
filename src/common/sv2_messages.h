@@ -1,8 +1,13 @@
+// Copyright (c) 2023-present The Bitcoin Core developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #ifndef BITCOIN_COMMON_SV2_MESSAGES_H
 #define BITCOIN_COMMON_SV2_MESSAGES_H
 
 #include <consensus/validation.h>
 #include <cstdint>
+#include <net_message.h>
 #include <primitives/transaction.h>
 #include <script/script.h>
 #include <streams.h>
@@ -637,6 +642,7 @@ public:
         s.write(MakeByteSpan(m_msg));
     }
 };
+
 }
 
 #endif // BITCOIN_COMMON_SV2_MESSAGES_H

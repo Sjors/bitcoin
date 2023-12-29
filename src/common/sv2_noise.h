@@ -24,7 +24,10 @@ static constexpr size_t KEY_SIZE = 32;
 static constexpr size_t ECDH_OUTPUT_SIZE = 32;
 /** Section 3: All Noise messages are less than or equal to 65535 bytes in length. */
 static constexpr size_t NOISE_MAX_CHUNK_SIZE = 65535;
-static constexpr size_t INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH = 170;
+/** Sv2 spec 4.5.2 */
+static constexpr size_t SIGNATURE_NOISE_MESSAGE_SIZE = 2 + 4 + 4 + 64;
+static constexpr size_t INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH = KEY_SIZE + KEY_SIZE +
+                        POLY1305_TAGLEN + SIGNATURE_NOISE_MESSAGE_SIZE + POLY1305_TAGLEN;
 
 // Sha256 hash of the ascii encoding - "Noise_NX_secp256k1_ChaChaPoly_SHA256".
 // This is the first step required when setting up the chaining key.
@@ -59,6 +62,7 @@ public:
     }
 };
 
+/** TODO: delete enum, state machine is handled by Sv2Transport */
 enum class SessionState
 {
     // The first step of the handshake expects the initiator to send a msg E.
@@ -78,7 +82,13 @@ public:
     Sv2CipherState() = default;
     explicit Sv2CipherState(uint8_t key[KEY_SIZE]);
 
-    void DecryptWithAd(Span<const std::byte> associated_data, Span<std::byte> msg);
+    /** Decrypt message
+     * @param[in] associated_data associated data
+     * @param[in,out] msg message with encrypted and authenticated chunks
+     *
+     * @returns whether decryption succeeded
+     */
+     [[nodiscard]] bool DecryptWithAd(Span<const std::byte> associated_data, Span<std::byte> msg);
     void EncryptWithAd(Span<const std::byte> associated_data, Span<std::byte> msg);
 
     /** The message will be chunked in NOISE_MAX_CHUNK_SIZE parts and expanded
@@ -93,7 +103,7 @@ public:
      *
      * @param[in] message     message
      */
-    void DecryptMessage(Span<std::byte> message);
+    [[ nodiscard ]] bool DecryptMessage(Span<std::byte> message);
 
 private:
     uint8_t m_key[KEY_SIZE];
@@ -114,8 +124,11 @@ public:
     void MixHash(const Span<const std::byte> input);
     void MixKey(const Span<const uint8_t> input_key_material);
     void EncryptAndHash(Span<std::byte> data);
-    void DecryptAndHash(Span<std::byte> data);
+    [[ nodiscard ]] bool DecryptAndHash(Span<std::byte> data);
     std::array<Sv2CipherState, 2> Split();
+
+    /* For testing */
+    void LogChainingKey();
 
 private:
     Sv2CipherState m_cipher_state;
@@ -202,14 +215,36 @@ public:
     /** During handshake Stage 2, read the remote ephmeral key, static key
       * and certificate. Verify their certificate. Only used in test code.
       */
-    void ReadMsgES(Span<std::byte> msg);
+    [[nodiscard]] bool ReadMsgES(Span<std::byte> msg);
 
 private:
     CKey m_static_key;
 
-    [[nodiscard]] bool GenerateEvenYCoordinateKey(CKey& key);
+    void GenerateEphemeralKey(CKey& key) noexcept;
 };
 
+class Sv2Cipher
+{
+public:
+    bool m_initiator;
+
+    Sv2Cipher(CKey&& static_key, bool initiator);
+
+    /** TODO: unused after HANDSHAKE state, so clear/remove (std::optional?) */
+    std::optional<Sv2HandshakeState> m_handshake_state;
+
+    SessionState m_session_state;
+
+    uint256 m_hash;
+    Sv2CipherState m_cs1;
+    Sv2CipherState m_cs2;
+
+    bool DecryptMessage(Span<std::byte> message);
+    void EncryptMessage(Span<std::byte> input, Span<std::byte> output);
+    void FinishHandshake();
+};
+
+/** TODO: delete class, have Sv2Transport manage session */
 // NoiseSession encapsulates the whole handshake state and subsequent secure
 // communication.
 class Sv2NoiseSession
@@ -222,9 +257,10 @@ public:
     /**
      * Process a noise msg to keep a handshake progressing
      * May not be called in TRANSPORT state
-     * @throws std::runtime_error if the msg cannot be processed.
+     * @throws std::runtime_error if the msg cannot be processed
+     * TODO: just return false
      */
-    void ProcessMaybeHandshake(Span<std::byte> msg, bool send);
+    [[ nodiscard ]] bool ProcessMaybeHandshake(Span<std::byte> msg, bool send);
 
     /** Encrypt a message. Only call in TRANSPORT session state.
      *
@@ -240,8 +276,9 @@ public:
      *
      * @param[in] message   message to be decrypted
      *
+     * @returns whether decryption succeeded
      */
-    void DecryptMessage(Span<std::byte> message);
+    [[ nodiscard ]] bool DecryptMessage(Span<std::byte> message);
     const uint256& GetSymmetricStateHash() const;
     const SessionState& GetSessionState() const;
     bool HandshakeComplete() const

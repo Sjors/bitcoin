@@ -1,6 +1,7 @@
 #include <node/sv2_template_provider.h>
 
 #include <common/args.h>
+#include <common/sv2_transport.h>
 #include <consensus/merkle.h>
 #include <txmempool.h>
 #include <util/thread.h>
@@ -275,7 +276,8 @@ void Sv2TemplateProvider::ProcessMaybeSv2Handshake(Sv2Client& client, Span<std::
     const SessionState state_before = client.m_noise->GetSessionState();
     Assume(state_before != SessionState::TRANSPORT);
 
-    client.m_noise->ProcessMaybeHandshake(buffer, /*send=*/false);
+    bool res = client.m_noise->ProcessMaybeHandshake(buffer, /*send=*/false);
+    if (!res) throw std::runtime_error("Failed to parse Msg E from client\n");
 
     // TODO: consider modifying ReadMsg to optionally return a reply, so
     //       we don't need to access client.m_noise->GetSessionState()
@@ -287,7 +289,8 @@ void Sv2TemplateProvider::ProcessMaybeSv2Handshake(Sv2Client& client, Span<std::
         LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Send noise handshake reply: ES\n");
         std::byte msg_es[INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH];
         Span<std::byte> msg_es_span(msg_es, INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH);
-        client.m_noise->ProcessMaybeHandshake(msg_es_span, /*send=*/true);
+        res  = client.m_noise->ProcessMaybeHandshake(msg_es_span, /*send=*/true);
+        if(!res) throw std::runtime_error("Failed to construct Msg ES\n");
         if (!SendBuf(client, msg_es_span)) {
             throw std::runtime_error("Sv2TemplateProvider::ProcessSv2Message(): Failed to send Msg ES to client\n");
         }
@@ -619,7 +622,11 @@ std::vector<node::Sv2NetMsg> Sv2TemplateProvider::ReadAndDecryptSv2NetMsgs(Sv2Cl
     {
         // Decrypt the header.
         Span<std::byte> encrypted_header = Span(&buffer[bytes_read], SV2_HEADER_ENCRYPTED_SIZE);
-        client.m_noise->DecryptMessage(encrypted_header);
+        if  (!client.m_noise->DecryptMessage(encrypted_header)) {
+            LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Failed to decrypt header\n");
+            client.m_disconnect_flag = true;
+            break;
+        }
         bytes_read += SV2_HEADER_ENCRYPTED_SIZE;
 
         Span<std::byte> decrypted_header = encrypted_header.subspan(0, SV2_HEADER_PLAIN_SIZE);
@@ -633,7 +640,11 @@ std::vector<node::Sv2NetMsg> Sv2TemplateProvider::ReadAndDecryptSv2NetMsgs(Sv2Cl
         // Decrypt the payload
         size_t expanded_size = Sv2NoiseSession::EncryptedMessageSize(header.m_msg_len);
         Span<std::byte> encrypted_payload = Span(&buffer[bytes_read], expanded_size);
-        client.m_noise->DecryptMessage(encrypted_payload);
+        if (!client.m_noise->DecryptMessage(encrypted_payload)) {
+            LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Failed to decrypt message payload\n");
+            client.m_disconnect_flag = true;
+            break;
+        }
         Span<std::byte> payload = encrypted_payload.subspan(0, header.m_msg_len);
         bytes_read += expanded_size;
 
