@@ -146,6 +146,8 @@ BITCOIN_CORE_H = \
   common/run_command.h \
   common/sv2_noise.h \
   common/url.h \
+  common/v1_transport.h \
+  common/v2_transport.h \
   compat/assumptions.h \
   compat/byteswap.h \
   compat/compat.h \
@@ -209,6 +211,7 @@ BITCOIN_CORE_H = \
   memusage.h \
   merkleblock.h \
   net.h \
+  net_message.h \
   net_permissions.h \
   net_processing.h \
   net_types.h \
@@ -388,7 +391,6 @@ libbitcoin_node_a_SOURCES = \
   addrdb.cpp \
   addrman.cpp \
   banman.cpp \
-  bip324.cpp \
   blockencodings.cpp \
   blockfilter.cpp \
   chain.cpp \
@@ -681,6 +683,7 @@ libbitcoin_common_a_SOURCES = \
   addresstype.cpp \
   base58.cpp \
   bech32.cpp \
+  bip324.cpp \
   chainparams.cpp \
   coins.cpp \
   common/args.cpp \
@@ -693,6 +696,8 @@ libbitcoin_common_a_SOURCES = \
   common/settings.cpp \
   common/system.cpp \
   common/transport.cpp \
+  common/v1_transport.cpp \
+  common/v2_transport.cpp \
   compressor.cpp \
   core_read.cpp \
   core_write.cpp \
