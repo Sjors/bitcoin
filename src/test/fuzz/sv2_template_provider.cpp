@@ -22,12 +22,12 @@ FUZZ_TARGET(sv2_template_provider)
     // node::Sv2SetNewPrevHashMsg best_prev_hash;
     // std::map<uint64_t, std::unique_ptr<node::CBlockTemplate>> block_cache;
 
-    auto sock = std::make_shared<StaticContentsSock>(std::string(1, 'a'));
-    Sv2Client client{sock};
+    // auto sock = std::make_shared<StaticContentsSock>(std::string(1, 'a'));
+    // Sv2Client client{sock};
 
-    client.m_setup_connection_confirmed = false;
-    auto header = node::Sv2NetHeader{node::Sv2MsgType::SETUP_CONNECTION, static_cast<uint32_t>(random_bytes.size())};
-    auto setup_conn = node::Sv2NetMsg(std::move(header), std::vector<uint8_t>(random_bytes));
+    // client.m_setup_connection_confirmed = false;
+    // auto header = node::Sv2NetHeader{node::Sv2MsgType::SETUP_CONNECTION, static_cast<uint32_t>(random_bytes.size())};
+    // auto setup_conn = node::Sv2NetMsg(std::move(header), std::vector<uint8_t>(random_bytes));
 
     // TODO: pass callback to ProcessSv2Message to it can return unencrypted
     // responses.

@@ -1,11 +1,19 @@
 #include <node/sv2_template_provider.h>
 
 #include <common/args.h>
-#include <common/sv2_transport.h>
 #include <consensus/merkle.h>
 #include <txmempool.h>
 #include <util/thread.h>
 #include <validation.h>
+
+Sv2TemplateProvider::Sv2TemplateProvider(ChainstateManager& chainman, CTxMemPool& mempool) : m_chainman{chainman}, m_mempool{mempool}
+{
+    // TODO: persist static key
+    m_static_key.MakeNewKey(true);
+
+    // TODO: get rid of Init() ???
+    Init({});
+}
 
 bool Sv2TemplateProvider::Start(const Sv2TemplateProviderOptions& options)
 {
@@ -217,7 +225,8 @@ void Sv2TemplateProvider::ThreadSv2Handler()
 
             auto sock = m_listening_socket->Accept(reinterpret_cast<struct sockaddr*>(&sockaddr), &sockaddr_len);
             if (sock) {
-                m_sv2_clients.emplace_back(std::make_unique<Sv2Client>(Sv2Client{std::move(sock)}));
+                m_sv2_clients.push_back(std::make_unique<Sv2Client>(Sv2Client{std::move(sock)}));
+                m_sv2_clients[-1]->m_transport = std::make_unique<Sv2Transport>(/*initiating=*/false, m_static_key);
             }
         }
 
@@ -250,49 +259,43 @@ void Sv2TemplateProvider::ThreadSv2Handler()
                 try
                 {
                     auto msg_ = Span(bytes_received_buf, num_bytes_received);
-                    Span<std::byte> msg(reinterpret_cast<std::byte*>(msg_.data()), msg_.size());
-
-                    if (!client->m_noise->HandshakeComplete()) {
-                        ProcessMaybeSv2Handshake(*client.get(), msg);
-                    } else {
-                        auto sv2_msgs = ReadAndDecryptSv2NetMsgs(*client.get(), msg);
-
-                        for (auto& m : sv2_msgs)
-                        {
-                            ProcessSv2Message(m, *client.get());
+                    Span<const uint8_t> msg(reinterpret_cast<const uint8_t*>(msg_.data()), msg_.size());
+                    while (msg.size() > 0) {
+                        // absorb network data
+                        if (!client->m_transport->ReceivedBytes(msg)) {
+                            // Serious transport problem
+                            client->m_disconnect_flag = true;
+                            continue;
                         }
+
+                        if (client->m_transport->ReceivedMessageComplete()) {
+                            Sv2NetMsg msg = client->m_transport->GetReceivedMessage();
+
+                            // TODO: push to a queue first
+                            ProcessSv2Message(std::move(msg), *client.get());
+                            // complete = true;
+                        }
+
+
+                        // auto msg_ = Span(bytes_received_buf, num_bytes_received);
+                        // Span<std::byte> msg(reinterpret_cast<std::byte*>(msg_.data()), msg_.size());
+
+                        // if (!client->m_noise->HandshakeComplete()) {
+                        //     ProcessMaybeSv2Handshake(*client.get(), msg);
+                        // } else {
+                        //     auto sv2_msgs = ReadAndDecryptSv2NetMsgs(*client.get(), msg);
+
+                        //     for (auto& m : sv2_msgs)
+                        //     {
+                        //         ProcessSv2Message(m, *client.get());
+                        //     }
+                        // }
                     }
                 } catch (const std::exception& e) {
                     LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received error when processing client message: %s\n", e.what());
                     client->m_disconnect_flag = true;
                 }
             }
-        }
-    }
-}
-
-void Sv2TemplateProvider::ProcessMaybeSv2Handshake(Sv2Client& client, Span<std::byte> buffer)
-{
-    const SessionState state_before = client.m_noise->GetSessionState();
-    Assume(state_before != SessionState::TRANSPORT);
-
-    bool res = client.m_noise->ProcessMaybeHandshake(buffer, /*send=*/false);
-    if (!res) throw std::runtime_error("Failed to parse Msg E from client\n");
-
-    // TODO: consider modifying ReadMsg to optionally return a reply, so
-    //       we don't need to access client.m_noise->GetSessionState()
-    if (state_before == SessionState::HANDSHAKE_STEP_1) {
-        // Expect to have read the E msg.
-        // Expect state transition to have happened
-        Assume(client.m_noise->GetSessionState() == SessionState::HANDSHAKE_STEP_2);
-
-        LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Send noise handshake reply: ES\n");
-        std::byte msg_es[INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH];
-        Span<std::byte> msg_es_span(msg_es, INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH);
-        res  = client.m_noise->ProcessMaybeHandshake(msg_es_span, /*send=*/true);
-        if(!res) throw std::runtime_error("Failed to construct Msg ES\n");
-        if (!SendBuf(client, msg_es_span)) {
-            throw std::runtime_error("Sv2TemplateProvider::ProcessSv2Message(): Failed to send Msg ES to client\n");
         }
     }
 }
@@ -589,77 +592,10 @@ std::vector<CTransactionRef> txs;
 
 bool Sv2TemplateProvider::EncryptAndSendMessage(Sv2Client& client, node::Sv2NetMsg& net_msg)
 {
-    const size_t encrypted_msg_size = Sv2NoiseSession::EncryptedMessageSize(net_msg.m_msg.size());
-    std::vector<std::byte> buffer(SV2_HEADER_ENCRYPTED_SIZE + encrypted_msg_size, std::byte(0));
-    Span<std::byte> buffer_span{MakeWritableByteSpan(buffer)};
-
-    // Header
-    DataStream ss_header_plain{};
-    ss_header_plain << net_msg.m_sv2_header;
-    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Header: %s\n", HexStr(ss_header_plain));
-    Span<std::byte> header_encrypted{buffer_span.subspan(0, SV2_HEADER_ENCRYPTED_SIZE)};
-    client.m_noise->EncryptMessage(ss_header_plain, header_encrypted);
-
-    // Payload
-    Span<std::byte> payload_plain = MakeWritableByteSpan(net_msg.m_msg);
-    // TODO: truncate very long messages, about 100 bytes at the start and end
-    //       is probably enough for most debugging.
-    // LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Payload: %s\n", HexStr(payload_plain));
-    Span<std::byte> payload_encrypted{buffer_span.subspan(SV2_HEADER_ENCRYPTED_SIZE, encrypted_msg_size)};
-    client.m_noise->EncryptMessage(payload_plain, payload_encrypted);
-
-    return SendBuf(client, buffer_span);
+    // TODO: pass message to transport and get the buffer of stuff to send back
+    // return SendBuf(client, buffer_span);
+    return false;
 };
-
-std::vector<node::Sv2NetMsg> Sv2TemplateProvider::ReadAndDecryptSv2NetMsgs(Sv2Client& client, Span<std::byte> buffer)
-{
-    Assume(client.m_noise->GetSessionState() == SessionState::TRANSPORT);
-
-    size_t bytes_read = 0;
-    std::vector<node::Sv2NetMsg> sv2_msgs;
-
-    while (bytes_read < buffer.size())
-    {
-        // Decrypt the header.
-        Span<std::byte> encrypted_header = Span(&buffer[bytes_read], SV2_HEADER_ENCRYPTED_SIZE);
-        if  (!client.m_noise->DecryptMessage(encrypted_header)) {
-            LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Failed to decrypt header\n");
-            client.m_disconnect_flag = true;
-            break;
-        }
-        bytes_read += SV2_HEADER_ENCRYPTED_SIZE;
-
-        Span<std::byte> decrypted_header = encrypted_header.subspan(0, SV2_HEADER_PLAIN_SIZE);
-        LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Header: %s\n", HexStr(decrypted_header));
-
-        // Decode header
-        DataStream ss_header{decrypted_header};
-        node::Sv2NetHeader header;
-        ss_header >> header;
-
-        // Decrypt the payload
-        size_t expanded_size = Sv2NoiseSession::EncryptedMessageSize(header.m_msg_len);
-        Span<std::byte> encrypted_payload = Span(&buffer[bytes_read], expanded_size);
-        if (!client.m_noise->DecryptMessage(encrypted_payload)) {
-            LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Failed to decrypt message payload\n");
-            client.m_disconnect_flag = true;
-            break;
-        }
-        Span<std::byte> payload = encrypted_payload.subspan(0, header.m_msg_len);
-        bytes_read += expanded_size;
-
-        LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Payload: %s\n", HexStr(payload));
-
-        // Add to sv2 message queue
-        std::vector<uint8_t> msg_payload(payload.size());
-        std::transform(payload.begin(), payload.end(), msg_payload.begin(),
-                           [](std::byte b) { return static_cast<uint8_t>(b); });
-
-        sv2_msgs.emplace_back(std::move(header), std::move(msg_payload));
-    }
-
-    return sv2_msgs;
-}
 
 bool Sv2TemplateProvider::SendBuf(const Sv2Client& client, Span<std::byte> buffer) {
     size_t total_sent = 0;

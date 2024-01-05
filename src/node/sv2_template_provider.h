@@ -2,7 +2,7 @@
 #define BITCOIN_NODE_SV2_TEMPLATE_PROVIDER_H
 
 #include <common/sv2_messages.h>
-#include <common/sv2_noise.h>
+#include <common/sv2_transport.h>
 #include <logging.h>
 #include <net.h>
 #include <node/miner.h>
@@ -19,6 +19,11 @@ struct Sv2Client
      * Receiving and sending socket for the connected client
      */
     std::shared_ptr<Sock> m_sock;
+
+    /**
+     * Transport
+     */
+    std::unique_ptr<Sv2Transport> m_transport;
 
     /**
      * Whether the client has confirmed the connection with a successful SetupConnection.
@@ -45,19 +50,7 @@ struct Sv2Client
      */
     CAmount m_latest_submitted_template_fees = 0;
 
-    /**
-     * The noise sessions for secure communication for this client and the template
-     * provider server.
-     */
-    std::unique_ptr<Sv2NoiseSession> m_noise;
-
-    explicit Sv2Client(std::shared_ptr<Sock> sock) : m_sock{sock}
-    {
-        CKey static_key;
-        static_key.MakeNewKey(true);
-
-        m_noise = std::make_unique<Sv2NoiseSession>(Sv2NoiseSession(false /* initiator */, std::move(static_key)));
-    };
+    explicit Sv2Client(std::shared_ptr<Sock> sock) : m_sock{sock} {};
 };
 
 struct Sv2TemplateProviderOptions
@@ -101,6 +94,8 @@ private:
      * template provider only recognizes its own subprotocol.
      */
     static constexpr uint8_t TP_SUBPROTOCOL{0x02};
+
+    CKey m_static_key;
 
     /**
      * The main listening socket for new stratum v2 connections.
@@ -182,10 +177,7 @@ private:
     uint16_t m_port;
 
 public:
-    explicit Sv2TemplateProvider(ChainstateManager& chainman, CTxMemPool& mempool) : m_chainman{chainman}, m_mempool{mempool}
-    {
-        Init({});
-    }
+    explicit Sv2TemplateProvider(ChainstateManager& chainman, CTxMemPool& mempool);
 
     ~Sv2TemplateProvider();
     /**
@@ -265,12 +257,6 @@ private:
      * @throws std::runtime_error if encrypting the message fails.
      */
     bool EncryptAndSendMessage(Sv2Client& client, node::Sv2NetMsg& net_msg);
-
-    /**
-     * A helper method to read multiple stratumv2 headers from a buffer.
-     * @throws std::runtime_error if deserializing the noise header fails.
-     */
-    std::vector<Sv2NoiseHeader> ReadSv2NoiseHeaders(Span<uint8_t> buffer, ssize_t num_bytes);
 
     /**
      * A helper method to read and decrypt multiple Sv2NetMsgs.

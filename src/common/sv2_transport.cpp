@@ -20,7 +20,7 @@ CKey GenerateRandomKey() noexcept
     return key;
 }
 
-Sv2Transport::Sv2Transport(bool initiating, CKey&& static_key) noexcept
+Sv2Transport::Sv2Transport(bool initiating, CKey static_key) noexcept
     : m_cipher{Sv2Cipher(std::move(static_key), initiating)}, m_initiating{initiating},
       m_recv_state{initiating ? RecvState::HANDSHAKE_STEP_2 : RecvState::HANDSHAKE_STEP_1},
       m_send_state{initiating ? SendState::HANDSHAKE_STEP_1 : SendState::HANDSHAKE_STEP_2},

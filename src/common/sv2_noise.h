@@ -250,52 +250,8 @@ public:
 class Sv2NoiseSession
 {
 public:
-    Sv2HandshakeState m_handshake_state;
-
-    Sv2NoiseSession(bool initiator, CKey&& static_key);
-
-    /**
-     * Process a noise msg to keep a handshake progressing
-     * May not be called in TRANSPORT state
-     * @throws std::runtime_error if the msg cannot be processed
-     * TODO: just return false
-     */
-    [[ nodiscard ]] bool ProcessMaybeHandshake(Span<std::byte> msg, bool send);
-
-    /** Encrypt a message. Only call in TRANSPORT session state.
-     *
-     * @param[in] input     message to be encrypted
-     * @param[out] output   use EncryptedMessageSize() to get the correct size,
-     *                      must point to a different underlying buffer.
-     */
-    void EncryptMessage(Span<std::byte> input, Span<std::byte> output);
-
-    /** Decrypt a message. Only call in TRANSPORT session state.
-     *  The shorter decrypted chunks are concatenated and written
-     *  back to msg.
-     *
-     * @param[in] message   message to be decrypted
-     *
-     * @returns whether decryption succeeded
-     */
-    [[ nodiscard ]] bool DecryptMessage(Span<std::byte> message);
-    const uint256& GetSymmetricStateHash() const;
-    const SessionState& GetSessionState() const;
-    bool HandshakeComplete() const
-    {
-        return m_session_state == SessionState::TRANSPORT;
-    }
     /* Expected size after chunking and with MAC */
     static size_t EncryptedMessageSize(size_t msg_len);
-
-private:
-    bool m_initiator;
-
-    SessionState m_session_state;
-
-    uint256 m_hash;
-    Sv2CipherState m_cs1;
-    Sv2CipherState m_cs2;
 };
 
 #endif // BITCOIN_COMMON_SV2_NOISE_H

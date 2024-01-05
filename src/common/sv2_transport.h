@@ -147,7 +147,7 @@ public:
       * @param[in] static_key a securely generated key
 
       */
-    Sv2Transport(bool initiating, CKey&& static_key) noexcept;
+    Sv2Transport(bool initiating, CKey static_key) noexcept;
 
     // Receive side functions.
     bool ReceivedMessageComplete() const noexcept override EXCLUSIVE_LOCKS_REQUIRED(!m_recv_mutex);
