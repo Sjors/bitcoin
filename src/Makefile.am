@@ -136,6 +136,7 @@ BITCOIN_CORE_H = \
   common/args.h \
   common/bloom.h \
   common/init.h \
+  common/transport.h \
   common/run_command.h \
   common/url.h \
   compat/assumptions.h \
@@ -681,6 +682,7 @@ libbitcoin_common_a_SOURCES = \
   common/run_command.cpp \
   common/settings.cpp \
   common/system.cpp \
+  common/transport.cpp \
   common/url.cpp \
   compressor.cpp \
   core_read.cpp \
