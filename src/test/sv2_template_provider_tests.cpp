@@ -55,9 +55,6 @@ BOOST_AUTO_TEST_CASE(Sv2TemplateProvider_Connection_test)
     uint32_t valid_from = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::seconds>(epoch_now).count());
     uint32_t valid_to =  std::numeric_limits<unsigned int>::max();
 
-    // TODO: Stratum v2 spec requires signing the static key using the authority key,
-    //       but SRI currently implements this incorrectly.
-    authority_key = static_key;
     auto certificate = Sv2SignatureNoiseMessage(version, valid_from, valid_to,
                                 XOnlyPubKey(static_key.GetPubKey()), authority_key);
 

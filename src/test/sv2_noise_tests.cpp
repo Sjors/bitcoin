@@ -56,10 +56,6 @@ BOOST_AUTO_TEST_CASE(certificate_test)
     uint32_t valid_from = now;
     uint32_t valid_to = std::numeric_limits<unsigned int>::max();
 
-    // TODO: Stratum v2 spec requires signing the static key using the authority key,
-    //       but SRI currently implements this incorrectly.
-    alice_authority_key = alice_static_key;
-
     auto alice_certificate = Sv2SignatureNoiseMessage(version, valid_from, valid_to,
                                XOnlyPubKey(alice_static_key.GetPubKey()), alice_authority_key);
 
@@ -117,9 +113,6 @@ BOOST_AUTO_TEST_CASE(handshake_and_transport_test)
     uint32_t valid_from = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::seconds>(epoch_now).count());
     uint32_t valid_to =  std::numeric_limits<unsigned int>::max();
 
-    // TODO: Stratum v2 spec requires signing the static key using the authority key,
-    //       but SRI currently implements this incorrectly.
-    bob_authority_key = bob_static_key;
     auto bob_certificate = Sv2SignatureNoiseMessage(version, valid_from, valid_to,
                              XOnlyPubKey(bob_static_key.GetPubKey()), bob_authority_key);
 
