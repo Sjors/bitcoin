@@ -90,7 +90,7 @@ void Sv2Transport::StartSendingHandshake() noexcept
     Assume(m_send_state == SendState::HANDSHAKE_STEP_1);
     Assume(m_send_buffer.empty());
 
-    m_send_buffer.resize(KEY_SIZE);
+    m_send_buffer.resize(ELLSWIFT_KEY_SIZE);
     m_cipher.GetHandshakeState().WriteMsgEphemeralPK(MakeWritableByteSpan(m_send_buffer));
 
     m_send_state = SendState::HANDSHAKE_STEP_2;
@@ -231,7 +231,7 @@ bool Sv2Transport::ReceivedBytes(Span<const uint8_t>& msg_bytes) noexcept
         if (m_recv_buffer.size() + std::min(msg_bytes.size(), max_read) > m_recv_buffer.capacity()) {
             switch (m_recv_state) {
             case RecvState::HANDSHAKE_STEP_1:
-                m_recv_buffer.reserve(KEY_SIZE);
+                m_recv_buffer.reserve(ELLSWIFT_KEY_SIZE);
                 break;
             case RecvState::HANDSHAKE_STEP_2:
                 m_recv_buffer.reserve(INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH);
@@ -290,9 +290,9 @@ bool Sv2Transport::ProcessReceivedEphemeralKeyBytes() noexcept
     AssertLockHeld(m_recv_mutex);
     AssertLockNotHeld(m_send_mutex);
     Assume(m_recv_state == RecvState::HANDSHAKE_STEP_1);
-    Assume(m_recv_buffer.size() <= KEY_SIZE);
+    Assume(m_recv_buffer.size() <= ELLSWIFT_KEY_SIZE);
 
-    if (m_recv_buffer.size() == KEY_SIZE) {
+    if (m_recv_buffer.size() == ELLSWIFT_KEY_SIZE) {
         // Other side's key has been fully received, and can now be Diffie-Hellman
         // combined with our key. This is act 1 of the Noise Protocol handshake.
         // TODO handle failure
@@ -344,8 +344,8 @@ size_t Sv2Transport::GetMaxBytesToProcess() noexcept
     switch (m_recv_state) {
     case RecvState::HANDSHAKE_STEP_1:
         // In this state, we only allow the 32-byte key into the receive buffer.
-        Assume(m_recv_buffer.size() <= KEY_SIZE);
-        return KEY_SIZE - m_recv_buffer.size();
+        Assume(m_recv_buffer.size() <= ELLSWIFT_KEY_SIZE);
+        return ELLSWIFT_KEY_SIZE - m_recv_buffer.size();
     case RecvState::HANDSHAKE_STEP_2:
         // In this state, we only allow the handshake reply into the receive buffer.
         Assume(m_recv_buffer.size() <= INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH);

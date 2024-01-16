@@ -183,12 +183,12 @@ public:
      */
     void ProcessHandshake1() {
         if (m_test_initiator) {
-            BOOST_REQUIRE(m_received.size() == KEY_SIZE);
+            BOOST_REQUIRE(m_received.size() == ELLSWIFT_KEY_SIZE);
             m_peer_cipher->GetHandshakeState().ReadMsgEphemeralPK(MakeWritableByteSpan(m_received));
             m_received.clear();
         } else {
             BOOST_REQUIRE(m_to_send.empty());
-            m_to_send.resize(KEY_SIZE);
+            m_to_send.resize(ELLSWIFT_KEY_SIZE);
             m_peer_cipher->GetHandshakeState().WriteMsgEphemeralPK(MakeWritableByteSpan(m_to_send));
         }
 

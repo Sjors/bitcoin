@@ -140,7 +140,7 @@ void Sv2SymmetricState::MixHash(const Span<const std::byte> input)
     m_hash_output = (HashWriter{} << m_hash_output << input).GetSHA256();
 }
 
-void Sv2SymmetricState::MixKey(const Span<const uint8_t> input_key_material)
+void Sv2SymmetricState::MixKey(const Span<const std::byte> input_key_material)
 {
     uint8_t out0[KEY_SIZE], out1[KEY_SIZE];
 
@@ -161,11 +161,11 @@ void Sv2SymmetricState::LogChainingKey()
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Chaining key: %s\n", GetChainingKey());
 }
 
-void Sv2SymmetricState::HKDF2(const Span<const uint8_t> input_key_material, uint8_t out0[KEY_SIZE], uint8_t out1[KEY_SIZE])
+void Sv2SymmetricState::HKDF2(const Span<const std::byte> input_key_material, uint8_t out0[KEY_SIZE], uint8_t out1[KEY_SIZE])
 {
     uint8_t tmp_key[KEY_SIZE];
     CHMAC_SHA256 tmp_mac(m_chaining_key, KEY_SIZE);
-    tmp_mac.Write(input_key_material.begin(), input_key_material.size());
+    tmp_mac.Write(UCharCast(input_key_material.data()), input_key_material.size());
     tmp_mac.Finalize(tmp_key);
 
     CHMAC_SHA256 out0_mac(tmp_key, KEY_SIZE);
@@ -204,7 +204,7 @@ std::array<Sv2CipherState, 2> Sv2SymmetricState::Split()
 {
     uint8_t send_key[KEY_SIZE], recv_key[KEY_SIZE];
 
-    std::vector<uint8_t> empty;
+    std::vector<std::byte> empty;
     HKDF2(empty, send_key, recv_key);
 
     std::array<Sv2CipherState, 2> result;
@@ -219,28 +219,25 @@ uint256 Sv2SymmetricState::GetHashOutput()
     return m_hash_output;
 }
 
-void Sv2HandshakeState::GenerateEphemeralKey(CKey& key) noexcept
+void Sv2HandshakeState::GenerateEphemeralKey() noexcept
 {
-    Assume(!key.size());
-    key.MakeNewKey(true);
-    Assume(XOnlyPubKey(key.GetPubKey()).IsFullyValid());
+    Assume(!m_ephemeral_key.size());
+    m_ephemeral_key.MakeNewKey(true);
+    m_our_ephemeral_ellswift_pk = m_ephemeral_key.EllSwiftCreate(MakeByteSpan(GetRandHash()));
 };
 
 void Sv2HandshakeState::WriteMsgEphemeralPK(Span<std::byte> msg)
 {
-    if (msg.size() < KEY_SIZE) {
-        throw std::runtime_error(strprintf("Invalid message size: %d bytes < %d", msg.size(), KEY_SIZE));
+    if (msg.size() < ELLSWIFT_KEY_SIZE) {
+        throw std::runtime_error(strprintf("Invalid message size: %d bytes < %d", msg.size(), ELLSWIFT_KEY_SIZE));
     }
 
-    GenerateEphemeralKey(m_ephemeral_key);
+    GenerateEphemeralKey();
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Write our ephemeral key\n");
+    std::copy(m_our_ephemeral_ellswift_pk.begin(), m_our_ephemeral_ellswift_pk.end(), msg.begin());
 
-    auto ephemeral_pk = XOnlyPubKey(m_ephemeral_key.GetPubKey());
-    std::transform(ephemeral_pk.begin(), ephemeral_pk.end(), msg.begin(),
-               [](unsigned char b) { return static_cast<std::byte>(b); });
-
-    m_symmetric_state.MixHash(Span(msg.begin(), KEY_SIZE));
+    m_symmetric_state.MixHash(Span(msg.begin(), ELLSWIFT_KEY_SIZE));
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix hash: %s\n", HexStr(m_symmetric_state.GetHashOutput()));
 
     std::vector<std::byte> empty;
@@ -248,14 +245,11 @@ void Sv2HandshakeState::WriteMsgEphemeralPK(Span<std::byte> msg)
 }
 
 void Sv2HandshakeState::ReadMsgEphemeralPK(Span<std::byte> msg) {
-    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Write their ephemeral key\n");
-    auto ucharSpan = UCharSpanCast(msg);
-    m_remote_ephemeral_key = XOnlyPubKey(Span(&ucharSpan[0], KEY_SIZE));
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Read their ephemeral key\n");
+    Assume(msg.size() == ELLSWIFT_KEY_SIZE);
+    m_remote_ephemeral_ellswift_pk = EllSwiftPubKey(msg);
 
-    if (!m_remote_ephemeral_key.IsFullyValid()) {
-       throw std::runtime_error("Sv2HandshakeState::ReadMsgEphemeralPK(): Received invalid remote ephemeral key");
-    }
-    m_symmetric_state.MixHash(Span(&msg[0], KEY_SIZE));
+    m_symmetric_state.MixHash(Span(&msg[0], ELLSWIFT_KEY_SIZE));
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix hash: %s\n", HexStr(m_symmetric_state.GetHashOutput()));
 
     std::vector<std::byte> empty;
@@ -266,50 +260,43 @@ void Sv2HandshakeState::WriteMsgES(Span<std::byte> msg)
 {
     ssize_t bytes_written = 0;
 
-    Assume(m_remote_ephemeral_key.IsFullyValid());
-
-    GenerateEphemeralKey(m_ephemeral_key);
+    GenerateEphemeralKey();
 
     // Send our ephemeral pk.
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Write our ephemeral key\n");
-    auto ephemeral_pk = XOnlyPubKey(m_ephemeral_key.GetPubKey());
-    Assume(ephemeral_pk.IsFullyValid());
-    std::transform(ephemeral_pk.begin(), ephemeral_pk.end(), msg.begin(),
-               [](unsigned char b) { return static_cast<std::byte>(b); });
+    std::copy(m_our_ephemeral_ellswift_pk.begin(), m_our_ephemeral_ellswift_pk.end(), msg.begin());
 
-    m_symmetric_state.MixHash(Span(msg.begin(), KEY_SIZE));
-    bytes_written += KEY_SIZE;
+    m_symmetric_state.MixHash(Span(msg.begin(), ELLSWIFT_KEY_SIZE));
+    bytes_written += ELLSWIFT_KEY_SIZE;
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix hash: %s\n", HexStr(m_symmetric_state.GetHashOutput()));
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Perform ECDH with the remote ephemeral key\n");
-    uint8_t ecdh_output[ECDH_OUTPUT_SIZE] = {};
-    if (!m_ephemeral_key.ECDH(m_remote_ephemeral_key, ecdh_output)) {
-        throw std::runtime_error("Failed to perform ECDH on the remote ephemeral key using our ephemeral key");
-    }
+    ECDHSecret ecdh_secret{m_ephemeral_key.ComputeBIP324ECDHSecret(m_remote_ephemeral_ellswift_pk,
+                                                                   m_our_ephemeral_ellswift_pk,
+                                                                   /*initiating=*/false)};
+
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix key with ECDH result: ephemeral ours -- remote ephemeral\n");
-    m_symmetric_state.MixKey(Span(ecdh_output));
+    m_symmetric_state.MixKey(ecdh_secret);
     m_symmetric_state.LogChainingKey();
 
     // Send our static pk.
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Encrypt and write our static key\n");
-    auto static_pk = XOnlyPubKey(m_static_key.GetPubKey());
-    Assume(static_pk.IsFullyValid());
-    std::transform(static_pk.begin(), static_pk.end(), msg.begin() + KEY_SIZE,
-               [](unsigned char b) { return static_cast<std::byte>(b); });
-    m_symmetric_state.EncryptAndHash(Span(msg.begin() + KEY_SIZE, KEY_SIZE + POLY1305_TAGLEN));
-    bytes_written += KEY_SIZE + POLY1305_TAGLEN;
+    std::copy(m_our_static_ellswift_pk.begin(), m_our_static_ellswift_pk.end(), msg.begin() + ELLSWIFT_KEY_SIZE);
+
+    m_symmetric_state.EncryptAndHash(Span(msg.begin() + ELLSWIFT_KEY_SIZE, ELLSWIFT_KEY_SIZE + POLY1305_TAGLEN));
+    bytes_written += ELLSWIFT_KEY_SIZE + POLY1305_TAGLEN;
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix hash: %s\n", HexStr(m_symmetric_state.GetHashOutput()));
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Perform ECDH between our static and remote ephemeral key\n");
-    uint8_t ecdh_output_remote[ECDH_OUTPUT_SIZE];
-    if (!m_static_key.ECDH(m_remote_ephemeral_key, ecdh_output_remote)) {
-        throw std::runtime_error("Failed to perform ECDH on the remote ephemeral key using our static key");
-    }
-    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "ECDH result: %s\n", HexStr(ecdh_output_remote));
+    ECDHSecret ecdh_static_secret{m_static_key.ComputeBIP324ECDHSecret(m_remote_ephemeral_ellswift_pk,
+                                                                       m_our_static_ellswift_pk,
+                                                                       /*initiating=*/false)};
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "ECDH result: %s\n", HexStr(ecdh_static_secret));
+
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix key with ECDH result: static ours -- remote ephemeral\n");
-    m_symmetric_state.MixKey(Span(ecdh_output_remote));
+    m_symmetric_state.MixKey(ecdh_static_secret);
     m_symmetric_state.LogChainingKey();
 
     // Serialize our digital signature noise message and encrypt.
@@ -337,48 +324,41 @@ bool Sv2HandshakeState::ReadMsgES(Span<std::byte> msg)
 
     // Read the remote ephmeral key from the msg and decrypt.
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Read remote ephemeral key\n");
-    auto remote_ephemeral_key_span = UCharSpanCast(Span(msg.begin(), KEY_SIZE));
-    m_remote_ephemeral_key = XOnlyPubKey(remote_ephemeral_key_span);
-    if (!m_remote_ephemeral_key.IsFullyValid()) {
-    throw std::runtime_error("Sv2HandshakeState::ReadMsgES(): Received invalid remote ephemeral key");
-    }
-    bytes_read += KEY_SIZE;
+    auto remote_ephemeral_key_span = Span(msg.begin(), ELLSWIFT_KEY_SIZE);
+    m_remote_ephemeral_ellswift_pk = EllSwiftPubKey(remote_ephemeral_key_span);
+    bytes_read += ELLSWIFT_KEY_SIZE;
 
-    m_symmetric_state.MixHash(Span(msg.begin(), KEY_SIZE));
+    m_symmetric_state.MixHash(Span(msg.begin(), ELLSWIFT_KEY_SIZE));
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix hash: %s\n", HexStr(m_symmetric_state.GetHashOutput()));
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Perform ECDH with the remote ephemeral key\n");
-    uint8_t ecdh_output[ECDH_OUTPUT_SIZE];
-    m_ephemeral_key.ECDH(m_remote_ephemeral_key, ecdh_output);
+    ECDHSecret ecdh_secret{m_ephemeral_key.ComputeBIP324ECDHSecret(m_remote_ephemeral_ellswift_pk,
+                                                                       m_our_ephemeral_ellswift_pk,
+                                                                       /*initiating=*/true)};
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix key with ECDH result: ephemeral ours -- remote ephemeral\n");
-    m_symmetric_state.MixKey(Span(ecdh_output));
+    m_symmetric_state.MixKey(ecdh_secret);
     m_symmetric_state.LogChainingKey();
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Decrypt remote static key\n");
-    bool res = m_symmetric_state.DecryptAndHash(Span(msg.begin() + KEY_SIZE, KEY_SIZE + POLY1305_TAGLEN));
+    bool res = m_symmetric_state.DecryptAndHash(Span(msg.begin() + ELLSWIFT_KEY_SIZE, ELLSWIFT_KEY_SIZE + POLY1305_TAGLEN));
     if (!res) return false;
-    bytes_read += KEY_SIZE + POLY1305_TAGLEN;
+    bytes_read += ELLSWIFT_KEY_SIZE + POLY1305_TAGLEN;
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix hash: %s\n", HexStr(m_symmetric_state.GetHashOutput()));
 
     // Load remote static key from the decryted msg
-    auto remote_static_key_span = UCharSpanCast(Span(msg.begin() + KEY_SIZE, KEY_SIZE));
-    m_remote_static_key = XOnlyPubKey(remote_static_key_span);
-
-    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Check if remote static key is valid\n");
-    if (!m_remote_static_key.IsFullyValid()) {
-        throw std::runtime_error("Sv2HandshakeState::ReadMsgES(): Received invalid remote static key");
-    }
+    auto remote_static_key_span = Span(msg.begin() + ELLSWIFT_KEY_SIZE, ELLSWIFT_KEY_SIZE);
+    m_remote_static_ellswift_pk = EllSwiftPubKey(remote_static_key_span);
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Perform ECDH on the remote static key\n");
-    uint8_t ecdh_output_remote[ECDH_OUTPUT_SIZE];
-    if (!m_ephemeral_key.ECDH(m_remote_static_key, ecdh_output_remote)) {
-        throw std::runtime_error("Failed to perform ECDH on the remote static key using our ephemeral key");
-    }
-    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "ECDH result: %s\n", HexStr(ecdh_output_remote));
+    ECDHSecret ecdh_static_secret{m_ephemeral_key.ComputeBIP324ECDHSecret(m_remote_static_ellswift_pk,
+                                                                    m_our_ephemeral_ellswift_pk,
+                                                                    /*initiating=*/true)};
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "ECDH result: %s\n", HexStr(ecdh_static_secret));
+
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Mix key with ECDH result: ephemeral ours -- remote static\n");
-    m_symmetric_state.MixKey(Span(ecdh_output_remote));
+    m_symmetric_state.MixKey(ecdh_static_secret);
     m_symmetric_state.LogChainingKey();
 
 
@@ -392,7 +372,7 @@ bool Sv2HandshakeState::ReadMsgES(Span<std::byte> msg)
     DataStream ss_cert(cert_span);
     Sv2SignatureNoiseMessage cert;
     ss_cert >> cert;
-    cert.m_static_key = m_remote_static_key;
+    cert.m_static_key = XOnlyPubKey(m_remote_static_ellswift_pk.Decode());
     Assume(m_authority_pubkey);
     if (!cert.Validate(m_authority_pubkey.value())) {
         LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Invalid certificate: %s\n", HexStr(cert_span));

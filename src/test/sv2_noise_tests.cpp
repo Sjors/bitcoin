@@ -1,5 +1,6 @@
 #include <common/sv2_noise.h>
 #include <key.h>
+#include <random.h>
 #include <test/util/setup_common.h>
 #include <util/strencodings.h>
 
@@ -13,33 +14,19 @@ BOOST_AUTO_TEST_CASE(MixKey_test)
     Sv2SymmetricState r_ss;
     BOOST_CHECK_EQUAL(r_ss.GetChainingKey(), i_ss.GetChainingKey());
 
-    CKey initiator_key;
-    initiator_key.MakeNewKey(true);
-    while (!initiator_key.HasEvenY()) {
-        initiator_key.MakeNewKey(true);
-    }
-    BOOST_CHECK(initiator_key.HasEvenY());
-    auto initiator_pk = XOnlyPubKey(initiator_key.GetPubKey());
+    CKey initiator_key{GenerateRandomKey()};
+    auto initiator_pk = initiator_key.EllSwiftCreate(MakeByteSpan(GetRandHash()));
 
-    CKey responder_key;
-    responder_key.MakeNewKey(true);
-    while (!responder_key.HasEvenY()) {
-        responder_key.MakeNewKey(true);
-    }
-    BOOST_CHECK(responder_key.HasEvenY());
-    auto responder_pk = XOnlyPubKey(responder_key.GetPubKey());
+    CKey responder_key{GenerateRandomKey()};
+    auto responder_pk = responder_key.EllSwiftCreate(MakeByteSpan(GetRandHash()));
 
-    unsigned char ecdh_output_1[32];
-    initiator_key.ECDH(responder_pk, ecdh_output_1);
-
-
-    unsigned char ecdh_output_2[32];
-    responder_key.ECDH(initiator_pk, ecdh_output_2);
+    auto ecdh_output_1 = initiator_key.ComputeBIP324ECDHSecret(responder_pk, initiator_pk, true);
+    auto ecdh_output_2 = responder_key.ComputeBIP324ECDHSecret(initiator_pk, responder_pk, false);
 
     BOOST_CHECK(std::memcmp(&ecdh_output_1[0], &ecdh_output_2[0], 32) == 0);
 
-    i_ss.MixKey(Span(ecdh_output_1));
-    r_ss.MixKey(Span(ecdh_output_2));
+    i_ss.MixKey(ecdh_output_1);
+    r_ss.MixKey(ecdh_output_2);
 
     BOOST_CHECK_EQUAL(r_ss.GetChainingKey(), i_ss.GetChainingKey());
 }
@@ -133,12 +120,11 @@ BOOST_AUTO_TEST_CASE(handshake_and_transport_test)
     // Handshake Act 1: e ->
 
     std::vector<uint8_t> transport_buffer;
-    transport_buffer.resize(KEY_SIZE);
+    transport_buffer.resize(ELLSWIFT_KEY_SIZE);
     Span<std::byte> transport_span{MakeWritableByteSpan(transport_buffer)};
     // Alice generates her ephemeral public key and write it into the buffer:
     alice_handshake->WriteMsgEphemeralPK(transport_span);
-    XOnlyPubKey alice_pubkey(Span(&transport_buffer[0], XOnlyPubKey::size()));
-    BOOST_CHECK(alice_pubkey.IsFullyValid());
+    EllSwiftPubKey alice_pubkey(transport_span);
 
     // Bob reads the ephemeral key
     bob_handshake->ReadMsgEphemeralPK(transport_span);

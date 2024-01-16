@@ -8,6 +8,7 @@
 #include <compat/compat.h>
 #include <key.h>
 #include <pubkey.h>
+#include <random.h>
 #include <streams.h>
 #include <uint256.h>
 
@@ -21,23 +22,24 @@
 
 static constexpr size_t POLY1305_TAGLEN{16};
 static constexpr size_t KEY_SIZE = 32;
+static constexpr size_t ELLSWIFT_KEY_SIZE = 64;
 static constexpr size_t ECDH_OUTPUT_SIZE = 32;
 /** Section 3: All Noise messages are less than or equal to 65535 bytes in length. */
 static constexpr size_t NOISE_MAX_CHUNK_SIZE = 65535;
 /** Sv2 spec 4.5.2 */
 static constexpr size_t SIGNATURE_NOISE_MESSAGE_SIZE = 2 + 4 + 4 + 64;
-static constexpr size_t INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH = KEY_SIZE + KEY_SIZE +
+static constexpr size_t INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH = ELLSWIFT_KEY_SIZE + ELLSWIFT_KEY_SIZE +
                         POLY1305_TAGLEN + SIGNATURE_NOISE_MESSAGE_SIZE + POLY1305_TAGLEN;
 
-// Sha256 hash of the ascii encoding - "Noise_NX_secp256k1_ChaChaPoly_SHA256".
+// Sha256 hash of the ascii encoding - "Noise_NX_EllSwiftXonly_ChaChaPoly_SHA256".
 // This is the first step required when setting up the chaining key.
 const std::vector<uint8_t> PROTOCOL_NAME_HASH = {
-    168, 246, 65, 106, 218, 197, 235, 205, 62, 183, 118, 131, 234, 247, 6, 174, 180, 164, 162, 125,
-    30, 121, 156, 182, 95, 117, 218, 138, 122, 135, 4, 65,
-};
+    27, 97, 156, 90, 248, 120, 254, 68, 34, 119, 45, 129, 209, 41, 152, 82,
+    26,137, 97, 115, 62, 44, 177, 60, 145, 24, 250, 214, 68, 188, 1, 128};
 
-// The double hash of protocol name "Noise_NX_secp256k1_ChaChaPoly_SHA256".
-static std::vector<uint8_t> PROTOCOL_NAME_DOUBLE_HASH = {132, 175, 109, 74, 47, 106, 167, 237, 124, 169, 128, 188, 123, 69, 19, 92, 215, 4, 100, 205, 0, 191, 211, 210, 38, 190, 247, 183, 20, 200, 116, 58};
+// The double hash of protocol name "Noise_NX_EllSwiftXonly_ChaChaPoly_SHA256".
+static std::vector<uint8_t> PROTOCOL_NAME_DOUBLE_HASH = {60, 102, 112, 143, 69, 248, 185, 34, 53, 193, 3, 46, 250, 104, 70, 171,
+                                                         139, 103, 55, 191, 199, 9, 77, 179, 99, 170, 7, 240, 219, 36, 226, 71};
 
 /** Simple certificate for the static key signed by the authority key.
   * See 4.5.2 and 4.5.3 of the Stratum v2 spec.
@@ -57,6 +59,7 @@ public:
     Sv2SignatureNoiseMessage() = default;
     Sv2SignatureNoiseMessage(uint16_t version, uint32_t valid_from, uint32_t valid_to, const XOnlyPubKey& static_key, const CKey& authority_key);
 
+    /* The certificate serializes pubkeys in x-only format, not EllSwift. */
     XOnlyPubKey m_static_key = {};
 
     [[ nodiscard ]] bool Validate(XOnlyPubKey authority_key);
@@ -141,7 +144,7 @@ public:
     }
 
     void MixHash(const Span<const std::byte> input);
-    void MixKey(const Span<const uint8_t> input_key_material);
+    void MixKey(const Span<const std::byte> input_key_material);
     void EncryptAndHash(Span<std::byte> data);
     [[ nodiscard ]] bool DecryptAndHash(Span<std::byte> data);
     std::array<Sv2CipherState, 2> Split();
@@ -157,7 +160,7 @@ private:
     uint256 m_hash_output = uint256(PROTOCOL_NAME_DOUBLE_HASH);
     Sv2CipherState m_cipher_state;
 
-    void HKDF2(const Span<const uint8_t> input_key_material, uint8_t out0[KEY_SIZE], uint8_t out1[KEY_SIZE]);
+    void HKDF2(const Span<const std::byte> input_key_material, uint8_t out0[KEY_SIZE], uint8_t out1[KEY_SIZE]);
 };
 
 /*
@@ -179,7 +182,9 @@ public:
     Sv2HandshakeState(CKey&& static_key,
                     XOnlyPubKey&& authority_pubkey):
                     m_static_key{static_key},
-                    m_authority_pubkey{authority_pubkey} {};
+                    m_authority_pubkey{authority_pubkey} {
+                        m_our_static_ellswift_pk = static_key.EllSwiftCreate(MakeByteSpan(GetRandHash()));
+                    };
 
     /*
      * If we are the responder, the certificate must be set
@@ -187,7 +192,9 @@ public:
     Sv2HandshakeState(CKey&& static_key,
                       Sv2SignatureNoiseMessage&& certificate):
                       m_static_key{static_key},
-                      m_certificate{certificate} {};
+                      m_certificate{certificate} {
+                          m_our_static_ellswift_pk = static_key.EllSwiftCreate(MakeByteSpan(GetRandHash()));
+                      };
 
     /** Handshake step 1 for initiator: -> e */
     void WriteMsgEphemeralPK(Span<std::byte> msg);
@@ -209,19 +216,24 @@ public:
 private:
     /** Our static key (s) */
     CKey m_static_key;
+    /** EllSwift encoded static key, for optimized ECDH */
+    EllSwiftPubKey m_our_static_ellswift_pk;
     /** Our ephemeral key (e) */
     CKey m_ephemeral_key;
+    /** EllSwift encoded ephemeral key, for optimized ECDH */
+    EllSwiftPubKey m_our_ephemeral_ellswift_pk;
     /** Remote static key (rs) */
-    XOnlyPubKey m_remote_static_key;
+    EllSwiftPubKey m_remote_static_ellswift_pk;
     /** Remote ephemeral key (re) */
-    XOnlyPubKey m_remote_ephemeral_key;
+    EllSwiftPubKey m_remote_ephemeral_ellswift_pk;
     Sv2SymmetricState m_symmetric_state;
     /** Certificate signed by m_authority_pubkey. */
     std::optional<Sv2SignatureNoiseMessage> m_certificate;
     /** Authority public key. */
     std::optional<XOnlyPubKey> m_authority_pubkey;
 
-    void GenerateEphemeralKey(CKey& key) noexcept;
+    /** Generate ephemeral key, sets set m_ephemeral_key and m_our_ephemeral_ellswift_pk */
+    void GenerateEphemeralKey() noexcept;
 };
 
 /**
