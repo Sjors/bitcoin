@@ -44,10 +44,21 @@ env:  # Global defaults
 # - small: For an x86_64 machine, recommended to have 2 CPUs and 8 GB of memory.
 # - medium: For an x86_64 machine, recommended to have 4 CPUs and 16 GB of memory.
 # - arm64: For an aarch64 machine, recommended to have 2 CPUs and 8 GB of memory.
+#
+# When a contributor maintains a fork of the repo, any pull request they make
+# to their own fork, or to the main repository, will trigger two CI runs:
+# one for the branch push and one for the pull request.
+# This can be avoided by setting NO_BRANCH=1 as a custom env variable in Cirrus.
 
 # https://cirrus-ci.org/guide/tips-and-tricks/#sharing-configuration-between-tasks
 filter_template: &FILTER_TEMPLATE
-  skip: $CIRRUS_REPO_FULL_NAME == "bitcoin-core/gui" && $CIRRUS_PR == ""  # No need to run on the read-only mirror, unless it is a PR. https://cirrus-ci.org/guide/writing-tasks/#conditional-task-execution
+  # No need to run on the read-only mirror, unless it is a PR.
+  # https://cirrus-ci.org/guide/writing-tasks/#conditional-task-execution
+  skip: $CIRRUS_REPO_FULL_NAME == "bitcoin-core/gui" && $CIRRUS_PR == ""
+  # We use only_if rather than skip when NO_BRANCH is set. Otherwise when a
+  # contributor opens a pull request, they will initially see all jobs marked
+  # as skipped.
+  only_if: $NO_BRANCH != "true" || $CIRRUS_PR != ""
   stateful: false  # https://cirrus-ci.org/guide/writing-tasks/#stateful-tasks
 
 base_template: &BASE_TEMPLATE
