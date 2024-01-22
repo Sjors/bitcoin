@@ -28,6 +28,7 @@ static constexpr size_t NOISE_MAX_CHUNK_SIZE = 65535;
 static constexpr size_t SIGNATURE_NOISE_MESSAGE_SIZE = 2 + 4 + 4 + 64;
 static constexpr size_t INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH = KEY_SIZE + KEY_SIZE +
                         POLY1305_TAGLEN + SIGNATURE_NOISE_MESSAGE_SIZE + POLY1305_TAGLEN;
+static constexpr size_t SV2_CERTIFICATE_GRACE_PERIOD = 3600;
 
 // Sha256 hash of the ascii encoding - "Noise_NX_secp256k1_ChaChaPoly_SHA256".
 // This is the first step required when setting up the chaining key.
@@ -205,6 +206,9 @@ public:
 
     std::array<Sv2CipherState, 2> SplitSymmetricState();
     uint256 GetHashOutput();
+
+    /* Test only */
+    void SetEphemeralKey(CKey&& key) { m_ephemeral_key = key; };
 
 private:
     /** Our static key (s) */

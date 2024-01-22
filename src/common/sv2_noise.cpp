@@ -10,6 +10,7 @@
 #include <logging.h>
 #include <util/check.h>
 #include <util/strencodings.h>
+#include <util/time.h>
 
 Sv2SignatureNoiseMessage::Sv2SignatureNoiseMessage(uint16_t version, uint32_t valid_from, uint32_t valid_to, const XOnlyPubKey& static_key, const CKey& authority_key) : m_version{version}, m_valid_from{valid_from}, m_valid_to{valid_to}, m_static_key{static_key}
 {
@@ -43,13 +44,24 @@ uint256 Sv2SignatureNoiseMessage::GetHash()
 bool Sv2SignatureNoiseMessage::Validate(XOnlyPubKey authority_key)
 {
     Assume(m_sig.size() == 64);
-    if (m_version > 0) return false;
-    auto epoch_now = std::chrono::system_clock::now().time_since_epoch();
-    uint32_t now = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::seconds>(epoch_now).count());
-    if (m_valid_from > now + 3600) return false;
-    if (m_valid_to < now - 3600) return false;
+    if (m_version > 0) {
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Invalid certificate version: %d\n", m_version);
+        return false;
+    }
+    uint32_t now = static_cast<uint32_t>(GetTime());
+    if (m_valid_from > now + SV2_CERTIFICATE_GRACE_PERIOD) {
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Certificate valid from is in the future: %d\n", m_valid_from);
+        return false;
+    }
+    if (m_valid_to < now - SV2_CERTIFICATE_GRACE_PERIOD) {
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Certificate expired: %d\n", m_valid_from);
+        return false;
+    }
 
-    return authority_key.VerifySchnorr(this->GetHash(), m_sig);
+    if (!authority_key.VerifySchnorr(this->GetHash(), m_sig)) {
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Certificate signature is invalid\n");
+    }
+    return true;
 }
 
 void Sv2SignatureNoiseMessage::SignSchnorr(const CKey& authority_key, Span<unsigned char> sig)
@@ -232,7 +244,9 @@ void Sv2HandshakeState::WriteMsgEphemeralPK(Span<std::byte> msg)
         throw std::runtime_error(strprintf("Invalid message size: %d bytes < %d", msg.size(), KEY_SIZE));
     }
 
-    GenerateEphemeralKey(m_ephemeral_key);
+    if (!m_ephemeral_key.IsValid()) {
+        GenerateEphemeralKey(m_ephemeral_key);
+    }
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Write our ephemeral key\n");
 
@@ -268,7 +282,9 @@ void Sv2HandshakeState::WriteMsgES(Span<std::byte> msg)
 
     Assume(m_remote_ephemeral_key.IsFullyValid());
 
-    GenerateEphemeralKey(m_ephemeral_key);
+    if (!m_ephemeral_key.IsValid()) {
+        GenerateEphemeralKey(m_ephemeral_key);
+    }
 
     // Send our ephemeral pk.
     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Write our ephemeral key\n");
