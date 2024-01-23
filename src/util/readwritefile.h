@@ -8,27 +8,21 @@
 #include <util/fs.h>
 
 #include <limits>
-#include <optional>
 #include <string>
 #include <utility>
 
-/**
- * Read full contents of a file and return one of the following formats:
- * 1. std::vector<unsigned char>
- * 2. std::string
+/** Read full contents of a file and return them in a std::string.
+ * Returns a pair <status, string>.
+ * If an error occurred, status will be false, otherwise status will be true and the data will be returned in string.
  *
- * @param[in] filename Filename. Returns false it doesn't exist.
- * @param[in] maxsize  Puts a maximum size limit on the file that is read. If the file
- *                 is larger than this, truncated data (with len > maxsize) will be returned.
- * @return result successful, {} otherwise
+ * @param maxsize Puts a maximum size limit on the file that is read. If the file is larger than this, truncated data
+ *         (with len > maxsize) will be returned.
  */
-template<class T>
-std::optional<T> ReadBinaryFile(const fs::path& filename, size_t maxsize=std::numeric_limits<size_t>::max());
+std::pair<bool,std::string> ReadBinaryFile(const fs::path &filename, size_t maxsize=std::numeric_limits<size_t>::max());
 
-/** Write contents of std::string or std::vector<unsigned char> to a file.
+/** Write contents of std::string to a file.
  * @return true on success.
  */
-template <class T>
-bool WriteBinaryFile(const fs::path& filename, const T& data);
+bool WriteBinaryFile(const fs::path &filename, const std::string &data);
 
 #endif // BITCOIN_UTIL_READWRITEFILE_H
