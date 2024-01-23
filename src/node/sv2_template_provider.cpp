@@ -26,23 +26,22 @@ using node::Sv2SubmitSolutionMsg;
 Sv2TemplateProvider::Sv2TemplateProvider(ChainstateManager& chainman, CTxMemPool& mempool) : m_chainman{chainman}, m_mempool{mempool}
 {
     // Read static key if cached
-    auto data{ReadBinaryFile<std::vector<unsigned char>>(GetStaticKeyFile())};
-    if (data) {
-        if (data->size() != 32) {
-            LogPrintLevel(BCLog::SV2, BCLog::Level::Error,
-                          "Failed to load static key from %s: size %d != 32\n",
-                          fs::PathToString(GetStaticKeyFile()), data->size());
-        }
+    try {
+        AutoFile{fsbridge::fopen(GetStaticKeyFile(), "wb")} >> m_static_key;
         LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Reading cached static key from %s\n", fs::PathToString(GetStaticKeyFile()));
-        m_static_key.Set(data->begin(), data->end(), /*fCompressedIn=*/true);
-    } else {
+    } catch (const std::ios_base::failure&) {
+        // File is not expected to exist the first time.
+        // In the unlikely event that loading an existing key fails, create a new one.
+    }
+    if (!m_static_key.IsValid()) {
         m_static_key = GenerateRandomKey();
-        std::vector<unsigned char> data(m_static_key.begin(), m_static_key.end());
-        if (WriteBinaryFile(GetStaticKeyFile(), data)) {
-            LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Generated static key, saved to %s\n", fs::PathToString(GetStaticKeyFile()));
-        } else {
+        try {
+            AutoFile{fsbridge::fopen(GetStaticKeyFile(), "wb")} << m_static_key;
+        } catch (const std::ios_base::failure&) {
             LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Error writing static key to %s\n", fs::PathToString(GetStaticKeyFile()));
+            // Continue, because this is not a critical failure.
         }
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Generated static key, saved to %s\n", fs::PathToString(GetStaticKeyFile()));
     }
     LogPrintLevel(BCLog::SV2, BCLog::Level::Info, "Static key: %s\n", HexStr(m_static_key.GetPubKey()));
 
@@ -51,23 +50,21 @@ Sv2TemplateProvider::Sv2TemplateProvider(ChainstateManager& chainman, CTxMemPool
 
     // Load authority key if cached
     CKey authority_key;
-    auto auth_key_data{ReadBinaryFile<std::vector<unsigned char>>(GetAuthorityKeyFile())};
-    if (auth_key_data) {
-        if (auth_key_data->size() != 32) {
-            LogPrintLevel(BCLog::SV2, BCLog::Level::Error,
-                          "Failed to load authority key from %s: size %d != 32\n",
-                          fs::PathToString(GetAuthorityKeyFile()), auth_key_data->size());
-        }
-        LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Reading cached authority key from %s\n", fs::PathToString(GetAuthorityKeyFile()));
-        authority_key.Set(auth_key_data->begin(), auth_key_data->end(), /*fCompressedIn=*/true);
-    } else {
+    try {
+        AutoFile{fsbridge::fopen(GetAuthorityKeyFile(), "wb")} >> authority_key;
+    } catch (const std::ios_base::failure&) {
+        // File is not expected to exist the first time.
+        // In the unlikely event that loading an existing key fails, create a new one.
+    }
+    if (!authority_key.IsValid()) {
         authority_key = GenerateRandomKey();
-        std::vector<unsigned char> data(m_static_key.begin(), m_static_key.end());
-        if (WriteBinaryFile(GetStaticKeyFile(), data)) {
-            LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Generated authority key, saved to %s\n", fs::PathToString(GetAuthorityKeyFile()));
-        } else {
+        try {
+            AutoFile{fsbridge::fopen(GetAuthorityKeyFile(), "wb")} << authority_key;
+        } catch (const std::ios_base::failure&) {
             LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Error writing authority key to %s\n", fs::PathToString(GetAuthorityKeyFile()));
+            // Continue, because this is not a critical failure.
         }
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Generated authority key, saved to %s\n", fs::PathToString(GetAuthorityKeyFile()));
     }
     // SRI uses base58 encoded x-only pubkeys in its configuration files
     LogPrintLevel(BCLog::SV2, BCLog::Level::Info, "Authority key: %s\n", EncodeBase58(XOnlyPubKey(m_static_key.GetPubKey())));
