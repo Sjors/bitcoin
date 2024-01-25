@@ -213,6 +213,19 @@ public:
      * Returns whether the public key as an even Y coordinate.
      */
     bool HasEvenY() const;
+
+    template <typename Stream>
+    inline void Unserialize(Stream& s) {
+        s >> fCompressed;
+        MakeKeyData();
+        s >> MakeWritableByteSpan(*keydata);
+    }
+
+    template<typename Stream>
+    void Serialize(Stream &s) const {
+        s << fCompressed;
+        ::Serialize(s, MakeUCharSpan(*this));
+    }
 };
 
 CKey GenerateRandomKey(bool compressed = true) noexcept;

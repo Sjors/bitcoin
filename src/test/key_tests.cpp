@@ -398,4 +398,26 @@ BOOST_AUTO_TEST_CASE(ecdh_test)
     BOOST_CHECK(std::memcmp(&ecdh_output_1[0], &ecdh_output_2[0], 32) == 0);
 }
 
+BOOST_AUTO_TEST_CASE(key_serialization)
+{
+    {
+        CKey key{GenerateRandomKey()};
+        DataStream s{};
+        s << key;
+        CKey key_copy;
+        s >> key_copy;
+        BOOST_CHECK(key == key_copy);
+    }
+
+    {
+        CKey key{GenerateRandomKey(/*compressed=*/false)};
+        DataStream s{};
+        s << key;
+        CKey key_copy;
+        s >> key_copy;
+        BOOST_CHECK(key == key_copy);
+    }
+
+}
+
 BOOST_AUTO_TEST_SUITE_END()
