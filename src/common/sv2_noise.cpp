@@ -21,8 +21,10 @@ uint256 Sv2SignatureNoiseMessage::GetHash()
     DataStream ss{};
     ss << m_version
        << m_valid_from
-       << m_valid_to
-       << m_static_key;
+       << m_valid_to;
+       // TODO: Stratum v2 spec requires signing the static key, but SRI currently
+       //       implements this incorrectly.
+       // << m_static_key;
 
     LogTrace(BCLog::SV2, "Certificate hashed data: %s\n", HexStr(ss));
 
