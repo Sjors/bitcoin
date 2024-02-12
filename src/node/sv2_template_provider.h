@@ -158,10 +158,9 @@ private:
     uint64_t m_template_id = 0;
 
     /**
-     * The current best known SetNewPrevHash that references the current best known
-     * block hash in the network.
+     * The current best known block hash in the network.
      */
-    node::Sv2SetNewPrevHashMsg m_best_prev_hash;
+    uint256 m_best_prev_hash;
 
 
     /** When we last saw a new block connection. Used to cache stale templates
