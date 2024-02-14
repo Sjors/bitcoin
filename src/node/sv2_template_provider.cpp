@@ -67,8 +67,13 @@ Sv2TemplateProvider::Sv2TemplateProvider(ChainstateManager& chainman, CTxMemPool
         LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Generated authority key, saved to %s\n", fs::PathToString(GetAuthorityKeyFile()));
     }
     // SRI uses base58 encoded x-only pubkeys in its configuration files
-    LogInfo("Template Provider authority key: %s\n", EncodeBase58(XOnlyPubKey(authority_key.GetPubKey())));
-    LogTrace(BCLog::SV2, "Authority key: %s\n", HexStr(XOnlyPubKey(authority_key.GetPubKey())));
+    std::array<unsigned char, 34> version_pubkey_bytes;
+    version_pubkey_bytes[0] = 1;
+    version_pubkey_bytes[1] = 0;
+    XOnlyPubKey authority_pub_key = XOnlyPubKey(authority_key.GetPubKey());
+    std::copy(authority_pub_key.begin(), authority_pub_key.end(), version_pubkey_bytes.begin() + 2);
+    LogInfo("Template Provider authority key: %s\n", EncodeBase58Check(version_pubkey_bytes));
+    LogTrace(BCLog::SV2, "Authority key: %s\n", HexStr(authority_pub_key));
 
     // Generate and sign certificate
     auto now{GetTime<std::chrono::seconds>()};
