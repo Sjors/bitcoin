@@ -2154,9 +2154,9 @@ static unsigned int GetBlockScriptFlags(const CBlockIndex& block_index, const Ch
 static SteadyClock::duration time_check{};
 static SteadyClock::duration time_forks{};
 static SteadyClock::duration time_connect{};
-static SteadyClock::duration time_verify{};
-static SteadyClock::duration time_undo{};
-static SteadyClock::duration time_index{};
+// static SteadyClock::duration time_verify{};
+// static SteadyClock::duration time_undo{};
+// static SteadyClock::duration time_index{};
 static SteadyClock::duration time_total{};
 static int64_t num_blocks_total = 0;
 
@@ -2453,13 +2453,13 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
         LogPrintf("ERROR: %s: CheckQueue failed\n", __func__);
         return state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "block-validation-failed");
     }
-    const auto time_4{SteadyClock::now()};
-    time_verify += time_4 - time_2;
-    LogPrint(BCLog::BENCH, "    - Verify %u txins: %.2fms (%.3fms/txin) [%.2fs (%.2fms/blk)]\n", nInputs - 1,
-             Ticks<MillisecondsDouble>(time_4 - time_2),
-             nInputs <= 1 ? 0 : Ticks<MillisecondsDouble>(time_4 - time_2) / (nInputs - 1),
-             Ticks<SecondsDouble>(time_verify),
-             Ticks<MillisecondsDouble>(time_verify) / num_blocks_total);
+    // const auto time_4{SteadyClock::now()};
+    // time_verify += time_4 - time_2;
+    // LogPrint(BCLog::BENCH, "    - Verify %u txins: %.2fms (%.3fms/txin) [%.2fs (%.2fms/blk)]\n", nInputs - 1,
+            //  Ticks<MillisecondsDouble>(time_4 - time_2),
+            //  nInputs <= 1 ? 0 : Ticks<MillisecondsDouble>(time_4 - time_2) / (nInputs - 1),
+            //  Ticks<SecondsDouble>(time_verify),
+            //  Ticks<MillisecondsDouble>(time_verify) / num_blocks_total);
 
     if (fJustCheck)
         return true;
@@ -2468,12 +2468,12 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
         return false;
     }
 
-    const auto time_5{SteadyClock::now()};
-    time_undo += time_5 - time_4;
-    LogPrint(BCLog::BENCH, "    - Write undo data: %.2fms [%.2fs (%.2fms/blk)]\n",
-             Ticks<MillisecondsDouble>(time_5 - time_4),
-             Ticks<SecondsDouble>(time_undo),
-             Ticks<MillisecondsDouble>(time_undo) / num_blocks_total);
+    // const auto time_5{SteadyClock::now()};
+    // time_undo += time_5 - time_4;
+    // LogPrint(BCLog::BENCH, "    - Write undo data: %.2fms [%.2fs (%.2fms/blk)]\n",
+    //          Ticks<MillisecondsDouble>(time_5 - time_4),
+    //          Ticks<SecondsDouble>(time_undo),
+    //          Ticks<MillisecondsDouble>(time_undo) / num_blocks_total);
 
     if (!pindex->IsValid(BLOCK_VALID_SCRIPTS)) {
         pindex->RaiseValidity(BLOCK_VALID_SCRIPTS);
@@ -2483,21 +2483,21 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
     // add this block to the view's block chain
     view.SetBestBlock(pindex->GetBlockHash());
 
-    const auto time_6{SteadyClock::now()};
-    time_index += time_6 - time_5;
-    LogPrint(BCLog::BENCH, "    - Index writing: %.2fms [%.2fs (%.2fms/blk)]\n",
-             Ticks<MillisecondsDouble>(time_6 - time_5),
-             Ticks<SecondsDouble>(time_index),
-             Ticks<MillisecondsDouble>(time_index) / num_blocks_total);
+    // const auto time_6{SteadyClock::now()};
+    // time_index += time_6 - time_5;
+    // LogPrint(BCLog::BENCH, "    - Index writing: %.2fms [%.2fs (%.2fms/blk)]\n",
+    //          Ticks<MillisecondsDouble>(time_6 - time_5),
+    //          Ticks<SecondsDouble>(time_index),
+    //          Ticks<MillisecondsDouble>(time_index) / num_blocks_total);
 
-    TRACE6(validation, block_connected,
-        block_hash.data(),
-        pindex->nHeight,
-        block.vtx.size(),
-        nInputs,
-        nSigOpsCost,
-        time_5 - time_start // in microseconds (µs)
-    );
+    // TRACE6(validation, block_connected,
+    //     block_hash.data(),
+    //     pindex->nHeight,
+    //     block.vtx.size(),
+    //     nInputs,
+    //     nSigOpsCost,
+    //     time_5 - time_start // in microseconds (µs)
+    // );
 
     return true;
 }

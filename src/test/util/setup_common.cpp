@@ -110,7 +110,10 @@ BasicTestingSetup::BasicTestingSetup(const ChainType chainType, const std::vecto
             "-logtimemicros",
             "-logthreadnames",
             "-loglevel=trace",
-            "-debug",
+            "-debug=sv2", // specifially, avoid debug=bench
+            "-debug=i2p",
+            "-debug=net",
+            "-debug=validation",
             "-debugexclude=libevent",
             "-debugexclude=leveldb",
         },

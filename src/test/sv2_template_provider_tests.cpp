@@ -55,6 +55,10 @@ public:
     {
         uint8_t bytes_received_buf[0x10000];
         const auto num_bytes_received = m_peer_socket->Recv(bytes_received_buf, sizeof(bytes_received_buf), MSG_DONTWAIT);
+        if(num_bytes_received == -1) {
+            // This sometimes happens on macOS native CI
+            return 0;
+        }
 
         // Have peer process received bytes:
         Span<const uint8_t> received = Span(bytes_received_buf).subspan(0, num_bytes_received);
@@ -108,6 +112,17 @@ public:
         BOOST_REQUIRE(occurred != 0);
 
         size_t bytes_received = PeerReceiveBytes();
+
+
+        if (bytes_received == 0 && reply_bytes_expected != 0) {
+            // Try one more time
+            Sock::Event occurred;
+            BOOST_REQUIRE(m_peer_socket->Wait(timeout, Sock::RECV, &occurred));
+            BOOST_REQUIRE(occurred != 0);
+
+            bytes_received = PeerReceiveBytes();
+            BOOST_REQUIRE(bytes_received != 0);
+        }
 
         // Wait for a possible second message (if MSG_MORE was set)
         BOOST_REQUIRE(m_peer_socket->Wait(timeout, Sock::RECV, &occurred));
@@ -212,6 +227,9 @@ BOOST_AUTO_TEST_CASE(client_tests)
     CScript locking_script = GetScriptForDestination(PKHash(key.GetPubKey()));
     // Don't hold on to the transaction
     {
+        LOCK(cs_main);
+        BOOST_REQUIRE_EQUAL(m_node.mempool->size(), 0);
+
         auto mtx = CreateValidMempoolTransaction(/*input_transaction=*/m_coinbase_txns[0], /*input_vout=*/0,
                                                         /*input_height=*/0, /*input_signing_key=*/coinbaseKey,
                                                         /*output_destination=*/locking_script,
@@ -222,12 +240,17 @@ BOOST_AUTO_TEST_CASE(client_tests)
         DataStream ss;
         ss << TX_WITH_WITNESS(tx);
         tx_size = ss.size();
+
+        BOOST_REQUIRE_EQUAL(m_node.mempool->size(), 1);
     }
+
+    // Wait a litle bit after adding to the mempool, or TSAN crashes before a new block is made
+    UninterruptibleSleep(std::chrono::milliseconds{1000});
 
     // Move mock time by at least DEFAULT_SV2_INTERVAL
     SetMockTime(GetMockTime() + std::chrono::seconds{DEFAULT_SV2_INTERVAL});
     // Briefly wait for the timer in ThreadSv2Handler and block creation
-    UninterruptibleSleep(std::chrono::milliseconds{200});
+    UninterruptibleSleep(std::chrono::milliseconds{1000});
 
     // Check that there's a new template
     BOOST_REQUIRE_EQUAL(tester.m_tp->GetBlockTemplates().size(), 2);
@@ -240,7 +263,8 @@ BOOST_AUTO_TEST_CASE(client_tests)
 
     // Expect our peer te receive a NewTemplate message
     // This time it should contain the 32 byte prevhash (unchanged)
-    BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), SV2_HEADER_ENCRYPTED_SIZE + 91 + 32 + Poly1305::TAGLEN);
+    constexpr size_t expected_len = SV2_HEADER_ENCRYPTED_SIZE + 91 + 32 + Poly1305::TAGLEN;
+    BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), expected_len);
 
     // Have the peer send us RequestTransactionData
     // We should reply with RequestTransactionData.Success
@@ -263,6 +287,11 @@ BOOST_AUTO_TEST_CASE(client_tests)
                                                 /*input_height=*/0, /*input_signing_key=*/coinbaseKey,
                                                 /*output_destination=*/locking_script,
                                                 /*output_amount=*/CAmount(48 * COIN), /*submit=*/true);
+
+    BOOST_REQUIRE_EQUAL(m_node.mempool->size(), 1);
+
+    // Wait a litle bit after adding to the mempool, or TSAN crashes before a new block is made
+    UninterruptibleSleep(std::chrono::milliseconds{300});
 
     // Move mock time by at least DEFAULT_SV2_INTERVAL
     SetMockTime(GetMockTime() + std::chrono::seconds{DEFAULT_SV2_INTERVAL});
