@@ -316,6 +316,9 @@ BOOST_AUTO_TEST_CASE(client_tests)
     // Check that there's a new template
     BOOST_REQUIRE_EQUAL(tester.GetBlockTemplateCount(), 3);
 
+    // Wait a bit more for macOS native CI
+    UninterruptibleSleep(std::chrono::milliseconds{1000});
+
     // Expect our peer te receive a NewTemplate message
     BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), SV2_HEADER_ENCRYPTED_SIZE + 91 + 32 + Poly1305::TAGLEN);
 
