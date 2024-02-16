@@ -534,7 +534,7 @@ bool Sv2TemplateProvider::SendWork(Sv2Client& client, bool send_new_prevhash)
     }
     if (!send_new_prevhash && client.m_latest_submitted_template_fees + m_minimum_fee_delta > fees) return true;
 
-    LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Send 0x71 NewTemplate to client id=%zu\n", client.m_id);
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Send 0x71 NewTemplate id=%lu to client id=%zu\n", m_template_id, client.m_id);
     client.m_send_messages.emplace_back(new_work_set.new_template);
 
     if (send_new_prevhash) {
