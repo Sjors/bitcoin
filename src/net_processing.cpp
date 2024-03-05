@@ -1833,8 +1833,7 @@ bool PeerManagerImpl::MaybePunishNodeForBlock(NodeId nodeid, const BlockValidati
         return true;
     // Conflicting (but not necessarily invalid) data or different policy:
     case BlockValidationResult::BLOCK_MISSING_PREV:
-        // TODO: Handle this much more gracefully (10 DoS points is super arbitrary)
-        if (peer) Misbehaving(*peer, 10, message);
+        if (peer) Misbehaving(*peer, 100, message);
         return true;
     case BlockValidationResult::BLOCK_RECENT_CONSENSUS_CHANGE:
     case BlockValidationResult::BLOCK_TIME_FUTURE:
@@ -2533,7 +2532,7 @@ bool PeerManagerImpl::CheckHeadersPoW(const std::vector<CBlockHeader>& headers, 
 
     // Are these headers connected to each other?
     if (!CheckHeadersAreContinuous(headers)) {
-        Misbehaving(peer, 20, "non-continuous headers sequence");
+        Misbehaving(peer, 100, "non-continuous headers sequence");
         return false;
     }
     return true;
@@ -2586,7 +2585,7 @@ void PeerManagerImpl::HandleFewUnconnectingHeaders(CNode& pfrom, Peer& peer,
     // The peer may just be broken, so periodically assign DoS points if this
     // condition persists.
     if (peer.m_num_unconnecting_headers_msgs % MAX_NUM_UNCONNECTING_HEADERS_MSGS == 0) {
-        Misbehaving(peer, 20, strprintf("%d non-connecting headers", peer.m_num_unconnecting_headers_msgs));
+        Misbehaving(peer, 100, strprintf("%d non-connecting headers", peer.m_num_unconnecting_headers_msgs));
     }
 }
 
@@ -2962,7 +2961,7 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, Peer& peer,
             // could be benign.
             HandleFewUnconnectingHeaders(pfrom, peer, headers);
         } else {
-            Misbehaving(peer, 10, "invalid header received");
+            Misbehaving(peer, 100, "invalid header received");
         }
         return;
     }
@@ -3809,7 +3808,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
 
         if (vAddr.size() > MAX_ADDR_TO_SEND)
         {
-            Misbehaving(*peer, 20, strprintf("%s message size = %u", msg_type, vAddr.size()));
+            Misbehaving(*peer, 100, strprintf("%s message size = %u", msg_type, vAddr.size()));
             return;
         }
 
@@ -3891,7 +3890,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         vRecv >> vInv;
         if (vInv.size() > MAX_INV_SZ)
         {
-            Misbehaving(*peer, 20, strprintf("inv message size = %u", vInv.size()));
+            Misbehaving(*peer, 100, strprintf("inv message size = %u", vInv.size()));
             return;
         }
 
@@ -3983,7 +3982,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         vRecv >> vInv;
         if (vInv.size() > MAX_INV_SZ)
         {
-            Misbehaving(*peer, 20, strprintf("getdata message size = %u", vInv.size()));
+            Misbehaving(*peer, 100, strprintf("getdata message size = %u", vInv.size()));
             return;
         }
 
@@ -4678,7 +4677,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         // Bypass the normal CBlock deserialization, as we don't want to risk deserializing 2000 full blocks.
         unsigned int nCount = ReadCompactSize(vRecv);
         if (nCount > MAX_HEADERS_RESULTS) {
-            Misbehaving(*peer, 20, strprintf("headers message size = %u", nCount));
+            Misbehaving(*peer, 100, strprintf("headers message size = %u", nCount));
             return;
         }
         headers.resize(nCount);

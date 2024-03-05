@@ -569,7 +569,7 @@ class SendHeadersTest(BitcoinTestFramework):
 
         # Now try to see how many unconnecting headers we can send
         # before we get disconnected.  Should be 5*MAX_NUM_UNCONNECTING_HEADERS_MSGS
-        for i in range(5 * MAX_NUM_UNCONNECTING_HEADERS_MSGS - 1):
+        for i in range(MAX_NUM_UNCONNECTING_HEADERS_MSGS - 1):
             # Send a header that doesn't connect, check that we get a getheaders.
             with p2p_lock:
                 test_node.last_message.pop("getheaders", None)
