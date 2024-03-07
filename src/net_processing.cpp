@@ -129,8 +129,6 @@ static constexpr double BLOCK_DOWNLOAD_TIMEOUT_BASE = 1;
 static constexpr double BLOCK_DOWNLOAD_TIMEOUT_PER_PEER = 0.5;
 /** Maximum number of headers to announce when relaying blocks with headers message.*/
 static const unsigned int MAX_BLOCKS_TO_ANNOUNCE = 8;
-/** Maximum number of unconnecting headers announcements before DoS score */
-static const int MAX_NUM_UNCONNECTING_HEADERS_MSGS = 10;
 /** Minimum blocks required to signal NODE_NETWORK_LIMITED */
 static const unsigned int NODE_NETWORK_LIMITED_MIN_BLOCKS = 288;
 /** Window, in blocks, for connecting to NODE_NETWORK_LIMITED peers */
@@ -379,8 +377,8 @@ struct Peer {
     /** Whether we've sent our peer a sendheaders message. **/
     std::atomic<bool> m_sent_sendheaders{false};
 
-    /** Length of current-streak of unconnecting headers announcements */
-    int m_num_unconnecting_headers_msgs GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0};
+    /** Large reorgs are rare, so only permit one such announcement. */
+    bool m_chicken_little GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0};
 
     /** When to potentially disconnect peer for stalling headers download */
     std::chrono::microseconds m_headers_sync_timeout GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0us};
@@ -2544,24 +2542,22 @@ arith_uint256 PeerManagerImpl::GetAntiDoSWorkThreshold()
  *
  * We'll send a getheaders message in response to try to connect the chain.
  *
- * The peer can send up to MAX_NUM_UNCONNECTING_HEADERS_MSGS in a row that
- * don't connect before given DoS points.
+ * Allow this only once, except when there may be a moderate clock difference.
  *
  * Once a headers message is received that is valid and does connect,
- * m_num_unconnecting_headers_msgs gets reset back to 0.
+ * m_chicken_little gets reset back to false.
  */
 void PeerManagerImpl::HandleFewUnconnectingHeaders(CNode& pfrom, Peer& peer,
         const std::vector<CBlockHeader>& headers)
 {
-    peer.m_num_unconnecting_headers_msgs++;
     // Try to fill in the missing headers.
     const CBlockIndex* best_header{WITH_LOCK(cs_main, return m_chainman.m_best_header)};
     if (MaybeSendGetHeaders(pfrom, GetLocator(best_header), peer)) {
-        LogPrint(BCLog::NET, "received header %s: missing prev block %s, sending getheaders (%d) to end (peer=%d, m_num_unconnecting_headers_msgs=%d)\n",
+        LogPrint(BCLog::NET, "received header %s: missing prev block %s, sending getheaders (%d) to end (peer=%d, m_chicken_little=%d)\n",
             headers[0].GetHash().ToString(),
             headers[0].hashPrevBlock.ToString(),
             best_header->nHeight,
-            pfrom.GetId(), peer.m_num_unconnecting_headers_msgs);
+            pfrom.GetId(), peer.m_chicken_little);
     }
 
     // Set hashLastUnknownBlock for this peer, so that if we
@@ -2569,10 +2565,28 @@ void PeerManagerImpl::HandleFewUnconnectingHeaders(CNode& pfrom, Peer& peer,
     // we can use this peer to download.
     WITH_LOCK(cs_main, UpdateBlockAvailability(pfrom.GetId(), headers.back().GetHash()));
 
-    // The peer may just be broken, so periodically assign DoS points if this
-    // condition persists.
-    if (peer.m_num_unconnecting_headers_msgs % MAX_NUM_UNCONNECTING_HEADERS_MSGS == 0) {
-        Misbehaving(peer, strprintf("%d non-connecting headers", peer.m_num_unconnecting_headers_msgs));
+    // If the peer has a slightly different clock, it may send us headers more
+    // than 2 hours in the future. This is eventually caught in ContextualCheckBlock(),
+    // but because we might have fetched the intermediate headers from a different
+    // peer, there's no guarantee we'll disconnect this peer.
+    //
+    // If the block is too far in the future, we immedidately disconnect.
+    // This means a malicious peer could get away with a timestamp in between
+    // MAX_FUTURE_BLOCK_TIME and the limit here, but such an attack would be
+    // very expensive and because of the upper limit, not useful.
+    for (auto header : headers) {
+        if (header.Time() > NodeClock::now() + std::chrono::seconds{MAX_FUTURE_BLOCK_TIME * 10}) {
+            Misbehaving(peer, "time-too-new");
+        }
+    }
+
+    // Finally, if the peer told us about a (extremely rare) long reorg before,
+    // we assume it's broken and just disconnect.
+    if (peer.m_chicken_little) {
+        Misbehaving(peer, "non-connecting headers");
+    } else {
+        // The peer told us about a long reorg. We'll consider that once.
+        peer.m_chicken_little = true;
     }
 }
 
@@ -2819,10 +2833,10 @@ void PeerManagerImpl::HeadersDirectFetchBlocks(CNode& pfrom, const Peer& peer, c
 void PeerManagerImpl::UpdatePeerStateForReceivedHeaders(CNode& pfrom, Peer& peer,
         const CBlockIndex& last_header, bool received_new_header, bool may_have_more_headers)
 {
-    if (peer.m_num_unconnecting_headers_msgs > 0) {
-        LogPrint(BCLog::NET, "peer=%d: resetting m_num_unconnecting_headers_msgs (%d -> 0)\n", pfrom.GetId(), peer.m_num_unconnecting_headers_msgs);
+    if (peer.m_chicken_little > 0) {
+        LogPrint(BCLog::NET, "peer=%d: resetting m_chicken_little (%d -> 0)\n", pfrom.GetId(), peer.m_chicken_little);
     }
-    peer.m_num_unconnecting_headers_msgs = 0;
+    peer.m_chicken_little = 0;
 
     LOCK(cs_main);
     CNodeState *nodestate = State(pfrom.GetId());

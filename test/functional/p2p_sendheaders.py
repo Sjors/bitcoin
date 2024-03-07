@@ -546,7 +546,7 @@ class SendHeadersTest(BitcoinTestFramework):
         blocks = []
         # Now we test that if we repeatedly don't send connecting headers, we
         # don't go into an infinite loop trying to get them to connect.
-        MAX_NUM_UNCONNECTING_HEADERS_MSGS = 10
+        MAX_NUM_UNCONNECTING_HEADERS_MSGS = 2
         for _ in range(MAX_NUM_UNCONNECTING_HEADERS_MSGS + 1):
             blocks.append(create_block(tip, create_coinbase(height), block_time))
             blocks[-1].solve()
@@ -568,7 +568,7 @@ class SendHeadersTest(BitcoinTestFramework):
         blocks = blocks[2:]
 
         # Now try to see how many unconnecting headers we can send
-        # before we get disconnected.  Should be 5*MAX_NUM_UNCONNECTING_HEADERS_MSGS
+        # before we get disconnected.  Should be MAX_NUM_UNCONNECTING_HEADERS_MSGS
         for i in range(MAX_NUM_UNCONNECTING_HEADERS_MSGS - 1):
             # Send a header that doesn't connect, check that we get a getheaders.
             with p2p_lock:
