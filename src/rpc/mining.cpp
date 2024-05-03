@@ -794,20 +794,43 @@ static RPCHelpMan getblocktemplate()
     static CBlockIndex* pindexPrev;
     static int64_t time_start;
     static std::unique_ptr<CBlockTemplate> pblocktemplate;
-    if (pindexPrev != active_chain.Tip() ||
-        (mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast && GetTime() - time_start > 5))
+    // Build on top of the chain tip, except on testnet4 where we reorg low difficulty exception blocks.
+    // In general the getblocktemplate RPC is used by Stratum (v1) miners which typically have more
+    // powerful mining equipment. If they fail to produce a block within 20 minutes, anyone can mine
+    // a difficulty 1 block using the generatetoaddress RPC. To prevent abuse in the form of a long chain
+    // of low difficulty blocks, we intentionally reorg them here.
+    const bool is_tesnet4{consensusParams.fPowAllowMinDifficultyBlocks && consensusParams.hashGenesisBlock == uint256S("0x000000008d6faa98083fa55742aa82d4ed249bd1bfc3239c706e0a61ef9e3931")};
+    CBlockIndex* real_tip{active_chain.Tip()};
+    if (is_tesnet4) {
+        const arith_uint256 bnPowLimit{UintToArith256(consensusParams.powLimit)};
+        const unsigned int pow_min{bnPowLimit.GetCompact()};
+        while (real_tip->pprev && real_tip->nHeight % consensusParams.DifficultyAdjustmentInterval() != 0 && real_tip->nBits == pow_min) {
+            real_tip = real_tip->pprev;
+        }
+    }
+    //  For simplicity reorg blocks are empty
+    const bool use_mempool{!is_tesnet4 || real_tip == active_chain.Tip()};
+    if (pindexPrev != real_tip ||
+        (use_mempool && mempool.GetTransactionsUpdated() != nTransactionsUpdatedLast && GetTime() - time_start > 5))
     {
         // Clear pindexPrev so future calls make a new block, despite any failures from here on
         pindexPrev = nullptr;
 
         // Store the pindexBest used before CreateNewBlock, to avoid races
         nTransactionsUpdatedLast = mempool.GetTransactionsUpdated();
-        CBlockIndex* pindexPrevNew = active_chain.Tip();
+        // TODO: need to hold a lock between setting real_tip and here?
+        CBlockIndex* pindexPrevNew = real_tip;
         time_start = GetTime();
 
         // Create new block
         CScript scriptDummy = CScript() << OP_TRUE;
-        pblocktemplate = BlockAssembler{active_chainstate, &mempool}.CreateNewBlock(scriptDummy);
+        if (use_mempool) {
+            pblocktemplate = BlockAssembler{active_chainstate, &mempool}.CreateNewBlock(scriptDummy);
+        } else {
+            CTxMemPool::Options mempool_opts{};
+            const CTxMemPool& dummy_mempool = CTxMemPool(mempool_opts);
+            pblocktemplate = BlockAssembler{active_chainstate, &dummy_mempool}.CreateNewBlock(scriptDummy);
+        }
         if (!pblocktemplate)
             throw JSONRPCError(RPC_OUT_OF_MEMORY, "Out of memory");
 
@@ -818,7 +841,8 @@ static RPCHelpMan getblocktemplate()
     CBlock* pblock = &pblocktemplate->block; // pointer for convenience
 
     // Update nTime
-    UpdateTime(pblock, consensusParams, pindexPrev);
+    UpdateTime(pblock, consensusParams, pindexPrev, /*avoid_difficulty_reset=*/true);
+
     pblock->nNonce = 0;
 
     // NOTE: If at some point we support pre-segwit miners post-segwit-activation, this needs to take segwit support into consideration

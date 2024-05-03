@@ -28,17 +28,23 @@
 #include <utility>
 
 namespace node {
-int64_t UpdateTime(CBlockHeader* pblock, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev)
+int64_t UpdateTime(CBlockHeader* pblock, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev, bool avoid_difficulty_reset)
 {
     int64_t nOldTime = pblock->nTime;
     int64_t nNewTime{std::max<int64_t>(pindexPrev->GetMedianTimePast() + 1, TicksSinceEpoch<std::chrono::seconds>(NodeClock::now()))};
 
-    if (nOldTime < nNewTime) {
+    if (avoid_difficulty_reset) {
+        Assume(consensusParams.fPowAllowMinDifficultyBlocks);
+        // 3600 second margin for timestamp grinding
+        nNewTime = std::min<int64_t>(nNewTime, pindexPrev->GetBlockTime() + consensusParams.nPowTargetSpacing * 2 - 3600);
+    }
+
+    if (avoid_difficulty_reset || nOldTime < nNewTime) {
         pblock->nTime = nNewTime;
     }
 
     // Updating time can change work required on testnet:
-    if (consensusParams.fPowAllowMinDifficultyBlocks) {
+    if (!avoid_difficulty_reset && consensusParams.fPowAllowMinDifficultyBlocks) {
         pblock->nBits = GetNextWorkRequired(pindexPrev, pblock, consensusParams);
     }
 
