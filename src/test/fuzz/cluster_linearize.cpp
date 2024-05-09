@@ -138,8 +138,9 @@ public:
 
 /** A simple linearization algorithm.
  *
- * This matches Linearize() in interface and behavior, though with fewer optimizations, and using
- * just SimpleCandidateFinder rather than AncestorCandidateFinder and SearchCandidateFinder.
+ * This matches Linearize() in interface and behavior, though with fewer optimizations, lacking
+ * the ability to pass in an existing linearization, and using just SimpleCandidateFinder rather
+ * than AncestorCandidateFinder and SearchCandidateFinder.
  */
 template<typename SetType>
 std::pair<std::vector<ClusterIndex>, bool> SimpleLinearize(const DepGraph<SetType>& depgraph, uint64_t max_iterations)
@@ -364,6 +365,7 @@ FUZZ_TARGET(clusterlin_ancestor_finder)
     while (todo.Any()) {
         // Call the ancestor finder's FindCandidateSet for what remains of the graph.
         assert(!anc_finder.AllDone());
+        assert(todo == anc_finder.GetTodo());
         auto best_anc = anc_finder.FindCandidateSet();
         // Sanity check the result.
         assert(best_anc.transactions.Any());
@@ -394,6 +396,7 @@ FUZZ_TARGET(clusterlin_ancestor_finder)
         anc_finder.MarkDone(del_set);
     }
     assert(anc_finder.AllDone());
+    assert(anc_finder.GetTodo().None());
 }
 
 static constexpr auto MAX_SIMPLE_ITERATIONS = 300000;
@@ -424,6 +427,7 @@ FUZZ_TARGET(clusterlin_search_finder)
         assert(!smp_finder.AllDone());
         assert(!exh_finder.AllDone());
         assert(!anc_finder.AllDone());
+        assert(anc_finder.GetTodo() == todo);
 
         // For each iteration, read an iteration count limit from the fuzz input.
         uint64_t max_iterations = 1;
@@ -494,6 +498,7 @@ FUZZ_TARGET(clusterlin_search_finder)
     assert(smp_finder.AllDone());
     assert(exh_finder.AllDone());
     assert(anc_finder.AllDone());
+    assert(anc_finder.GetTodo().None());
 }
 
 FUZZ_TARGET(clusterlin_linearization_chunking)
@@ -606,11 +611,31 @@ FUZZ_TARGET(clusterlin_linearize)
         reader >> VARINT(iter_count) >> Using<DepGraphFormatter>(depgraph) >> rng_seed;
     } catch (const std::ios_base::failure&) {}
 
+    // Optionally construct an old linearization for it.
+    std::vector<ClusterIndex> old_linearization;
+    {
+        uint8_t have_old_linearization{0};
+        try {
+            reader >> have_old_linearization;
+        } catch(const std::ios_base::failure&) {}
+        if (have_old_linearization & 1) {
+            old_linearization = ReadLinearization(depgraph, reader);
+            SanityCheck(depgraph, old_linearization);
+        }
+    }
+
     // Invoke Linearize().
     iter_count &= 0x7ffff;
-    auto [linearization, optimal] = Linearize(depgraph, iter_count, rng_seed);
+    auto [linearization, optimal] = Linearize(depgraph, iter_count, rng_seed, old_linearization);
     SanityCheck(depgraph, linearization);
     auto chunking = ChunkLinearization(depgraph, linearization);
+
+    // Linearization must always be as good as the old one, if provided.
+    if (!old_linearization.empty()) {
+        auto old_chunking = ChunkLinearization(depgraph, old_linearization);
+        auto cmp = CompareChunks(chunking, old_chunking);
+        assert(cmp >= 0);
+    }
 
     // If the iteration count is sufficiently high, an optimal linearization must be found.
     // Each linearization step can use up to 2^k iterations, with steps k=1..n. That sum is
