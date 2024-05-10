@@ -151,6 +151,18 @@ std::optional<PublicData> CreateInputPubkeysTweak(
     return public_data;
 }
 
+bool MaybeSilentPayment(const CTransactionRef &tx) {
+    if (tx->IsCoinBase()) return false;
+
+    if (std::none_of(tx->vout.begin(), tx->vout.end(), [](const CTxOut& txout) {
+        return txout.scriptPubKey.IsPayToTaproot();
+    })) {
+        return false;
+    }
+
+    return true;
+}
+
 std::optional<PublicData> GetSilentPaymentsPublicData(const std::vector<CTxIn>& vin, const std::map<COutPoint, Coin>& coins)
 {
     // Extract the keys from the inputs
