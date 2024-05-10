@@ -686,6 +686,7 @@ static RPCHelpMan getsilentpaymentblockdata()
                 },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
+    // TODO: add cut-through argument, check which index to use here
     if (!g_bip352_index) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, "Requires bip352index");
     }
