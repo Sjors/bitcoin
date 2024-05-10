@@ -77,7 +77,29 @@ bool BIP352Index::GetSilentPaymentKeys(const std::vector<CTransactionRef>& txs, 
         }
 
         std::optional<CPubKey> tweaked_pk = bip352::GetSerializedSilentPaymentsPublicData(tx->vin, coins);
-        if (tweaked_pk) tweaked_pub_key_sums.push_back(tweaked_pk.value());
+        if (tweaked_pk) {
+            if (m_cut_through) {
+                // Skip entry if all outputs have been spent.
+                // This is only effective when the index is generated while
+                // the tip is far ahead.
+                //
+                // This is done after calculating the tweak in order to minimize
+                // the number of UTXO lookups.
+                LOCK(cs_main);
+                const CCoinsViewCache& coins_cache = m_chainstate->CoinsTip();
+
+                uint32_t spent{0};
+                for (size_t j{0}; j < tx->vout.size(); j++) {
+                    COutPoint outpoint(tx->GetHash(), j);
+                    // Many new blocks may be processed while generating the index,
+                    // in between HaveCoin calls. This is not a problem, because
+                    // the cut-through index can safely have false positives.
+                    if (!coins_cache.HaveCoin(outpoint)) spent++;
+                }
+                if (spent == tx->vout.size()) continue;
+            }
+            tweaked_pub_key_sums.emplace_back(tweaked_pk.value());
+        }
     }
 
     return true;
