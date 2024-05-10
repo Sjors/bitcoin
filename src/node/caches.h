@@ -22,6 +22,7 @@ struct IndexCacheSizes {
     size_t bip352_index{0};
     size_t tx_index{0};
     size_t filter_index{0};
+    size_t bip352_ct_index{0};
 };
 struct CacheSizes {
     IndexCacheSizes index;
