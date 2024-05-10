@@ -84,15 +84,21 @@ bool BIP352Index::GetSilentPaymentKeys(std::vector<CTransactionRef> txs, CBlockU
                 LOCK(cs_main);
                 const CCoinsViewCache& coins_cache = m_chainstate->CoinsTip();
 
-                uint32_t spent{0};
+                uint32_t discarded{0};
                 for (uint32_t i{0}; i < tx->vout.size(); i++) {
                     COutPoint outpoint(tx->GetHash(), i);
+                    // Discard dust
+                    if (tx->vout.at(i).nValue < 1000) {
+                        discarded++;
+                        continue;
+                    }
+
                     // Many new blocks may be processed while generating the index,
                     // in between HaveCoin calls. This is not a problem, because
                     // the cut-through index can safely have false positives.
-                    if (!coins_cache.HaveCoin(outpoint)) spent++;
+                    if (!coins_cache.HaveCoin(outpoint)) discarded++;
                 }
-                if (spent == tx->vout.size()) continue;
+                if (discarded == tx->vout.size()) continue;
             }
             tweaked_pub_key_sums.push_back(tweaked_pk.value());
         }
