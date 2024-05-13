@@ -37,17 +37,17 @@ class BIP352Index::DB : public BaseIndex::DB
 public:
     explicit DB(fs::path file_name, size_t n_cache_size, bool f_memory = false, bool f_wipe = false);
 
-    bool WriteSilentPayments(const std::pair<uint256, std::vector<CPubKey>>& tweaks);
+    bool WriteSilentPayments(const std::pair<uint256, tweak_index_entry>& kv);
 };
 
 BIP352Index::DB::DB(fs::path file_name, size_t n_cache_size, bool f_memory, bool f_wipe) :
     BaseIndex::DB(gArgs.GetDataDirNet() / "indexes" / file_name, n_cache_size, f_memory, f_wipe)
 {}
 
-bool BIP352Index::DB::WriteSilentPayments(const std::pair<uint256, std::vector<CPubKey>>& tweaks)
+bool BIP352Index::DB::WriteSilentPayments(const std::pair<uint256, tweak_index_entry>& kv)
 {
     CDBBatch batch(*this);
-    batch.Write(std::make_pair(DB_SILENT_PAYMENT_INDEX, tweaks.first), tweaks.second);
+    batch.Write(std::make_pair(DB_SILENT_PAYMENT_INDEX, kv.first), kv.second);
     return WriteBatch(batch);
 }
 
@@ -59,7 +59,7 @@ BIP352Index::BIP352Index(bool cut_through, std::unique_ptr<interfaces::Chain> ch
 
 BIP352Index::~BIP352Index() = default;
 
-bool BIP352Index::GetSilentPaymentKeys(const std::vector<CTransactionRef>& txs, const CBlockUndo& block_undo, std::vector<CPubKey>& tweaked_pub_key_sums) const
+bool BIP352Index::GetSilentPaymentKeys(const std::vector<CTransactionRef>& txs, const CBlockUndo& block_undo, tweak_index_entry& index_entry) const
 {
     assert(txs.size() - 1 == block_undo.vtxundo.size());
 
@@ -78,6 +78,15 @@ bool BIP352Index::GetSilentPaymentKeys(const std::vector<CTransactionRef>& txs, 
 
         std::optional<CPubKey> tweaked_pk = bip352::GetSerializedSilentPaymentsPrevoutsSummary(tx->vin, coins);
         if (tweaked_pk) {
+            // Used to filter dust. To keep the index small we use only one byte
+            // and measure in hexasats.
+            uint8_t max_output_hsat = 0;
+            for (const CTxOut& txout : tx->vout) {
+                if (!txout.scriptPubKey.IsPayToTaproot()) continue;
+                uint8_t output_hsat = txout.nValue > max_dust_threshold ? UINT8_MAX : txout.nValue >> dust_shift;
+                max_output_hsat = std::max(output_hsat, max_output_hsat);
+            }
+
             if (m_cut_through) {
                 // Skip entry if all outputs have been spent.
                 // This is only effective when the index is generated while
@@ -98,7 +107,7 @@ bool BIP352Index::GetSilentPaymentKeys(const std::vector<CTransactionRef>& txs, 
                 }
                 if (spent == tx->vout.size()) continue;
             }
-            tweaked_pub_key_sums.emplace_back(tweaked_pk.value());
+            index_entry.emplace_back(std::make_pair(tweaked_pk.value(), max_output_hsat));
         }
     }
 
@@ -121,15 +130,15 @@ bool BIP352Index::CustomAppend(const interfaces::BlockInfo& block)
     // Exclude pre-taproot
     if (block.height < m_start_height) return true;
 
-    std::vector<CPubKey> tweaked_pub_key_sums;
-    GetSilentPaymentKeys(Assert(block.data)->vtx, *Assert(block.undo_data), tweaked_pub_key_sums);
+    tweak_index_entry index_entry;
+    GetSilentPaymentKeys(Assert(block.data)->vtx, *Assert(block.undo_data), index_entry);
 
-    return m_db->WriteSilentPayments(make_pair(block.hash, tweaked_pub_key_sums));
+    return m_db->WriteSilentPayments(make_pair(block.hash, index_entry));
 }
 
-bool BIP352Index::FindSilentPayment(const uint256& block_hash, std::vector<CPubKey>& tweaked_pub_key_sums) const
+bool BIP352Index::FindSilentPayment(const uint256& block_hash, tweak_index_entry& index_entry) const
 {
-    return m_db->Read(std::make_pair(DB_SILENT_PAYMENT_INDEX, block_hash), tweaked_pub_key_sums);
+    return m_db->Read(std::make_pair(DB_SILENT_PAYMENT_INDEX, block_hash), index_entry);
 }
 
 BaseIndex::DB& BIP352Index::GetDB() const { return *m_db; }
