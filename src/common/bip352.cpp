@@ -4,12 +4,13 @@
 
 #include <addresstype.h>
 #include <common/bip352.h>
+#include <policy/feerate.h>
+#include <policy/policy.h>
 #include <primitives/transaction.h>
 #include <secp256k1_extrakeys.h>
 #include <pubkey.h>
 #include <secp256k1.h>
 #include <span.h>
-
 #include <secp256k1_silentpayments.h>
 #include <streams.h>
 #include <uint256.h>
@@ -78,7 +79,7 @@ bool MaybeSilentPayment(CTransactionRef &tx) {
 
     if (std::none_of(tx->vout.begin(), tx->vout.end(), [](const CTxOut& txout) {
         std::vector<std::vector<unsigned char>> solutions;
-        return Solver(txout.scriptPubKey, solutions) == TxoutType::WITNESS_V1_TAPROOT;
+        return !IsDust(txout, CFeeRate{DUST_RELAY_TX_FEE}) && Solver(txout.scriptPubKey, solutions) == TxoutType::WITNESS_V1_TAPROOT;
     })) {
         return false;
     }
