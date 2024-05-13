@@ -18,8 +18,18 @@ static constexpr bool DEFAULT_BIP352_CT_INDEX{false};
  * Currently only silent payments v0 exists. Future versions may expand the
  * existing index or create a (perhaps overlapping) new one.
  */
+
 class BIP352Index final : public BaseIndex
 {
+public:
+    /**
+     * For each block hash we store and array of transactions. For each
+     * transaction we store:
+     * - the tweaked pubkey sum
+     * - the highest output amount (for dust filtering)
+     */
+    using tweak_index_entry = std::vector<std::pair<CPubKey, uint8_t>>;
+
 protected:
     class DB;
 
@@ -34,12 +44,13 @@ private:
     /**
      * Derive the silent payment tweaked public key for every block transaction.
      *
+     *
      * @param[in] txs all block transactions
      * @param[in] block_undo block undo data
-     * @param[out] tweaked_pub_key_sums the tweaked public keys, only for transactions that have one
+     * @param[out] index_entry the tweaked public keys, only for transactions that have one
      * @return false if something went wrong
      */
-    bool GetSilentPaymentKeys(std::vector<CTransactionRef> txs, CBlockUndo& block_undo, std::vector<CPubKey>& tweaked_pub_key_sums);
+    bool GetSilentPaymentKeys(std::vector<CTransactionRef> txs, CBlockUndo& block_undo, tweak_index_entry& index_entry);
 
 protected:
     bool CustomAppend(const interfaces::BlockInfo& block) override;
@@ -52,7 +63,7 @@ public:
     // Destructor is declared because this class contains a unique_ptr to an incomplete type.
     virtual ~BIP352Index() override;
 
-    bool FindSilentPayment(const uint256& block_hash, std::vector<CPubKey>& tweaked_pub_key_sums) const;
+    bool FindSilentPayment(const uint256& block_hash, tweak_index_entry& index_entry) const;
 };
 
 /// The global BIP325 index. May be null.

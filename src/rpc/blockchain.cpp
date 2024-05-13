@@ -702,7 +702,7 @@ static RPCHelpMan getsilentpaymentblockdata()
         }
     }
 
-    std::vector<CPubKey> tweaks;
+    BIP352Index::tweak_index_entry tweaks;
     if (!g_bip352_index->FindSilentPayment(block_hash, tweaks)) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, "Block has not been indexed yet");
     }
@@ -710,8 +710,8 @@ static RPCHelpMan getsilentpaymentblockdata()
     UniValue ret(UniValue::VOBJ);
     UniValue tweaks_res(UniValue::VARR);
 
-    for (CPubKey& tweak : tweaks) {
-        tweaks_res.push_back(HexStr(tweak));
+    for (std::pair<CPubKey, uint8_t>& tweak : tweaks) {
+        tweaks_res.push_back(HexStr(tweak.first));
     }
 
     ret.pushKV("bip352_tweaks", tweaks_res);
