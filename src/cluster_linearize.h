@@ -167,6 +167,45 @@ public:
         return ret;
     }
 
+    /** Find some connected component within the subset "todo" of this graph.
+     *
+     * Complexity: O(ret.Count()).
+     */
+    SetType FindConnectedComponent(const SetType& todo) const noexcept
+    {
+        if (todo.None()) return todo;
+        auto first = todo.First();
+        SetType ret = Descendants(first) | Ancestors(first);
+        ret &= todo;
+        SetType to_add = ret;
+        to_add.Reset(first);
+        do {
+            SetType old = ret;
+            for (auto add : to_add) {
+                ret |= Descendants(add);
+                ret |= Ancestors(add);
+            }
+            ret &= todo;
+            to_add = ret - old;
+        } while (to_add.Any());
+        return ret;
+    }
+
+    /** Determine if a subset is connected.
+     *
+     * Complexity: O(subset.Count()).
+     */
+    bool IsConnected(const SetType& subset) const noexcept
+    {
+        return FindConnectedComponent(subset) == subset;
+    }
+
+    /** Determine if this entire graph is connected.
+     *
+     * Complexity: O(TxCount()).
+     */
+    bool IsConnected() const noexcept { return IsConnected(SetType::Fill(TxCount())); }
+
     /** Append the entries of select to list in a topologically valid order.
      *
      * Complexity: O(select.Count() * log(select.Count())).
