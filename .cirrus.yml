@@ -116,7 +116,9 @@ task:
 
 task:
   name: 'ARM, unit tests, no functional tests'
+  # Skip if no ARM worker exists (for a fork)
   << : *GLOBAL_TASK_TEMPLATE
+  skip: $NO_ARM == "true"
   persistent_worker:
     labels:
       type: arm64  # Use arm64 worker to sidestep qemu and avoid a slow CI: https://github.com/bitcoin/bitcoin/pull/28087#issuecomment-1649399453
