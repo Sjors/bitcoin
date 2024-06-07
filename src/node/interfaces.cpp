@@ -876,10 +876,14 @@ public:
         return TestBlockValidity(state, chainman().GetParams(), chainman().ActiveChainstate(), block, chainman().ActiveChain().Tip(), /*fCheckPOW=*/false, check_merkle_root);
     }
 
-    std::unique_ptr<CBlockTemplate> createNewBlock(const CScript& script_pub_key, bool use_mempool) override
+    std::unique_ptr<CBlockTemplate> createNewBlock(const CScript& script_pub_key, bool use_mempool, size_t coinbase_output_max_additional_size) override
     {
         BlockAssembler::Options options;
         ApplyArgsManOptions(gArgs, options);
+
+        // TODO: fail sv2 handshake
+        Assume(options.nBlockMaxWeight >= coinbase_output_max_additional_size);
+        options.coinbase_output_max_additional_size = coinbase_output_max_additional_size;
 
         LOCK(::cs_main);
         return BlockAssembler{chainman().ActiveChainstate(), use_mempool ? context()->mempool.get() : nullptr, options}.CreateNewBlock(script_pub_key);
