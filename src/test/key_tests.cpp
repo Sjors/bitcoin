@@ -7,6 +7,7 @@
 #include <common/system.h>
 #include <key_io.h>
 #include <span.h>
+#include <silentpaymentkey.h>
 #include <streams.h>
 #include <test/util/random.h>
 #include <test/util/setup_common.h>
@@ -363,6 +364,26 @@ BOOST_AUTO_TEST_CASE(bip341_test_h)
     hw.write(MakeByteSpan(G_uncompressed));
     XOnlyPubKey H{hw.GetSHA256()};
     BOOST_CHECK(XOnlyPubKey::NUMS_H == H);
+}
+
+BOOST_AUTO_TEST_CASE(silentpayment_key)
+{
+    CKey scanKey = DecodeSecret(strSecret1C);
+    CKey spendKey = DecodeSecret(strSecret2C);
+
+    SpPubKey sppub_key(scanKey, spendKey.GetPubKey());
+    std::string sppub_key_str(EncodeSpPubKey(sppub_key));
+    SpPubKey sppub_key_decoded = DecodeSpPubKey(sppub_key_str);
+    BOOST_CHECK(sppub_key.scanKey == sppub_key_decoded.scanKey);
+    BOOST_CHECK(sppub_key.spendKey == sppub_key_decoded.spendKey);
+    BOOST_CHECK(sppub_key == sppub_key_decoded);
+
+    SpKey spkey(sppub_key, scanKey, spendKey);
+    std::string spkey_str(EncodeSpKey(spkey));
+    SpKey spkey_decoded = DecodeSpKey(spkey_str);
+    BOOST_CHECK(spkey.scanKey == spkey_decoded.scanKey);
+    BOOST_CHECK(spkey.spendKey == spkey_decoded.spendKey);
+    BOOST_CHECK(spkey == spkey_decoded);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
