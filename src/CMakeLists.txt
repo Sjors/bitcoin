@@ -246,6 +246,7 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/minisketchwrapper.cpp
   node/peerman_args.cpp
   node/psbt.cpp
+  node/sv2_template_provider.cpp
   node/timeoffsets.cpp
   node/transaction.cpp
   node/txreconciliation.cpp
