@@ -27,7 +27,7 @@ FUZZ_TARGET(sv2_msgs)
     }
 
     DataStream ss_coinbase_output_data(buffer);
-    node::Sv2CoinbaseOutputDataSizeMsg coinbase_output_data;
+    node::Sv2CoinbaseOutputConstraintsMsg coinbase_output_data;
 
     try {
         ss_coinbase_output_data >> coinbase_output_data;

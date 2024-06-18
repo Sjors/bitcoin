@@ -10,7 +10,7 @@
 #include <util/thread.h>
 #include <validation.h>
 
-using node::Sv2CoinbaseOutputDataSizeMsg;
+using node::Sv2CoinbaseOutputConstraintsMsg;
 using node::Sv2MsgType;
 using node::Sv2SetupConnectionMsg;
 using node::Sv2SetupConnectionErrorMsg;
@@ -297,7 +297,7 @@ void Sv2TemplateProvider::ThreadSv2Handler()
             // Update all clients with the new template and prev hash.
             for (const auto& client : m_sv2_clients) {
                 // For newly connected clients, we call SendWork after receiving
-                // CoinbaseOutputDataSize.
+                // CoinbaseOutputConstraints.
                 if (client->m_coinbase_tx_outputs_size == 0) continue;
                 LOCK(m_tp_mutex);
                 if (!SendWork(*client.get(), /*send_new_prevhash=*/best_block_changed)) {
@@ -615,7 +615,7 @@ void Sv2TemplateProvider::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Cli
     }
     case Sv2MsgType::COINBASE_OUTPUT_DATA_SIZE:
     {
-        LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Received 0x70 CoinbaseOutputDataSize from client id=%zu\n",
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Received 0x70 CoinbaseOutputConstraints from client id=%zu\n",
                       client.m_id);
 
         if (!client.m_setup_connection_confirmed) {
@@ -623,12 +623,12 @@ void Sv2TemplateProvider::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Cli
             return;
         }
 
-        Sv2CoinbaseOutputDataSizeMsg coinbase_output_data_size;
+        Sv2CoinbaseOutputConstraintsMsg coinbase_output_data_size;
         try {
             ss >> coinbase_output_data_size;
             client.m_coinbase_output_data_size_recv = true;
         } catch (const std::exception& e) {
-            LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received invalid CoinbaseOutputDataSize message from client id=%zu: %s\n",
+            LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received invalid CoinbaseOutputConstraints message from client id=%zu: %s\n",
                           client.m_id, e.what());
             client.m_disconnect_flag = true;
             return;
@@ -638,7 +638,7 @@ void Sv2TemplateProvider::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Cli
         LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "coinbase_output_max_additional_size=%d bytes\n", max_additional_size);
 
         if (max_additional_size > MAX_BLOCK_WEIGHT) {
-            LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received impossible CoinbaseOutputDataSize from client id=%zu: %d\n",
+            LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received impossible CoinbaseOutputConstraints from client id=%zu: %d\n",
                           client.m_id, max_additional_size);
             client.m_disconnect_flag = true;
             return;

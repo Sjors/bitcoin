@@ -45,7 +45,7 @@ public:
      * @param[in] coinbase_output_max_additional_size maximum additional serialized bytes which the pool will add in coinbase transaction outputs
      * @returns a block template
      */
-    virtual std::unique_ptr<node::CBlockTemplate> createNewBlock(const CScript& script_pub_key, bool use_mempool = true, size_t coinbase_output_max_additional_size = DEFAULT_COINBASE_OUTPUT_MAX_ADDITIONAL_SIZE) = 0;
+    virtual std::unique_ptr<node::CBlockTemplate> createNewBlock(const CScript& script_pub_key, bool use_mempool = true, size_t coinbase_output_max_additional_size = DEFAULT_COINBASE_OUTPUT_MAX_ADDITIONAL_SIZE, size_t coinbase_output_max_sigops = DEFAULT_COINBASE_OUTPUT_MAX_SIGOPS) = 0;
     /**
      * Processes new block. A valid new block is automatically relayed to peers.
      *
