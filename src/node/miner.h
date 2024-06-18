@@ -159,6 +159,16 @@ public:
         CFeeRate blockMinFeeRate{DEFAULT_BLOCK_MIN_TX_FEE};
         // Whether to call TestBlockValidity() at the end of CreateNewBlock().
         bool test_block_validity{true};
+        /**
+         * The maximum additional serialized bytes which the pool will add in
+         * coinbase transaction outputs.
+         */
+        size_t coinbase_output_max_additional_size{4000};
+        /**
+         * The maximum additional sigops which the pool will add in coinbase
+         * transaction outputs.
+         */
+        size_t coinbase_output_max_sigops{400};
     };
 
     explicit BlockAssembler(Chainstate& chainstate, const CTxMemPool* mempool, const Options& options);
