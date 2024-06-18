@@ -121,7 +121,7 @@ struct Sv2SetupConnectionMsg
  * The template provider MUST NOT provide NewWork messages which would represent consensus-invalid blocks once this
  * additional size — along with a maximally-sized (100 byte) coinbase field — is added.
  */
-struct Sv2CoinbaseOutputDataSizeMsg
+struct Sv2CoinbaseOutputConstraintsMsg
 {
     /**
      * The default message type value for this Stratum V2 message.
