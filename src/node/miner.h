@@ -20,6 +20,8 @@
 #include <boost/multi_index/tag.hpp>
 #include <boost/multi_index_container.hpp>
 
+#include <util/mining.h>
+
 class ArgsManager;
 class CBlockIndex;
 class CChainParams;
@@ -163,12 +165,12 @@ public:
          * The maximum additional serialized bytes which the pool will add in
          * coinbase transaction outputs.
          */
-        size_t coinbase_output_max_additional_size{4000};
+        size_t coinbase_output_max_additional_size{DEFAULT_COINBASE_OUTPUT_MAX_ADDITIONAL_SIZE};
         /**
          * The maximum additional sigops which the pool will add in coinbase
          * transaction outputs.
          */
-        size_t coinbase_output_max_sigops{400};
+        size_t coinbase_output_max_sigops{DEFAULT_COINBASE_OUTPUT_MAX_SIGOPS};
     };
 
     explicit BlockAssembler(Chainstate& chainstate, const CTxMemPool* mempool, const Options& options);
