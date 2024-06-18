@@ -133,11 +133,16 @@ struct Sv2CoinbaseOutputConstraintsMsg
      */
     uint32_t m_coinbase_output_max_additional_size;
 
+    /**
+     * The maximum additional sigops which the pool will add in coinbase transaction outputs.
+     */
+    uint16_t m_coinbase_output_max_sigops;
 
     template <typename Stream>
     void Unserialize(Stream& s)
     {
         s >> m_coinbase_output_max_additional_size;
+        s >> m_coinbase_output_max_sigops;
     }
 };
 
