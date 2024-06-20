@@ -20,8 +20,12 @@ env:  # Global defaults
 # - medium: For an x86_64 machine, recommended to have 4 CPUs and 16 GB of memory.
 # - arm64: For an aarch64 machine, recommended to have 2 CPUs and 8 GB of memory.
 #
-# CI jobs for the latter configuration can be skipped by setting NO_ARM=1
-# as a custom env variable in Cirrus.
+# CI jobs for the latter configuration can be run on x86_64 hardware
+# by installing qemu-user-static, which may work out of the box with
+# podman or docker.
+#
+# Alternatively arm tasks can be skipped by setting NO_ARM=1 as a custom env
+# variable in Cirrus.
 #
 # The above machine types are matched to each job by their label. Refer to the
 # Cirrus CI docs for more details.
