@@ -120,6 +120,7 @@ add_executable(test_bitcoin
   span_tests.cpp
   streams_tests.cpp
   sv2_noise_tests.cpp
+  sv2_transport_tests.cpp
   sync_tests.cpp
   system_tests.cpp
   timeoffsets_tests.cpp
