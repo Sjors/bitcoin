@@ -119,6 +119,7 @@ add_library(bitcoin_common STATIC EXCLUDE_FROM_ALL
   common/settings.cpp
   common/signmessage.cpp
   common/sv2_connman.cpp
+  common/sv2_messages.cpp
   common/sv2_noise.cpp
   common/sv2_transport.cpp
   common/system.cpp
