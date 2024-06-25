@@ -10,6 +10,7 @@
 #include <chainparams.h>
 #include <key.h>
 #include <pubkey.h>
+#include <silentpaymentkey.h>
 
 #include <string>
 
@@ -20,6 +21,10 @@ CExtKey DecodeExtKey(const std::string& str);
 std::string EncodeExtKey(const CExtKey& extkey);
 CExtPubKey DecodeExtPubKey(const std::string& str);
 std::string EncodeExtPubKey(const CExtPubKey& extpubkey);
+SpKey DecodeSpKey(const std::string& str);
+std::string EncodeSpKey(const SpKey& spkey);
+SpPubKey DecodeSpPubKey(const std::string& str);
+std::string EncodeSpPubKey(const SpPubKey& sppubkey);
 
 std::string EncodeDestination(const CTxDestination& dest);
 CTxDestination DecodeDestination(const std::string& str);

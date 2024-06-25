@@ -326,6 +326,54 @@ std::string EncodeExtKey(const CExtKey& key)
     return ret;
 }
 
+SpKey DecodeSpKey(const std::string& str)
+{
+    SpKey key;
+    std::vector<unsigned char> data;
+    const std::vector<unsigned char>& prefix = Params().Base58Prefix(CChainParams::SP_SECRET_KEY);
+    if (DecodeBase58Check(str, data, prefix.size() + BIP352_SPKEY_SIZE)) {
+        if (data.size() == BIP352_SPKEY_SIZE + prefix.size() && std::equal(prefix.begin(), prefix.end(), data.begin())) {
+            key.Decode(data.data() + prefix.size());
+        }
+    }
+    return key;
+}
+
+std::string EncodeSpKey(const SpKey& key)
+{
+    std::vector<unsigned char> data = Params().Base58Prefix(CChainParams::SP_SECRET_KEY);
+    size_t size = data.size();
+    data.resize(size + BIP352_SPKEY_SIZE);
+    key.Encode(data.data() + size);
+    std::string ret = EncodeBase58Check(data);
+    memory_cleanse(data.data(), data.size());
+    return ret;
+}
+
+SpPubKey DecodeSpPubKey(const std::string& str)
+{
+    SpPubKey key;
+    std::vector<unsigned char> data;
+    const std::vector<unsigned char>& prefix = Params().Base58Prefix(CChainParams::SP_PUBLIC_KEY);
+    if (DecodeBase58Check(str, data, prefix.size() + BIP352_SPKEY_SIZE)) {
+        if (data.size() == BIP352_SPKEY_SIZE + prefix.size() && std::equal(prefix.begin(), prefix.end(), data.begin())) {
+            key.Decode(data.data() + prefix.size());
+        }
+    }
+    return key;
+}
+
+std::string EncodeSpPubKey(const SpPubKey& key)
+{
+    std::vector<unsigned char> data = Params().Base58Prefix(CChainParams::SP_PUBLIC_KEY);
+    size_t size = data.size();
+    data.resize(size + BIP352_SPKEY_SIZE);
+    key.Encode(data.data() + size);
+    std::string ret = EncodeBase58Check(data);
+    memory_cleanse(data.data(), data.size());
+    return ret;
+}
+
 std::string EncodeDestination(const CTxDestination& dest)
 {
     return std::visit(DestinationEncoder(Params()), dest);

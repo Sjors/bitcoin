@@ -147,6 +147,8 @@ public:
         base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,128);
         base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x88, 0xB2, 0x1E};
         base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x88, 0xAD, 0xE4};
+        base58Prefixes[SP_PUBLIC_KEY] = {0x22, 0x48, 0x2F, 0xFE}; //0x22482ffe
+        base58Prefixes[SP_SECRET_KEY] = {0x07, 0xC4, 0x5A, 0xB9, 0xEB}; //0x07c45ab9eb
 
         bech32_hrp = "bc";
         silent_payment_hrp = "sp";
@@ -255,6 +257,8 @@ public:
         base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,239);
         base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x35, 0x87, 0xCF};
         base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x35, 0x83, 0x94};
+        base58Prefixes[SP_PUBLIC_KEY] = {0x22, 0x48, 0x2F, 0xFE}; //0x22482ffe
+        base58Prefixes[SP_SECRET_KEY] = {0x07, 0xC4, 0x5A, 0xB9, 0xEB}; //0x07c45ab9eb
 
         bech32_hrp = "tb";
         silent_payment_hrp = "tsp";
@@ -394,6 +398,8 @@ public:
         base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,239);
         base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x35, 0x87, 0xCF};
         base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x35, 0x83, 0x94};
+        base58Prefixes[SP_PUBLIC_KEY] = {0x22, 0x48, 0x2F, 0xFE}; //0x22482ffe
+        base58Prefixes[SP_SECRET_KEY] = {0x07, 0xC4, 0x5A, 0xB9, 0xEB}; //0x07c45ab9eb
 
         bech32_hrp = "tb";
         silent_payment_hrp = "tsp";
@@ -531,6 +537,8 @@ public:
         base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,239);
         base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x35, 0x87, 0xCF};
         base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x35, 0x83, 0x94};
+        base58Prefixes[SP_PUBLIC_KEY] = {0x22, 0x48, 0x2F, 0xFE}; //0x22482ffe
+        base58Prefixes[SP_SECRET_KEY] = {0x07, 0xC4, 0x5A, 0xB9, 0xEB}; //0x07c45ab9eb
 
         bech32_hrp = "bcrt";
         silent_payment_hrp = "sprt";
