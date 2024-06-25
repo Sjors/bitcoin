@@ -12,6 +12,7 @@
 #include <script/script.h>
 #include <script/signingprovider.h>
 #include <script/solver.h>
+#include <silentpaymentkey.h>
 #include <uint256.h>
 
 #include <common/args.h>
@@ -558,6 +559,87 @@ public:
     }
 };
 
+/** An object representing a parsed silent payment public key in a descriptor. */
+class SilentPubkeyProvider final : public PubkeyProvider
+{
+    SpPubKey m_sppk;
+public:
+    SilentPubkeyProvider(uint32_t exp_index, const SpPubKey& sppk) : PubkeyProvider(exp_index), m_sppk(sppk) {}
+    bool IsRange() const override { return false; }
+    size_t GetSize() const override { return BIP352_SPKEY_SIZE; }
+    bool GetPubKey(int pos, const SigningProvider& arg, CPubKey& key, KeyOriginInfo& info, const DescriptorCache* read_cache = nullptr, DescriptorCache* write_cache = nullptr) const override
+    {
+        return false;
+    }
+    bool GetPrivKey(int pos, const SigningProvider& arg, CKey& key) const override
+    {
+        return false;
+    }
+    std::string ToString(StringType type, bool normalized) const
+    {
+        std::string ret = EncodeSpPubKey(m_sppk);
+        return ret;
+    }
+    std::string ToString(StringType type=StringType::PUBLIC) const override
+    {
+        return ToString(type, /*normalized=*/false);
+    }
+    bool ToPrivateString(const SigningProvider& arg, std::string& out) const override
+    {
+        SpKey key;
+        if (!GetSpKey(arg, key)) return false;
+        out = EncodeSpKey(key);
+        return true;
+    }
+    bool ToNormalizedString(const SigningProvider& arg, std::string& out, const DescriptorCache* cache) const override
+    {
+        out = ToString(StringType::PUBLIC, /*normalized=*/true);
+        return true;
+    }
+    std::optional<CPubKey> GetRootPubKey() const override
+    {
+        return std::nullopt;
+    }
+    std::optional<CExtPubKey> GetRootExtPubKey() const override
+    {
+        return std::nullopt;
+    }
+    bool GetSpKey(const SigningProvider& arg, SpKey& ret) const
+    {
+        CKey spendKey;
+        if (!arg.GetKey(m_sppk.spendKey.GetID(), spendKey)) return false;
+        ret.scanKey = m_sppk.scanKey;
+        ret.spendKey = spendKey;
+        ret.maximumNumberOfLabels = m_sppk.maximumNumberOfLabels;
+        std::copy(m_sppk.version, m_sppk.version + sizeof(m_sppk.version), ret.version);
+        std::copy(m_sppk.vchFingerprint, m_sppk.vchFingerprint + sizeof(ret.vchFingerprint), ret.vchFingerprint);
+        return true;
+    }
+    bool GetSpPubKey(SpPubKey& ret) const
+    {
+        ret.maximumNumberOfLabels = m_sppk.maximumNumberOfLabels;
+        std::copy(m_sppk.version, m_sppk.version + sizeof(m_sppk.version), ret.version);
+        std::copy(m_sppk.vchFingerprint, m_sppk.vchFingerprint + sizeof(ret.vchFingerprint), ret.vchFingerprint);
+        ret.scanKey = m_sppk.scanKey;
+        ret.spendKey = m_sppk.spendKey;
+        return true;
+    }
+    void GetSpendPubKey(CPubKey& pubkey, KeyOriginInfo& info) const
+    {
+        info.path.clear();
+        CKeyID keyid = m_sppk.spendKey.GetID();
+        std::copy(keyid.begin(), keyid.begin() + sizeof(info.fingerprint), info.fingerprint);
+        pubkey = m_sppk.spendKey;
+    }
+    void GetScanPubKey(CPubKey& pubkey, KeyOriginInfo& info) const
+    {
+        info.path.clear();
+        CKeyID keyid = m_sppk.scanKey.GetPubKey().GetID();
+        std::copy(keyid.begin(), keyid.begin() + sizeof(info.fingerprint), info.fingerprint);
+        pubkey = m_sppk.scanKey.GetPubKey();
+    }
+};
+
 /** Base class for all Descriptor implementations. */
 class DescriptorImpl : public Descriptor
 {
@@ -697,6 +779,18 @@ public:
         // Construct temporary data in `entries`, `subscripts`, and `subprovider` to avoid producing output in case of failure.
         for (const auto& p : m_pubkey_args) {
             entries.emplace_back();
+
+            try {
+                auto sppubkeyprovider = dynamic_cast<SilentPubkeyProvider&>(*p);
+                SpPubKey key;
+                sppubkeyprovider.GetSpPubKey(key);
+                out.sppubkeys.emplace(key.GetID(), key);
+                sppubkeyprovider.GetSpendPubKey(entries.back().first, entries.back().second);
+                entries.emplace_back();
+                sppubkeyprovider.GetScanPubKey(entries.back().first, entries.back().second);
+                continue;
+            } catch (const std::bad_cast&) {}
+
             if (!p->GetPubKey(pos, arg, entries.back().first, entries.back().second, read_cache, write_cache)) return false;
         }
         std::vector<CScript> subscripts;
@@ -734,6 +828,16 @@ public:
     void ExpandPrivate(int pos, const SigningProvider& provider, FlatSigningProvider& out) const final
     {
         for (const auto& p : m_pubkey_args) {
+            try {
+                auto sppubkeyprovider = dynamic_cast<SilentPubkeyProvider&>(*p);
+                SpKey key;
+                sppubkeyprovider.GetSpKey(provider, key);
+                out.spkeys.emplace(key.Neuter().GetID(), key);
+                out.keys.emplace(key.spendKey.GetPubKey().GetID(), key.spendKey);
+                out.keys.emplace(key.scanKey.GetPubKey().GetID(), key.scanKey);
+                continue;
+            } catch (const std::bad_cast&) {}
+
             CKey key;
             if (!p->GetPrivKey(pos, provider, key)) continue;
             out.keys.emplace(key.GetPubKey().GetID(), key);
@@ -1302,6 +1406,18 @@ public:
     }
 };
 
+/** A parsed sp(...) descriptor */
+class SpDescriptor final : public DescriptorImpl
+{
+protected:
+    std::vector<CScript> MakeScripts(const std::vector<CPubKey>&, Span<const CScript>, FlatSigningProvider&) const override { return std::vector<CScript>(); }
+public:
+    SpDescriptor(std::unique_ptr<PubkeyProvider> spkey) : DescriptorImpl(Vector(std::move(spkey)), "sp") {};
+
+    std::optional<OutputType> GetOutputType() const override { return OutputType::SILENT_PAYMENT; }
+    bool IsSingleType() const final { return true; }
+};
+
 ////////////////////////////////////////////////////////////////////////////
 // Parser                                                                 //
 ////////////////////////////////////////////////////////////////////////////
@@ -1312,6 +1428,7 @@ enum class ParseScriptContext {
     P2WPKH,  //!< Inside wpkh() (no script, pubkey only)
     P2WSH,   //!< Inside wsh() (script becomes v0 witness script)
     P2TR,    //!< Inside tr() (either internal key, or BIP342 script leaf)
+    SP,      //!< Inside sp() (spkeys are only valid under sp())
 };
 
 /**
@@ -1397,8 +1514,33 @@ std::unique_ptr<PubkeyProvider> ParsePubkeyInner(uint32_t key_exp_index, const S
             }
         }
     }
+
+    SpKey spkey = DecodeSpKey(str);
+    SpPubKey sppubkey = DecodeSpPubKey(str);
     CExtKey extkey = DecodeExtKey(str);
     CExtPubKey extpubkey = DecodeExtPubKey(str);
+
+    if (ctx == ParseScriptContext::SP) {
+        if (extkey.key.IsValid() || extpubkey.pubkey.IsValid()) {
+            error = "extended keys are not allowed";
+            return nullptr;
+        }
+
+        if (spkey.IsValid()) {
+            out.keys.emplace(spkey.scanKey.GetPubKey().GetID(), spkey.scanKey);
+            out.keys.emplace(spkey.spendKey.GetPubKey().GetID(), spkey.spendKey);
+            return std::make_unique<SilentPubkeyProvider>(key_exp_index, spkey.Neuter());
+        }
+
+        if (sppubkey.IsValid()) {
+            out.keys.emplace(sppubkey.scanKey.GetPubKey().GetID(), sppubkey.scanKey);
+            return std::make_unique<SilentPubkeyProvider>(key_exp_index, sppubkey);
+        }
+
+        error = "provided key is not a valid silent payment key";
+        return nullptr;
+    }
+
     if (!extkey.key.IsValid() && !extpubkey.pubkey.IsValid()) {
         error = strprintf("key '%s' is not valid", str);
         return nullptr;
@@ -1599,6 +1741,47 @@ std::unique_ptr<DescriptorImpl> ParseScript(uint32_t& key_exp_index, Span<const 
         ++key_exp_index;
         return std::make_unique<PKDescriptor>(std::move(pubkey), ctx == ParseScriptContext::P2TR);
     }
+
+    if (ctx == ParseScriptContext::TOP && Func("sp", expr)) {
+        auto arg1 = Expr(expr);
+        auto firstKey = ParsePubkey(key_exp_index, arg1, ParseScriptContext::SP, out, error);
+        if (!firstKey) {
+            error = strprintf("sp(): %s", error);
+            return nullptr;
+        }
+        ++key_exp_index;
+        if (!Const(",", expr)) {
+            return std::make_unique<SpDescriptor>(std::move(firstKey));
+        }
+        auto arg2 = Expr(expr);
+        auto spendKey = ParsePubkey(key_exp_index, arg2, ParseScriptContext::SP, out, error);
+        if (!spendKey) {
+            error = strprintf("sp(): %s", error);
+            return nullptr;
+        }
+        auto scanPubKey = firstKey->GetRootPubKey();
+        auto spendPubKey = spendKey->GetRootPubKey();
+        if (!scanPubKey.has_value()) {
+            error = "sp(): could not get scan pubkey";
+            return nullptr;
+        }
+        if (!spendPubKey.has_value()) {
+            error = "sp(): could not get spend pubkey";
+            return nullptr;
+        }
+        auto it = out.keys.find(scanPubKey->GetID());
+        if (it == out.keys.end()) {
+            error = "sp(): requires the scan priv key";
+            return nullptr;
+        }
+        auto sppk = std::make_unique<SilentPubkeyProvider>(key_exp_index, SpPubKey(it->second, *spendPubKey));
+        ++key_exp_index;
+        return std::make_unique<SpDescriptor>(std::move(sppk));
+    } else if (Func("sp", expr)) {
+        error = "Can only have sp() at top level";
+        return nullptr;
+    }
+
     if ((ctx == ParseScriptContext::TOP || ctx == ParseScriptContext::P2SH || ctx == ParseScriptContext::P2WSH) && Func("pkh", expr)) {
         auto pubkey = ParsePubkey(key_exp_index, expr, ctx, out, error);
         if (!pubkey) {
