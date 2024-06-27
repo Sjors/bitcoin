@@ -755,6 +755,8 @@ private:
     };
 
     struct SubPackageState m_subpackage;
+    /** The coins that were spent by the transaction(s) being validated */
+    std::map<COutPoint, Coin> m_spent_coins;
 
     /** Re-set sub-package state to not leak between evaluations */
     void ClearSubPackageState() EXCLUSIVE_LOCKS_REQUIRED(cs_main, m_pool.cs)

@@ -176,7 +176,6 @@ BOOST_AUTO_TEST_CASE(bip352_send_and_receive_test_vectors)
                 std::string pubkey_hex = output["pub_key"].get_str();
                 expected_outputs.emplace_back(ParseHex(pubkey_hex));
             }
-            BOOST_TEST_MESSAGE(found_outputs->size());
             BOOST_CHECK(found_outputs->size() == expected_outputs.size());
             for (const auto& output : *found_outputs) {
                 BOOST_CHECK(std::find(expected_outputs.begin(), expected_outputs.end(), output.output) != expected_outputs.end());
