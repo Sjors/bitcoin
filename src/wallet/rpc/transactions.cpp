@@ -890,7 +890,9 @@ RPCHelpMan rescanblockchain()
     LOCK(pwallet->m_relock_mutex);
     {
         LOCK(pwallet->cs_wallet);
-        EnsureWalletIsUnlocked(*pwallet);
+        if (!pwallet->IsWalletFlagSet(WALLET_FLAG_SILENT_PAYMENTS)) {
+            EnsureWalletIsUnlocked(*pwallet);
+        }
         int tip_height = pwallet->GetLastBlockHeight();
 
         if (!request.params[0].isNull()) {
