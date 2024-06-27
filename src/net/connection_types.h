@@ -2,8 +2,8 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#ifndef BITCOIN_NODE_CONNECTION_TYPES_H
-#define BITCOIN_NODE_CONNECTION_TYPES_H
+#ifndef BITCOIN_NET_CONNECTION_TYPES_H
+#define BITCOIN_NET_CONNECTION_TYPES_H
 
 #include <string>
 #include <stdint.h>
@@ -90,4 +90,4 @@ enum class TransportProtocolType : uint8_t {
 /** Convert TransportProtocolType enum to a string value */
 std::string TransportTypeAsString(TransportProtocolType transport_type);
 
-#endif // BITCOIN_NODE_CONNECTION_TYPES_H
+#endif // BITCOIN_NET_CONNECTION_TYPES_H
