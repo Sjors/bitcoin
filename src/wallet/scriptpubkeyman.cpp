@@ -11,6 +11,7 @@
 #include <script/script.h>
 #include <script/sign.h>
 #include <script/solver.h>
+#include <silentpaymentkey.h>
 #include <util/bip32.h>
 #include <util/check.h>
 #include <util/strencodings.h>
@@ -2833,4 +2834,174 @@ bool DescriptorScriptPubKeyMan::CanUpdateToWalletDescriptor(const WalletDescript
 
     return true;
 }
+
+SilentPaymentDescriptorScriptPubKeyMan::SilentPaymentDescriptorScriptPubKeyMan(WalletStorage& storage, WalletDescriptor& descriptor)
+    :   DescriptorScriptPubKeyMan(storage, descriptor, 0)
+{
+    if (descriptor.descriptor->GetOutputType() != OutputType::SILENT_PAYMENT) {
+        throw std::runtime_error(std::string(__func__) + ": descriptor is not a Silent Payment Descriptor");
+    }
+
+    // Populate m_map_label_tweaks if descriptor is Silent Payments
+    if (descriptor.descriptor->GetOutputType() == OutputType::SILENT_PAYMENT) {
+        auto sppubkey = GetSpPubKeyFrom(descriptor.descriptor);
+        if (!sppubkey.has_value()) {
+            throw std::runtime_error(std::string(__func__) + ": descriptor expansion failed");
+        }
+        auto change_label_data = BIP352::CreateLabelTweak(sppubkey->scanKey, 0);
+        m_map_label_tweaks.insert(change_label_data);
+        for (int i = 1; i < descriptor.next_index; i++) {
+            // Add the other generated labelled destinations
+            m_map_label_tweaks.insert(BIP352::CreateLabelTweak(sppubkey->scanKey, i));
+        }
+    }
+}
+
+util::Result<CTxDestination> SilentPaymentDescriptorScriptPubKeyMan::GetNewDestination(const OutputType type)
+{
+    LOCK(cs_desc_man);
+    if (type != OutputType::SILENT_PAYMENT) {
+        throw std::runtime_error(std::string(__func__) + ": Types are inconsistent. Requested Type is not Silent Payment");
+    }
+
+    auto sppubkey = GetSpPubKeyFrom(m_wallet_descriptor.descriptor);
+    if (!sppubkey.has_value()) {
+        throw std::runtime_error(std::string(__func__) + ": descriptor expansion failed");
+    }
+    V0SilentPaymentDestination main_dest;
+    main_dest.m_scan_pubkey = sppubkey->scanKey.GetPubKey();
+    main_dest.m_spend_pubkey = sppubkey->spendKey;
+    auto label_data = BIP352::CreateLabelTweak(sppubkey->scanKey, m_wallet_descriptor.next_index);
+    m_map_label_tweaks.insert(label_data);
+    V0SilentPaymentDestination label_dest = BIP352::GenerateSilentPaymentLabelledAddress(main_dest, label_data.second);
+    CTxDestination dest{label_dest};
+
+    m_wallet_descriptor.next_index++;
+    WalletBatch(m_storage.GetDatabase()).WriteDescriptor(GetID(), m_wallet_descriptor);
+    return dest;
+}
+
+isminetype SilentPaymentDescriptorScriptPubKeyMan::IsMine(const CScript& script) const
+{
+    LOCK(cs_desc_man);
+
+    if (m_map_spk_tweaks.count(script) > 0) {
+        return ISMINE_SPENDABLE;
+    }
+    return ISMINE_NO;
+}
+
+isminetype SilentPaymentDescriptorScriptPubKeyMan::IsMine(std::vector<XOnlyPubKey> output_keys, BIP352::PubTweakData& public_data)
+{
+    LOCK(cs_desc_man);
+    if (m_wallet_descriptor.descriptor->GetOutputType() != OutputType::SILENT_PAYMENT) {
+        return ISMINE_NO;
+    }
+    auto sppubkey = GetSpPubKeyFrom(m_wallet_descriptor.descriptor);
+    if (!sppubkey.has_value()) {
+        throw std::runtime_error(std::string(__func__) + ": descriptor expansion failed");
+    }
+    auto tweaks = BIP352::ScanForSilentPaymentOutputs(sppubkey->scanKey, public_data, sppubkey->spendKey, output_keys, m_map_label_tweaks);
+    if (!tweaks.has_value()) {
+        return ISMINE_NO;
+    }
+    WalletBatch batch(m_storage.GetDatabase());
+    if (!batch.TxnBegin()) {
+        throw std::runtime_error(strprintf("Error during descriptors tweak top up. Cannot start db transaction wallet %s", m_storage.GetDisplayName()));
+    }
+    for (const auto& tweak : *tweaks) {
+        if (!TopUpWithDB(batch, tweak.tweak)) {
+            throw std::runtime_error(std::string(__func__) + ": writing tweak failed");
+        }
+    }
+    if (!batch.TxnCommit()) {
+        throw std::runtime_error(strprintf("Error during descriptors tweak top up. Cannot commit changes for wallet %s", m_storage.GetDisplayName()));
+    }
+    return ISMINE_SPENDABLE;
+}
+
+util::Result<CTxDestination> SilentPaymentDescriptorScriptPubKeyMan::GetReservedDestination(const OutputType type, bool internal, int64_t& index, CKeyPool& keypool)
+{
+    LOCK(cs_desc_man);
+
+    int64_t index_cache = m_wallet_descriptor.next_index;
+    m_wallet_descriptor.next_index = 0; // Set to zero for change
+    auto op_dest = GetNewDestination(type);
+    index = 0;
+    m_wallet_descriptor.next_index = index_cache; // Restore next_index
+    return op_dest;
+}
+
+bool SilentPaymentDescriptorScriptPubKeyMan::TopUp(const uint256& tweak)
+{
+    WalletBatch batch(m_storage.GetDatabase());
+    if (!batch.TxnBegin()) return false;
+    bool res = TopUpWithDB(batch, tweak);
+    if (!batch.TxnCommit()) throw std::runtime_error(strprintf("Error during descriptors tweak top up. Cannot commit changes for wallet %s", m_storage.GetDisplayName()));
+    return res;
+}
+
+bool SilentPaymentDescriptorScriptPubKeyMan::TopUpWithDB(WalletBatch& batch, const uint256& tweak)
+{
+    LOCK(cs_desc_man);
+    assert(m_wallet_descriptor.descriptor->GetOutputType() == OutputType::SILENT_PAYMENT); // Should only ever be called on silent payment descriptorspkman
+    auto sppubkey = GetSpPubKeyFrom(m_wallet_descriptor.descriptor);
+    if (!sppubkey.has_value()) {
+        throw std::runtime_error(std::string(__func__) + ": descriptor expansion failed");
+    }
+    CPubKey tweaked_pub{sppubkey->spendKey};
+    tweaked_pub.TweakAdd(tweak.data());
+    const auto spk = GetScriptForDestination(WitnessV1Taproot{XOnlyPubKey{tweaked_pub}});
+    m_map_spk_tweaks.emplace(spk, tweak);
+    m_storage.TopUpCallback({spk}, this);
+    return batch.WriteSilentPaymentsTweak(GetID(), tweak);
+}
+
+std::unique_ptr<FlatSigningProvider> SilentPaymentDescriptorScriptPubKeyMan::GetSigningProvider(const CScript& script, bool include_private) const
+{
+    LOCK(cs_desc_man);
+
+    std::unique_ptr<FlatSigningProvider> out_keys = std::make_unique<FlatSigningProvider>();
+    if (m_map_spk_tweaks.count(script) == 0) {
+        return out_keys;
+    }
+
+    const uint256& tweak = m_map_spk_tweaks.at(script);
+    auto sppubkey = GetSpPubKeyFrom(m_wallet_descriptor.descriptor);
+    if (!sppubkey.has_value()) {
+        throw std::runtime_error(std::string(__func__) + ": descriptor expansion failed");
+    }
+    CPubKey tweaked_pubkey = sppubkey->spendKey;
+    tweaked_pubkey.TweakAdd(tweak.data());
+    out_keys->pubkeys.emplace(tweaked_pubkey.GetID(), tweaked_pubkey);
+
+    if (include_private) {
+        auto spend_key = GetKey(sppubkey->spendKey.GetID());
+        if (!spend_key.has_value()) {
+            // We don't have spend private key
+            return out_keys;
+        }
+        spend_key->TweakAdd(tweak.data());
+        if (spend_key.value().IsValid()) {
+            assert(spend_key.value().GetPubKey() == tweaked_pubkey);
+            out_keys->keys.emplace(tweaked_pubkey.GetID(), spend_key.value());
+        }
+    }
+
+    return out_keys;
+}
+
+void SilentPaymentDescriptorScriptPubKeyMan::AddTweak(const uint256& tweak)
+{
+    LOCK(cs_desc_man);
+    auto sppubkey = GetSpPubKeyFrom(m_wallet_descriptor.descriptor);
+    if (!sppubkey.has_value()) {
+        throw std::runtime_error(std::string(__func__) + ": descriptor expansion failed");
+    }
+    CPubKey tweaked_pub{sppubkey->spendKey};
+    tweaked_pub.TweakAdd(tweak.data());
+    const auto spk = GetScriptForDestination(WitnessV1Taproot{XOnlyPubKey{tweaked_pub}});
+    m_map_spk_tweaks.emplace(spk, tweak);
+}
+
 } // namespace wallet
