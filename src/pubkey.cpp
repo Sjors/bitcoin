@@ -13,6 +13,7 @@
 #include <secp256k1_schnorrsig.h>
 #include <span.h>
 #include <uint256.h>
+#include <util/hash.h>
 #include <util/strencodings.h>
 
 #include <algorithm>

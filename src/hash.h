@@ -18,8 +18,6 @@
 #include <string>
 #include <vector>
 
-typedef uint256 ChainCode;
-
 /** A hasher class for Bitcoin's 256-bit hash (double SHA-256). */
 class CHash256 {
 private:
@@ -205,10 +203,6 @@ public:
 
 /** Single-SHA256 a 32-byte input (represented as uint256). */
 [[nodiscard]] uint256 SHA256Uint256(const uint256& input);
-
-unsigned int MurmurHash3(unsigned int nHashSeed, Span<const unsigned char> vDataToHash);
-
-void BIP32Hash(const ChainCode &chainCode, unsigned int nChild, unsigned char header, const unsigned char data[32], unsigned char output[64]);
 
 /** Return a HashWriter primed for tagged hashes (as specified in BIP 340).
  *
