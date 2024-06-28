@@ -9,15 +9,13 @@
 
 #include <hash.h>
 #include <serialize.h>
+#include <secp256k1.h>
 #include <span.h>
 #include <uint256.h>
 
 #include <cstring>
 #include <optional>
 #include <vector>
-
-const unsigned int BIP32_EXTKEY_SIZE = 74;
-const unsigned int BIP32_EXTKEY_WITH_VERSION_SIZE = 78;
 
 /** A reference to a CKey: the Hash160 of its serialized public key */
 class CKeyID : public uint160
@@ -26,8 +24,6 @@ public:
     CKeyID() : uint160() {}
     explicit CKeyID(const uint160& in) : uint160(in) {}
 };
-
-typedef uint256 ChainCode;
 
 /** An encapsulated public key. */
 class CPubKey
@@ -48,13 +44,13 @@ public:
         SIZE >= COMPRESSED_SIZE,
         "COMPRESSED_SIZE is larger than SIZE");
 
-private:
-
     /**
      * Just store the serialized data.
      * Its length can very cheaply be computed from the first byte.
      */
     unsigned char vch[SIZE];
+
+private:
 
     //! Compute the length of a pubkey with a given first byte.
     unsigned int static GetLen(unsigned char chHeader)
@@ -222,10 +218,19 @@ public:
 
     //! Turn this public key into an uncompressed public key.
     bool Decompress();
-
-    //! Derive BIP32 child pubkey.
-    [[nodiscard]] bool Derive(CPubKey& pubkeyChild, ChainCode &ccChild, unsigned int nChild, const ChainCode& cc) const;
 };
+
+/** This function is taken from the libsecp256k1 distribution and implements
+ *  DER parsing for ECDSA signatures, while supporting an arbitrary subset of
+ *  format violations.
+ *
+ *  Supported violations include negative integers, excessive padding, garbage
+ *  at the end, and overly long length descriptors. This is safe to use in
+ *  Bitcoin because since the activation of BIP66, signatures are verified to be
+ *  strict DER before being passed to this module, and we know it supports all
+ *  violations present in the blockchain before that point.
+ */
+int ecdsa_signature_parse_der_lax(secp256k1_ecdsa_signature* sig, const unsigned char *input, size_t inputlen);
 
 class XOnlyPubKey
 {
@@ -337,45 +342,6 @@ public:
     {
         return a.m_pubkey != b.m_pubkey;
     }
-};
-
-struct CExtPubKey {
-    unsigned char version[4];
-    unsigned char nDepth;
-    unsigned char vchFingerprint[4];
-    unsigned int nChild;
-    ChainCode chaincode;
-    CPubKey pubkey;
-
-    friend bool operator==(const CExtPubKey &a, const CExtPubKey &b)
-    {
-        return a.nDepth == b.nDepth &&
-            memcmp(a.vchFingerprint, b.vchFingerprint, sizeof(vchFingerprint)) == 0 &&
-            a.nChild == b.nChild &&
-            a.chaincode == b.chaincode &&
-            a.pubkey == b.pubkey;
-    }
-
-    friend bool operator!=(const CExtPubKey &a, const CExtPubKey &b)
-    {
-        return !(a == b);
-    }
-
-    friend bool operator<(const CExtPubKey &a, const CExtPubKey &b)
-    {
-        if (a.pubkey < b.pubkey) {
-            return true;
-        } else if (a.pubkey > b.pubkey) {
-            return false;
-        }
-        return a.chaincode < b.chaincode;
-    }
-
-    void Encode(unsigned char code[BIP32_EXTKEY_SIZE]) const;
-    void Decode(const unsigned char code[BIP32_EXTKEY_SIZE]);
-    void EncodeWithVersion(unsigned char code[BIP32_EXTKEY_WITH_VERSION_SIZE]) const;
-    void DecodeWithVersion(const unsigned char code[BIP32_EXTKEY_WITH_VERSION_SIZE]);
-    [[nodiscard]] bool Derive(CExtPubKey& out, unsigned int nChild) const;
 };
 
 #endif // BITCOIN_PUBKEY_H

@@ -2,8 +2,8 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#ifndef BITCOIN_BIP324_H
-#define BITCOIN_BIP324_H
+#ifndef BITCOIN_NET_BIP324_H
+#define BITCOIN_NET_BIP324_H
 
 #include <array>
 #include <cstddef>
@@ -11,9 +11,10 @@
 
 #include <crypto/chacha20.h>
 #include <crypto/chacha20poly1305.h>
-#include <key.h>
-#include <pubkey.h>
+#include <util/key.h>
+#include <kernel/messagestartchars.h>
 #include <span.h>
+
 
 /** The BIP324 packet cipher, encapsulating its key derivation, stream cipher, and AEAD. */
 class BIP324Cipher
@@ -59,7 +60,7 @@ public:
      * self_decrypt is only for testing, and swaps encryption/decryption keys, so that encryption
      * and decryption can be tested without knowing the other side's private key.
      */
-    void Initialize(const EllSwiftPubKey& their_pubkey, bool initiator, bool self_decrypt = false) noexcept;
+    void Initialize(const EllSwiftPubKey& their_pubkey, bool initiator, MessageStartChars magic_bytes, bool self_decrypt = false) noexcept;
 
     /** Determine whether this cipher is fully initialized. */
     explicit operator bool() const noexcept { return m_send_l_cipher.has_value(); }
@@ -93,4 +94,4 @@ public:
     Span<const std::byte> GetReceiveGarbageTerminator() const noexcept { return m_recv_garbage_terminator; }
 };
 
-#endif // BITCOIN_BIP324_H
+#endif // BITCOIN_NET_BIP324_H

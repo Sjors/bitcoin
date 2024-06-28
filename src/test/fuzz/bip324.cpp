@@ -2,7 +2,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <bip324.h>
+#include <net/bip324.h>
 #include <chainparams.h>
 #include <span.h>
 #include <test/fuzz/FuzzedDataProvider.h>
@@ -47,9 +47,9 @@ FUZZ_TARGET(bip324_cipher_roundtrip, .init=Initialize)
     assert(!initiator);
     BIP324Cipher responder(resp_key, resp_ent);
     assert(!responder);
-    initiator.Initialize(responder.GetOurPubKey(), true);
+    initiator.Initialize(responder.GetOurPubKey(), true, Params().MessageStart());
     assert(initiator);
-    responder.Initialize(initiator.GetOurPubKey(), false);
+    responder.Initialize(initiator.GetOurPubKey(), false, Params().MessageStart());
     assert(responder);
 
     // Initialize RNG deterministically, to generate contents and AAD. We assume that there are no

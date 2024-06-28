@@ -9,9 +9,9 @@
 #include <netaddress.h>
 #include <netbase.h>
 #include <netgroup.h>
-#include <node/connection_types.h>
+#include <net/connection_types.h>
 #include <node/protocol_version.h>
-#include <protocol.h>
+#include <net/protocol.h>
 #include <random.h>
 #include <test/util/logging.h>
 #include <test/util/net.h>

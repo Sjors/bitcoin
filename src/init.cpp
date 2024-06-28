@@ -34,7 +34,7 @@
 #include <interfaces/mining.h>
 #include <interfaces/node.h>
 #include <kernel/context.h>
-#include <key.h>
+#include <util/key.h>
 #include <logging.h>
 #include <mapport.h>
 #include <net.h>
@@ -60,7 +60,7 @@
 #include <policy/fees_args.h>
 #include <policy/policy.h>
 #include <policy/settings.h>
-#include <protocol.h>
+#include <net/protocol.h>
 #include <rpc/blockchain.h>
 #include <rpc/register.h>
 #include <rpc/server.h>

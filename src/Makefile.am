@@ -31,6 +31,7 @@ LIBBITCOIN_NODE=libbitcoin_node.a
 LIBBITCOIN_COMMON=libbitcoin_common.a
 LIBBITCOIN_CONSENSUS=libbitcoin_consensus.a
 LIBBITCOIN_CLI=libbitcoin_cli.a
+LIBBITCOIN_NET=libbitcoin_net.a
 LIBBITCOIN_UTIL=libbitcoin_util.a
 LIBBITCOIN_CRYPTO_BASE=crypto/libbitcoin_crypto_base.la
 LIBBITCOINQT=qt/libbitcoinqt.a
@@ -75,6 +76,7 @@ EXTRA_LIBRARIES += \
   $(LIBBITCOIN_UTIL) \
   $(LIBBITCOIN_COMMON) \
   $(LIBBITCOIN_CONSENSUS) \
+  $(LIBBITCOIN_NET) \
   $(LIBBITCOIN_NODE) \
   $(LIBBITCOIN_CLI) \
   $(LIBBITCOIN_IPC) \
@@ -123,7 +125,6 @@ BITCOIN_CORE_H = \
   banman.h \
   base58.h \
   bech32.h \
-  bip324.h \
   blockencodings.h \
   blockfilter.h \
   chain.h \
@@ -198,13 +199,21 @@ BITCOIN_CORE_H = \
   kernel/notifications_interface.h \
   kernel/validation_cache_sizes.h \
   kernel/warning.h \
-  key.h \
   key_io.h \
   logging.h \
   logging/timer.h \
   mapport.h \
   memusage.h \
   merkleblock.h \
+  net/bip324.h \
+  net/connection_types.h \
+  net/constants.h \
+  net/net_message.h \
+  net/protocol.h \
+  net/transport.h \
+  net/util.h \
+  net/v1_transport.h \
+  net/v2_transport.h \
   net.h \
   net_permissions.h \
   net_processing.h \
@@ -221,7 +230,6 @@ BITCOIN_CORE_H = \
   node/chainstatemanager_args.h \
   node/coin.h \
   node/coins_view_args.h \
-  node/connection_types.h \
   node/context.h \
   node/database_args.h \
   node/eviction.h \
@@ -253,7 +261,6 @@ BITCOIN_CORE_H = \
   policy/rbf.h \
   policy/settings.h \
   pow.h \
-  protocol.h \
   psbt.h \
   random.h \
   randomenv.h \
@@ -306,14 +313,17 @@ BITCOIN_CORE_H = \
   util/check.h \
   util/epochguard.h \
   util/exception.h \
+  util/extpubkey.h \
   util/fastrange.h \
   util/feefrac.h \
   util/fs.h \
   util/fs_helpers.h \
   util/golombrice.h \
+  util/hash.h \
   util/hash_type.h \
   util/hasher.h \
   util/insert.h \
+  util/key.h \
   util/macros.h \
   util/moneystr.h \
   util/overflow.h \
@@ -390,7 +400,6 @@ libbitcoin_node_a_SOURCES = \
   addrdb.cpp \
   addrman.cpp \
   banman.cpp \
-  bip324.cpp \
   blockencodings.cpp \
   blockfilter.cpp \
   chain.cpp \
@@ -427,7 +436,6 @@ libbitcoin_node_a_SOURCES = \
   node/chainstatemanager_args.cpp \
   node/coin.cpp \
   node/coins_view_args.cpp \
-  node/connection_types.cpp \
   node/context.cpp \
   node/database_args.cpp \
   node/eviction.cpp \
@@ -700,7 +708,6 @@ libbitcoin_common_a_SOURCES = \
   external_signer.cpp \
   init/common.cpp \
   kernel/chainparams.cpp \
-  key.cpp \
   key_io.cpp \
   merkleblock.cpp \
   net_types.cpp \
@@ -711,7 +718,6 @@ libbitcoin_common_a_SOURCES = \
   policy/v3_policy.cpp \
   policy/feerate.cpp \
   policy/policy.cpp \
-  protocol.cpp \
   psbt.cpp \
   rpc/external_signer.cpp \
   rpc/rawtransaction_util.cpp \
@@ -724,6 +730,19 @@ libbitcoin_common_a_SOURCES = \
   script/sign.cpp \
   script/signingprovider.cpp \
   script/solver.cpp \
+  $(BITCOIN_CORE_H)
+#
+
+# net #
+libbitcoin_net_a_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES) $(BOOST_CPPFLAGS)
+libbitcoin_net_a_CXXFLAGS = $(AM_CXXFLAGS) $(PIE_FLAGS)
+libbitcoin_net_a_SOURCES = \
+  net/bip324.cpp \
+  net/connection_types.cpp \
+  net/net_message.cpp \
+  net/protocol.cpp \
+  net/v1_transport.cpp \
+  net/v2_transport.cpp \
   $(BITCOIN_CORE_H)
 #
 
@@ -745,10 +764,13 @@ libbitcoin_util_a_SOURCES = \
   util/chaintype.cpp \
   util/check.cpp \
   util/exception.cpp \
+  util/extpubkey.cpp \
   util/feefrac.cpp \
   util/fs.cpp \
   util/fs_helpers.cpp \
+  util/hash.cpp \
   util/hasher.cpp \
+  util/key.cpp \
   util/sock.cpp \
   util/syserror.cpp \
   util/moneystr.cpp \
@@ -791,6 +813,7 @@ endif
 bitcoin_bin_ldadd = \
   $(LIBBITCOIN_WALLET) \
   $(LIBBITCOIN_COMMON) \
+  $(LIBBITCOIN_NET) \
   $(LIBBITCOIN_UTIL) \
   $(LIBUNIVALUE) \
   $(LIBBITCOIN_ZMQ) \

@@ -8,9 +8,9 @@
 #include <net_processing.h>
 #include <netaddress.h>
 #include <netmessagemaker.h>
-#include <node/connection_types.h>
+#include <net/connection_types.h>
 #include <node/eviction.h>
-#include <protocol.h>
+#include <net/protocol.h>
 #include <random.h>
 #include <serialize.h>
 #include <span.h>

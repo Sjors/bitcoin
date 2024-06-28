@@ -12,6 +12,7 @@
 #include <span.h>
 #include <streams.h>
 #include <util/fastrange.h>
+#include <util/hash.h>
 
 #include <algorithm>
 #include <cmath>

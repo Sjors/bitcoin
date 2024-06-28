@@ -12,14 +12,14 @@
 #include <common/args.h>
 #include <compressor.h>
 #include <consensus/merkle.h>
-#include <key.h>
+#include <util/key.h>
 #include <merkleblock.h>
 #include <net.h>
 #include <netbase.h>
 #include <netgroup.h>
 #include <node/utxo_snapshot.h>
 #include <primitives/block.h>
-#include <protocol.h>
+#include <net/protocol.h>
 #include <psbt.h>
 #include <pubkey.h>
 #include <script/keyorigin.h>
