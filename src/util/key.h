@@ -11,6 +11,7 @@
 #include <serialize.h>
 #include <support/allocators/secure.h>
 #include <uint256.h>
+#include <util/extpubkey.h>
 
 #include <stdexcept>
 #include <vector>

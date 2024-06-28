@@ -313,6 +313,7 @@ BITCOIN_CORE_H = \
   util/check.h \
   util/epochguard.h \
   util/exception.h \
+  util/extpubkey.h \
   util/fastrange.h \
   util/feefrac.h \
   util/fs.h \
@@ -763,6 +764,7 @@ libbitcoin_util_a_SOURCES = \
   util/chaintype.cpp \
   util/check.cpp \
   util/exception.cpp \
+  util/extpubkey.cpp \
   util/feefrac.cpp \
   util/fs.cpp \
   util/fs_helpers.cpp \

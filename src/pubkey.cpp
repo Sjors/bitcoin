@@ -6,7 +6,6 @@
 #include <pubkey.h>
 
 #include <hash.h>
-#include <secp256k1.h>
 #include <secp256k1_ellswift.h>
 #include <secp256k1_extrakeys.h>
 #include <secp256k1_recovery.h>
@@ -183,6 +182,14 @@ int ecdsa_signature_parse_der_lax(secp256k1_ecdsa_signature* sig, const unsigned
     return 1;
 }
 
+/* static */ bool CPubKey::CheckLowS(const std::vector<unsigned char>& vchSig) {
+    secp256k1_ecdsa_signature sig;
+    if (!ecdsa_signature_parse_der_lax(&sig, vchSig.data(), vchSig.size())) {
+        return false;
+    }
+    return (!secp256k1_ecdsa_signature_normalize(secp256k1_context_static, nullptr, &sig));
+}
+
 /** Nothing Up My Sleeve (NUMS) point
  *
  *  NUMS_H is a point with an unknown discrete logarithm, constructed by taking the sha256 of 'g'
@@ -335,27 +342,6 @@ bool CPubKey::Decompress() {
     return true;
 }
 
-bool CPubKey::Derive(CPubKey& pubkeyChild, ChainCode &ccChild, unsigned int nChild, const ChainCode& cc) const {
-    assert(IsValid());
-    assert((nChild >> 31) == 0);
-    assert(size() == COMPRESSED_SIZE);
-    unsigned char out[64];
-    BIP32Hash(cc, nChild, *begin(), begin()+1, out);
-    memcpy(ccChild.begin(), out+32, 32);
-    secp256k1_pubkey pubkey;
-    if (!secp256k1_ec_pubkey_parse(secp256k1_context_static, &pubkey, vch, size())) {
-        return false;
-    }
-    if (!secp256k1_ec_pubkey_tweak_add(secp256k1_context_static, &pubkey, out)) {
-        return false;
-    }
-    unsigned char pub[COMPRESSED_SIZE];
-    size_t publen = COMPRESSED_SIZE;
-    secp256k1_ec_pubkey_serialize(secp256k1_context_static, pub, &publen, &pubkey, SECP256K1_EC_COMPRESSED);
-    pubkeyChild.Set(pub, pub + publen);
-    return true;
-}
-
 EllSwiftPubKey::EllSwiftPubKey(Span<const std::byte> ellswift) noexcept
 {
     assert(ellswift.size() == SIZE);
@@ -374,51 +360,4 @@ CPubKey EllSwiftPubKey::Decode() const
     assert(sz == vch_bytes.size());
 
     return CPubKey{vch_bytes.begin(), vch_bytes.end()};
-}
-
-void CExtPubKey::Encode(unsigned char code[BIP32_EXTKEY_SIZE]) const {
-    code[0] = nDepth;
-    memcpy(code+1, vchFingerprint, 4);
-    WriteBE32(code+5, nChild);
-    memcpy(code+9, chaincode.begin(), 32);
-    assert(pubkey.size() == CPubKey::COMPRESSED_SIZE);
-    memcpy(code+41, pubkey.begin(), CPubKey::COMPRESSED_SIZE);
-}
-
-void CExtPubKey::Decode(const unsigned char code[BIP32_EXTKEY_SIZE]) {
-    nDepth = code[0];
-    memcpy(vchFingerprint, code+1, 4);
-    nChild = ReadBE32(code+5);
-    memcpy(chaincode.begin(), code+9, 32);
-    pubkey.Set(code+41, code+BIP32_EXTKEY_SIZE);
-    if ((nDepth == 0 && (nChild != 0 || ReadLE32(vchFingerprint) != 0)) || !pubkey.IsFullyValid()) pubkey = CPubKey();
-}
-
-void CExtPubKey::EncodeWithVersion(unsigned char code[BIP32_EXTKEY_WITH_VERSION_SIZE]) const
-{
-    memcpy(code, version, 4);
-    Encode(&code[4]);
-}
-
-void CExtPubKey::DecodeWithVersion(const unsigned char code[BIP32_EXTKEY_WITH_VERSION_SIZE])
-{
-    memcpy(version, code, 4);
-    Decode(&code[4]);
-}
-
-bool CExtPubKey::Derive(CExtPubKey &out, unsigned int _nChild) const {
-    if (nDepth == std::numeric_limits<unsigned char>::max()) return false;
-    out.nDepth = nDepth + 1;
-    CKeyID id = pubkey.GetID();
-    memcpy(out.vchFingerprint, &id, 4);
-    out.nChild = _nChild;
-    return pubkey.Derive(out.pubkey, out.chaincode, _nChild, chaincode);
-}
-
-/* static */ bool CPubKey::CheckLowS(const std::vector<unsigned char>& vchSig) {
-    secp256k1_ecdsa_signature sig;
-    if (!ecdsa_signature_parse_der_lax(&sig, vchSig.data(), vchSig.size())) {
-        return false;
-    }
-    return (!secp256k1_ecdsa_signature_normalize(secp256k1_context_static, nullptr, &sig));
 }
