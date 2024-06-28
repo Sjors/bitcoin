@@ -6,6 +6,8 @@
 #include <config/bitcoin-config.h> // IWYU pragma: keep
 
 #include <core_io.h>
+#include <key.h>
+#include <pubkey.h>
 #include <key_io.h>
 #include <rpc/server.h>
 #include <rpc/util.h>
@@ -999,9 +1001,10 @@ static RPCHelpMan createwalletdescriptor()
             CExtKey active_hdkey(xpub, *key);
 
             std::vector<std::reference_wrapper<DescriptorScriptPubKeyMan>> spkms;
+            std::vector<std::pair<CKey, CPubKey>> out_keys;
             WalletBatch batch{pwallet->GetDatabase()};
             for (bool internal : internals) {
-                WalletDescriptor w_desc = GenerateWalletDescriptor(xpub, *output_type, internal);
+                WalletDescriptor w_desc = GenerateWalletDescriptor(active_hdkey, *output_type, internal, out_keys);
                 uint256 w_id = DescriptorID(*w_desc.descriptor);
                 if (!pwallet->GetScriptPubKeyMan(w_id)) {
                     spkms.emplace_back(pwallet->SetupDescriptorScriptPubKeyMan(batch, active_hdkey, *output_type, internal));

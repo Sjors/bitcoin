@@ -5,9 +5,14 @@
 #ifndef BITCOIN_WALLET_WALLETUTIL_H
 #define BITCOIN_WALLET_WALLETUTIL_H
 
+#include <common/bip352.h>
+#include <primitives/transaction.h>
+#include <pubkey.h>
 #include <script/descriptor.h>
+#include <silentpaymentkey.h>
 #include <util/fs.h>
 
+#include <optional>
 #include <vector>
 
 namespace wallet {
@@ -115,7 +120,11 @@ public:
     WalletDescriptor(std::shared_ptr<Descriptor> descriptor, uint64_t creation_time, int32_t range_start, int32_t range_end, int32_t next_index) : descriptor(descriptor), id(DescriptorID(*descriptor)), creation_time(creation_time), range_start(range_start), range_end(range_end), next_index(next_index) { }
 };
 
-WalletDescriptor GenerateWalletDescriptor(const CExtPubKey& master_key, const OutputType& output_type, bool internal);
+WalletDescriptor GenerateWalletDescriptor(const CExtKey& master_key, const OutputType& output_type, bool internal, std::vector<std::pair<CKey, CPubKey>>& out_keys);
+
+std::optional<std::pair<std::vector<XOnlyPubKey>, BIP352::PubTweakData>> GetSilentPaymentsData(const CTransaction& tx, const std::map<COutPoint, Coin>& spent_coins);
+
+std::optional<SpPubKey> GetSpPubKeyFrom(std::shared_ptr<Descriptor> desc);
 } // namespace wallet
 
 #endif // BITCOIN_WALLET_WALLETUTIL_H
