@@ -947,6 +947,25 @@ static DBErrors LoadDescriptorWalletRecords(CWallet* pwallet, DatabaseBatch& bat
         result = std::max(result, ckey_res.m_result);
         num_ckeys = ckey_res.m_records;
 
+        // Load silent payments tweaks
+        SilentPaymentDescriptorScriptPubKeyMan* sp_spk_man = dynamic_cast<SilentPaymentDescriptorScriptPubKeyMan*>(spk_man);
+        prefix = PrefixStream(DBKeys::SPTWEAK, id);
+        LoadResult tweaks_res = LoadRecords(pwallet, batch, DBKeys::SPTWEAK, prefix,
+            [&id, &sp_spk_man] (CWallet* pwallet, DataStream& key, DataStream& value, std::string& err) {
+            uint256 spkm_id;
+            key >> spkm_id;
+            assert(spkm_id == id);
+
+            uint256 tweak;
+            value >> tweak;
+
+            assert(sp_spk_man != nullptr); // Only SP DescriptorScriptPubKeyMan should have tweaks stored
+            sp_spk_man->AddTweak(tweak);
+
+            return DBErrors::LOAD_OK;
+        });
+        result = std::max(result, tweaks_res.m_result);
+
         return result;
     });
 
