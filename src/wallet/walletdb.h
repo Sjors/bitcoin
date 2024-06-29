@@ -81,6 +81,7 @@ extern const std::string ORDERPOSNEXT;
 extern const std::string POOL;
 extern const std::string PURPOSE;
 extern const std::string SETTINGS;
+extern const std::string SPTWEAK;
 extern const std::string TX;
 extern const std::string VERSION;
 extern const std::string WALLETDESCRIPTOR;
@@ -231,6 +232,7 @@ public:
     bool WritePurpose(const std::string& strAddress, const std::string& purpose);
     bool ErasePurpose(const std::string& strAddress);
 
+    bool WriteSilentPaymentsTweak(const uint256& id, const uint256& tweak);
     bool WriteTx(const CWalletTx& wtx);
     bool EraseTx(uint256 hash);
 

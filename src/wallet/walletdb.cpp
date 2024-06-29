@@ -55,6 +55,7 @@ const std::string ORDERPOSNEXT{"orderposnext"};
 const std::string POOL{"pool"};
 const std::string PURPOSE{"purpose"};
 const std::string SETTINGS{"settings"};
+const std::string SPTWEAK{"sptweak"};
 const std::string TX{"tx"};
 const std::string VERSION{"version"};
 const std::string WALLETDESCRIPTOR{"walletdescriptor"};
@@ -91,6 +92,11 @@ bool WalletBatch::WritePurpose(const std::string& strAddress, const std::string&
 bool WalletBatch::ErasePurpose(const std::string& strAddress)
 {
     return EraseIC(std::make_pair(DBKeys::PURPOSE, strAddress));
+}
+
+bool WalletBatch::WriteSilentPaymentsTweak(const uint256& id, const uint256& tweak)
+{
+    return WriteIC(std::make_pair(DBKeys::SPTWEAK, id), tweak);
 }
 
 bool WalletBatch::WriteTx(const CWalletTx& wtx)
