@@ -306,6 +306,55 @@ void Sv2TemplateProvider::ThreadSv2ClientHandler(size_t client_id)
     }
 }
 
+void Sv2TemplateProvider::RequestTransactionData(Sv2Client& client, node::Sv2RequestTransactionDataMsg msg)
+{
+    CBlock block;
+    {
+        LOCK(m_tp_mutex);
+        auto cached_block = m_block_template_cache.find(msg.m_template_id);
+        if (cached_block == m_block_template_cache.end()) {
+            node::Sv2RequestTransactionDataErrorMsg request_tx_data_error{msg.m_template_id, "template-id-not-found"};
+
+            LogDebug(BCLog::SV2, "Send 0x75 RequestTransactionData.Error (template-id-not-found: %zu) to client id=%zu\n",
+                    msg.m_template_id, client.m_id);
+            client.m_send_messages.emplace_back(request_tx_data_error);
+
+            return;
+        }
+        block = (*cached_block->second).getBlock();
+    }
+
+    {
+        LOCK(m_tp_mutex);
+        if (block.hashPrevBlock != m_best_prev_hash) {
+            LogTrace(BCLog::SV2, "Template id=%lu prevhash=%s, tip=%s\n", msg.m_template_id, HexStr(block.hashPrevBlock), HexStr(m_best_prev_hash));
+            node::Sv2RequestTransactionDataErrorMsg request_tx_data_error{msg.m_template_id, "stale-template-id"};
+
+
+            LogDebug(BCLog::SV2, "Send 0x75 RequestTransactionData.Error (stale-template-id) to client id=%zu\n",
+                    client.m_id);
+            client.m_send_messages.emplace_back(request_tx_data_error);
+            return;
+        }
+    }
+
+    std::vector<uint8_t> witness_reserve_value;
+    auto scriptWitness = block.vtx[0]->vin[0].scriptWitness;
+    if (!scriptWitness.IsNull()) {
+        std::copy(scriptWitness.stack[0].begin(), scriptWitness.stack[0].end(), std::back_inserter(witness_reserve_value));
+    }
+    std::vector<CTransactionRef> txs;
+    if (block.vtx.size() > 0) {
+        std::copy(block.vtx.begin() + 1, block.vtx.end(), std::back_inserter(txs));
+    }
+
+    node::Sv2RequestTransactionDataSuccessMsg request_tx_data_success{msg.m_template_id, std::move(witness_reserve_value), std::move(txs)};
+
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Send 0x74 RequestTransactionData.Success to client id=%zu\n",
+                    client.m_id);
+    client.m_send_messages.emplace_back(request_tx_data_success);
+}
+
 void Sv2TemplateProvider::PruneBlockTemplateCache()
 {
     AssertLockHeld(m_tp_mutex);
