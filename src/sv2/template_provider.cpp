@@ -1,6 +1,7 @@
 #include <sv2/template_provider.h>
 
 #include <base58.h>
+#include <consensus/merkle.h>
 #include <crypto/hex_base.h>
 #include <common/args.h>
 #include <logging.h>
@@ -357,6 +358,50 @@ void Sv2TemplateProvider::RequestTransactionData(Sv2Client& client, node::Sv2Req
                     client.m_id);
     LOCK(client.cs_send);
     client.m_send_messages.emplace_back(request_tx_data_success);
+}
+
+void Sv2TemplateProvider::SubmitSolution(node::Sv2SubmitSolutionMsg solution)
+{
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "id=%lu version=%d, timestamp=%d, nonce=%d\n",
+            solution.m_template_id,
+            solution.m_version,
+            solution.m_header_timestamp,
+            solution.m_header_nonce
+        );
+
+        std::shared_ptr<BlockTemplate> block_template;
+        {
+            // We can't hold this lock until submitSolution() because it's
+            // possible that the new block arrives via the p2p network at the
+            // same time. That leads to a deadlock in g_best_block_mutex.
+            LOCK(m_tp_mutex);
+            auto cached_block_template = m_block_template_cache.find(solution.m_template_id);
+            if (cached_block_template == m_block_template_cache.end()) {
+                LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Template with id=%lu is no longer in cache\n",
+                solution.m_template_id);
+                return;
+            }
+            /**
+             * It's important to not delete this template from the cache in case
+             * another solution is submitted for the same template later.
+             *
+             * This is very unlikely on mainnet, but not impossible. Many mining
+             * devices may be working on the default pool template at the same
+             * time and they may not update the new tip right away.
+             *
+             * The node will never broadcast the second block. It's marked
+             * valid-headers in getchaintips. However a node or pool operator
+             * may wish to manually inspect the block or keep it as a souvenir.
+             * Additionally, because in Stratum v2 the block solution is sent
+             * to both the pool node and the template provider node, it's
+             * possibly they arrive out of order and two competing blocks propagate
+             * on the network. In case of a reorg the node will be able to switch
+             * faster because it already has (but not fully validated) the block.
+             */
+            block_template = cached_block_template->second;
+        }
+
+        block_template->submitSolution(solution.m_version, solution.m_header_timestamp, solution.m_header_nonce, MakeTransactionRef(solution.m_coinbase_tx));
 }
 
 void Sv2TemplateProvider::PruneBlockTemplateCache()
