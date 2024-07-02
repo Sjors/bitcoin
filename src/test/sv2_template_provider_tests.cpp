@@ -178,6 +178,7 @@ BOOST_AUTO_TEST_CASE(client_tests)
     BOOST_REQUIRE_EQUAL(tester.GetBlockTemplateCount(), 1);
 
     // Create a transaction with a large fee
+    size_t tx_size;
     CKey key = GenerateRandomKey();
     CScript locking_script = GetScriptForDestination(PKHash(key.GetPubKey()));
     // Don't hold on to the transaction
@@ -190,6 +191,11 @@ BOOST_AUTO_TEST_CASE(client_tests)
                                                         /*output_destination=*/locking_script,
                                                         /*output_amount=*/CAmount(49 * COIN), /*submit=*/true);
         CTransactionRef tx = MakeTransactionRef(mtx);
+
+        // Get serialized transaction size
+        DataStream ss;
+        ss << TX_WITH_WITNESS(tx);
+        tx_size = ss.size();
 
         BOOST_REQUIRE_EQUAL(m_node.mempool->size(), 1);
     }
@@ -219,6 +225,24 @@ BOOST_AUTO_TEST_CASE(client_tests)
 
     BOOST_REQUIRE_EQUAL(template_id, 2);
 
+    UninterruptibleSleep(std::chrono::milliseconds{200});
+
+    // Have the peer send us RequestTransactionData
+    // We should reply with RequestTransactionData.Success
+    node::Sv2NetHeader req_tx_data_header{node::Sv2MsgType::REQUEST_TRANSACTION_DATA, 8};
+    DataStream ss;
+    ss << template_id;
+    std::vector<unsigned char> template_id_bytes;
+    template_id_bytes.resize(8);
+    ss >> MakeWritableByteSpan(template_id_bytes);
+
+    msg = node::Sv2NetMsg{req_tx_data_header.m_msg_type, std::move(template_id_bytes)};
+    tester.receiveMessage(msg);
+    const size_t template_id_size = 8;
+    const size_t excess_data_size = 2 + 32;
+    size_t tx_list_size = 2 + 3 + tx_size;
+    BOOST_TEST_MESSAGE("Receive RequestTransactionData.Success");
+    BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), SV2_HEADER_ENCRYPTED_SIZE + template_id_size + excess_data_size + tx_list_size + Poly1305::TAGLEN);
     {
         LOCK(cs_main);
 
@@ -230,8 +254,6 @@ BOOST_AUTO_TEST_CASE(client_tests)
 
         BOOST_REQUIRE_EQUAL(m_node.mempool->size(), 1);
     }
-
-    UninterruptibleSleep(std::chrono::milliseconds{200});
 
     // Move mock time
     SetMockTime(GetMockTime() + std::chrono::seconds{tester.m_tp_options.fee_check_interval});
@@ -247,6 +269,13 @@ BOOST_AUTO_TEST_CASE(client_tests)
 
     // Check that there's a new template
     BOOST_REQUIRE_EQUAL(tester.GetBlockTemplateCount(), 3);
+
+    // Have the peer send us RequestTransactionData for the old template
+    // We should reply with RequestTransactionData.Success, and the original
+    // (replaced) transaction
+    tester.receiveMessage(msg);
+    tx_list_size = 2 + 3 + tx_size;
+    BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), SV2_HEADER_ENCRYPTED_SIZE + template_id_size + excess_data_size + tx_list_size + Poly1305::TAGLEN);
 
     BOOST_TEST_MESSAGE("Create a new block");
     mineBlocks(1);
