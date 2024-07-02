@@ -78,6 +78,13 @@ struct Sv2Client
 class Sv2EventsInterface
 {
 public:
+    /**
+     * We received and successfully parsed a RequestTransactionData message.
+     * Deal with it and respond with either RequestTransactionData.Success or
+     * RequestTransactionData.Error.
+     */
+    virtual void RequestTransactionData(Sv2Client& client, node::Sv2RequestTransactionDataMsg msg) = 0;
+
     virtual ~Sv2EventsInterface() = default;
 };
 
