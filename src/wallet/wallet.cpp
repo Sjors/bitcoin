@@ -3883,7 +3883,7 @@ void CWallet::LoadActiveScriptPubKeyMan(uint256 id, OutputType type, bool intern
     spk_mans[type] = spk_man;
 
     const auto it = spk_mans_other.find(type);
-    if (it != spk_mans_other.end() && it->second == spk_man) {
+    if (it != spk_mans_other.end() && it->second == spk_man && type != OutputType::SILENT_PAYMENT) {
         spk_mans_other.erase(type);
     }
 
@@ -3976,10 +3976,23 @@ ScriptPubKeyMan* CWallet::AddWalletDescriptor(WalletDescriptor& desc, const Flat
         return nullptr;
     }
 
+    auto type = desc.descriptor->GetOutputType();
+    if (type == OutputType::SILENT_PAYMENT && !IsWalletFlagSet(WALLET_FLAG_SILENT_PAYMENTS)) {
+        WalletLogPrintf("Cannot add Silent Payment Descriptor to a wallet that does not support silent payments\n");
+        return nullptr;
+    }
+
     auto spk_man = GetDescriptorScriptPubKeyMan(desc);
     if (spk_man) {
         WalletLogPrintf("Update existing descriptor: %s\n", desc.descriptor->ToString());
         spk_man->UpdateWalletDescriptor(desc);
+    } else if (type == OutputType::SILENT_PAYMENT) {
+        auto new_spk_man = std::unique_ptr<SilentPaymentDescriptorScriptPubKeyMan>(new SilentPaymentDescriptorScriptPubKeyMan(*this, desc));
+        spk_man = new_spk_man.get();
+
+        // Save the descriptor to memory
+        uint256 id = new_spk_man->GetID();
+        AddScriptPubKeyMan(id, std::move(new_spk_man));
     } else {
         auto new_spk_man = std::unique_ptr<DescriptorScriptPubKeyMan>(new DescriptorScriptPubKeyMan(*this, desc, m_keypool_size));
         spk_man = new_spk_man.get();
@@ -4005,7 +4018,7 @@ ScriptPubKeyMan* CWallet::AddWalletDescriptor(WalletDescriptor& desc, const Flat
     // Note: we disable labels for ranged descriptors
     if (!desc.descriptor->IsRange()) {
         auto script_pub_keys = spk_man->GetScriptPubKeys();
-        if (script_pub_keys.empty()) {
+        if (script_pub_keys.empty() && type != OutputType::SILENT_PAYMENT) {
             WalletLogPrintf("Could not generate scriptPubKeys (cache is empty)\n");
             return nullptr;
         }
