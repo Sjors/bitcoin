@@ -6,7 +6,48 @@
 #include <test/util/setup_common.h>
 #include <util/sock.h>
 
+#include <array>
+#include <memory>
+
 BOOST_FIXTURE_TEST_SUITE(sv2_connman_tests, TestChain100Setup)
+
+class ListenSock : public ZeroSock
+{
+public:
+    explicit ListenSock(const std::array<std::shared_ptr<DynSock::Pipes>, 2>& pipes) : m_pipes{pipes} {}
+
+    ~ListenSock() override;
+
+    /**
+     * Pretend that a new connection has arrived and was accepted.
+     */
+    std::unique_ptr<Sock> Accept(sockaddr* addr, socklen_t* addr_len) const override
+    {
+        // Return sockets associated with pipes from m_pipes[] until it is
+        // exhausted. After this return nullptr.
+        if (m_num_accept_called < m_pipes.size()) {
+            // Set addr and addr_len to some meaningful values.
+            ZeroSock::Accept(addr, addr_len);
+
+            return std::make_unique<DynSock>(m_pipes.at(m_num_accept_called++));
+        }
+        return nullptr;
+    }
+
+    bool IsConnected(std::string&) const override { return true; }
+
+private:
+    ListenSock& operator=(Sock&&) override
+    {
+        std::abort();
+        return *this;
+    }
+
+    mutable size_t m_num_accept_called{0};
+    mutable std::array<std::shared_ptr<DynSock::Pipes>, 2> m_pipes;
+};
+
+ListenSock::~ListenSock() {}
 
 /**
   * A class for testing the Sv2Connman. Each ConnTester encapsulates a
@@ -16,7 +57,12 @@ BOOST_FIXTURE_TEST_SUITE(sv2_connman_tests, TestChain100Setup)
 class ConnTester : Sv2EventsInterface {
 private:
     std::unique_ptr<Sv2Transport> m_peer_transport; //!< Transport for peer
-    std::unique_ptr<Sock> m_peer_socket;
+    // Send and receive pipes associated with the Sv2Connman's socket that has
+    // accepted a client connection. This test does 2 client connections.
+    std::array<std::shared_ptr<DynSock::Pipes>, 2> m_pipes{std::make_shared<DynSock::Pipes>(),
+                                                           std::make_shared<DynSock::Pipes>()};
+    // Which one of m_pipes[] to use.
+    ssize_t m_pipes_i{-1};
     XOnlyPubKey m_connman_authority_pubkey;
 
 public:
@@ -24,6 +70,12 @@ public:
 
     ConnTester()
     {
+        CreateSock = [this](int, int, int) -> std::unique_ptr<Sock> {
+            // This will be the bind/listen socket from m_connman. It will
+            // create other sockets via its Accept() method.
+            return std::make_unique<ListenSock>(m_pipes);
+        };
+
         CKey static_key;
         static_key.MakeNewKey(true);
         auto authority_key{GenerateRandomKey()};
@@ -38,70 +90,64 @@ public:
         Sv2SignatureNoiseMessage certificate{version, valid_from, valid_to, XOnlyPubKey(static_key.GetPubKey()), authority_key};
 
         m_connman = std::make_unique<Sv2Connman>(TP_SUBPROTOCOL, static_key, m_connman_authority_pubkey, certificate);
+
+        BOOST_REQUIRE(m_connman->Start(this, "127.0.0.1", 18447));
+    }
+
+    ~ConnTester()
+    {
+        CreateSock = CreateSockOS;
     }
 
     bool start()
     {
         bool started = m_connman->Start(this, "127.0.0.1", 18447);
         if (! started) return false;
-        // Avoid "Connection refused" on CI:
-        UninterruptibleSleep(std::chrono::milliseconds{1000});
         return true;
     }
 
     void SendPeerBytes()
     {
-        int flags = MSG_NOSIGNAL | MSG_DONTWAIT;
-        ssize_t sent = 0;
         const auto& [data, more, _m_message_type] = m_peer_transport->GetBytesToSend(/*have_next_message=*/false);
         BOOST_REQUIRE(data.size() > 0);
-        sent = m_peer_socket->Send(data.data(), data.size(), flags);
-        m_peer_transport->MarkBytesSent(sent);
-
-        BOOST_REQUIRE(sent > 0);
+        // Schedule data to be returned by the next Recv() call from
+        // Sv2Connman on the socket it has accepted.
+        m_pipes[m_pipes_i]->recv.PushBytes(data.data(), data.size());
+        m_peer_transport->MarkBytesSent(data.size());
     }
 
     // Have the peer receive and process bytes:
     size_t PeerReceiveBytes()
     {
-        uint8_t bytes_received_buf[0x10000];
-        const auto num_bytes_received = m_peer_socket->Recv(bytes_received_buf, sizeof(bytes_received_buf), MSG_DONTWAIT);
-        if(num_bytes_received == -1) {
-            // This sometimes happens on macOS native CI
-            return 0;
-        }
+        uint8_t buf[0x10000];
+        // Get the data that has been written to the accepted socket with
+        // Send() by Sv2Connman.
+        UninterruptibleSleep(1000ms); // XXX, wait until the bytes appear in the "send" pipe
+        const auto n = m_pipes[m_pipes_i]->send.GetBytes(buf, sizeof(buf), 0);
+        assert(n > 0);
 
-        // Have peer process received bytes:
-        Span<const uint8_t> received = Span(bytes_received_buf).subspan(0, num_bytes_received);
-        BOOST_REQUIRE(m_peer_transport->ReceivedBytes(received));
+        // Inform client's transport that some bytes have been received (sent by Sv2Connman).
+        Span<const uint8_t> s(buf, n);
+        BOOST_REQUIRE(m_peer_transport->ReceivedBytes(s));
 
-        return num_bytes_received;
+        return n;
     }
 
     /* Create a new client and perform handshake */
     void handshake()
     {
+        ++m_pipes_i;
+        assert(static_cast<size_t>(m_pipes_i) < m_pipes.size());
+
         m_peer_transport.reset();
 
         auto peer_static_key{GenerateRandomKey()};
         m_peer_transport = std::make_unique<Sv2Transport>(std::move(peer_static_key), m_connman_authority_pubkey);
 
-        // Connect client via socket to Template Provider
-
-        std::optional<CService> tp{Lookup("127.0.0.1", 18447, /*fAllowLookup=*/false)};
-        BOOST_REQUIRE(tp);
-        m_peer_socket = ConnectDirectly(*tp, /*manual_connection=*/true);
-        BOOST_REQUIRE(m_peer_socket);
-
         // Flush transport for handshake part 1
         SendPeerBytes();
 
         // Read handshake part 2 from transport
-        constexpr auto timeout = std::chrono::milliseconds(1000);
-        Sock::Event occurred;
-        BOOST_REQUIRE(m_peer_socket->Wait(timeout, Sock::RECV, &occurred));
-        BOOST_REQUIRE(occurred != 0);
-
         BOOST_REQUIRE_EQUAL(PeerReceiveBytes(), Sv2HandshakeState::HANDSHAKE_STEP2_SIZE);
     }
 
@@ -111,38 +157,6 @@ public:
         CSerializedNetMsg net_msg{std::move(msg)};
         BOOST_REQUIRE(m_peer_transport->SetMessageToSend(net_msg));
         SendPeerBytes();
-    }
-
-    void ProcessOurResponse(size_t reply_bytes_expected)
-    {
-        // Respond to peer
-        constexpr auto timeout = std::chrono::milliseconds(1000);
-        Sock::Event occurred;
-        BOOST_REQUIRE(m_peer_socket->Wait(timeout, Sock::RECV, &occurred));
-        BOOST_REQUIRE(occurred != 0);
-
-        size_t bytes_received = PeerReceiveBytes();
-
-
-        if (bytes_received == 0 && reply_bytes_expected != 0) {
-            // Try one more time
-            Sock::Event occurred;
-            BOOST_REQUIRE(m_peer_socket->Wait(timeout, Sock::RECV, &occurred));
-            BOOST_REQUIRE(occurred != 0);
-
-            bytes_received = PeerReceiveBytes();
-            BOOST_REQUIRE(bytes_received != 0);
-        }
-
-        // Wait for a possible second message (if MSG_MORE was set)
-        BOOST_REQUIRE(m_peer_socket->Wait(timeout, Sock::RECV, &occurred));
-
-        if (occurred != 0) {
-            // Have peer process response bytes:
-            bytes_received += PeerReceiveBytes();
-        }
-
-        BOOST_REQUIRE_EQUAL(bytes_received, reply_bytes_expected);
     }
 
     bool IsConnected()
@@ -187,7 +201,6 @@ public:
 BOOST_AUTO_TEST_CASE(client_tests)
 {
     ConnTester tester{};
-    BOOST_REQUIRE(tester.start());
 
     BOOST_REQUIRE(!tester.IsConnected());
     tester.handshake();
@@ -200,7 +213,7 @@ BOOST_AUTO_TEST_CASE(client_tests)
     // An empty SetupConnection message should cause disconnection
     node::Sv2NetMsg sv2_msg{node::Sv2MsgType::SETUP_CONNECTION, {}};
     tester.receiveMessage(sv2_msg);
-    tester.ProcessOurResponse(0);
+    BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), 0);
 
     BOOST_REQUIRE(!tester.IsConnected());
 
@@ -213,7 +226,7 @@ BOOST_AUTO_TEST_CASE(client_tests)
     node::Sv2NetMsg setup{tester.SetupConnectionMsg()};
     tester.receiveMessage(setup);
     // SetupConnection.Success is 6 bytes
-    tester.ProcessOurResponse(SV2_HEADER_ENCRYPTED_SIZE + 6 + Poly1305::TAGLEN);
+    BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), SV2_HEADER_ENCRYPTED_SIZE + 6 + Poly1305::TAGLEN);
     BOOST_REQUIRE(tester.IsFullyConnected());
 
     std::vector<uint8_t> coinbase_output_max_additional_size_bytes{
