@@ -14,6 +14,10 @@ namespace {
      * Supported Stratum v2 subprotocols
      */
     static constexpr uint8_t TP_SUBPROTOCOL{0x02};
+
+    static const std::map<uint8_t, std::string> SV2_PROTOCOL_NAMES{
+    {0x02, "Template Provider"},
+    };
 }
 
 struct Sv2Client

@@ -71,10 +71,10 @@ std::shared_ptr<Sock> Sv2Connman::BindListenPort(std::string host, uint16_t port
 
     constexpr int max_pending_conns{4096};
     if (sock->Listen(max_pending_conns) == SOCKET_ERROR) {
-        throw std::runtime_error("Sv2 Template Provider listening socket has an error listening");
+        throw std::runtime_error("Sv2 listening socket has an error listening");
     }
 
-    LogPrintLevel(BCLog::SV2, BCLog::Level::Info, "Template Provider listening on %s:%d\n", host, port);
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Info, "%s listening on %s:%d\n", SV2_PROTOCOL_NAMES.at(m_subprotocol), host, port);
 
     return sock;
 }
