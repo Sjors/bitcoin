@@ -241,6 +241,9 @@ ssize_t DynSock::Pipe::GetBytes(void* buf, size_t len, int flags)
 {
     WAIT_LOCK(m_mutex, lock);
 
+    fprintf(stderr, "Pipe::GetBytes() len=%zu\n", len);
+    fprintf(stderr, "m_data size before: %zu\n", m_data.size());
+
     if (m_data.empty()) {
         if (m_eof) {
             return 0;
@@ -255,6 +258,8 @@ ssize_t DynSock::Pipe::GetBytes(void* buf, size_t len, int flags)
     if ((flags & MSG_PEEK) == 0) {
         m_data.erase(m_data.begin(), m_data.begin() + read_bytes);
     }
+
+    fprintf(stderr, "m_data size after: %zu\n", m_data.size());
 
     return read_bytes;
 }
@@ -300,8 +305,11 @@ std::optional<CNetMessage> DynSock::Pipe::GetNetMsg()
 void DynSock::Pipe::PushBytes(const void* buf, size_t len)
 {
     LOCK(m_mutex);
+    fprintf(stderr, "Pipe::PushBytes() len=%zu\n", len);
+    fprintf(stderr, "m_data size before: %zu\n", m_data.size());
     const uint8_t* b = static_cast<const uint8_t*>(buf);
     m_data.insert(m_data.end(), b, b + len);
+    fprintf(stderr, "m_data size after: %zu\n", m_data.size());
     m_cond.notify_all();
 }
 

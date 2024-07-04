@@ -14,7 +14,7 @@ BOOST_FIXTURE_TEST_SUITE(sv2_connman_tests, TestChain100Setup)
 class ListenSock : public ZeroSock
 {
 public:
-    explicit ListenSock(const std::array<std::shared_ptr<DynSock::Pipes>, 2>& pipes) : m_pipes{pipes} {}
+    explicit ListenSock(std::vector<std::shared_ptr<DynSock::Pipes>>& pipes) : m_pipes{pipes} {}
 
     ~ListenSock() override;
 
@@ -44,7 +44,7 @@ private:
     }
 
     mutable size_t m_num_accept_called{0};
-    mutable std::array<std::shared_ptr<DynSock::Pipes>, 2> m_pipes;
+    std::vector<std::shared_ptr<DynSock::Pipes>>& m_pipes;
 };
 
 ListenSock::~ListenSock() {}
@@ -58,9 +58,8 @@ class ConnTester : Sv2EventsInterface {
 private:
     std::unique_ptr<Sv2Transport> m_peer_transport; //!< Transport for peer
     // Send and receive pipes associated with the Sv2Connman's socket that has
-    // accepted a client connection. This test does 2 client connections.
-    std::array<std::shared_ptr<DynSock::Pipes>, 2> m_pipes{std::make_shared<DynSock::Pipes>(),
-                                                           std::make_shared<DynSock::Pipes>()};
+    // accepted a client connection.
+    std::vector<std::shared_ptr<DynSock::Pipes>> m_pipes;
     // Which one of m_pipes[] to use.
     ssize_t m_pipes_i{-1};
     XOnlyPubKey m_connman_authority_pubkey;
@@ -105,6 +104,7 @@ public:
 
     void SendPeerBytes()
     {
+        BOOST_REQUIRE(m_pipes_i != -1);
         const auto& [data, more, _m_message_type] = m_peer_transport->GetBytesToSend(/*have_next_message=*/false);
         BOOST_REQUIRE(data.size() > 0);
         // Schedule data to be returned by the next Recv() call from
@@ -116,6 +116,7 @@ public:
     // Have the peer receive and process bytes:
     size_t PeerReceiveBytes()
     {
+        BOOST_REQUIRE(m_pipes_i != -1);
         uint8_t buf[0x10000];
         // Get the data that has been written to the accepted socket with
         // Send() by Sv2Connman.
@@ -133,13 +134,15 @@ public:
     /* Create a new client and perform handshake */
     void handshake()
     {
-        ++m_pipes_i;
-        assert(static_cast<size_t>(m_pipes_i) < m_pipes.size());
-
         m_peer_transport.reset();
 
         auto peer_static_key{GenerateRandomKey()};
         m_peer_transport = std::make_unique<Sv2Transport>(std::move(peer_static_key), m_connman_authority_pubkey);
+
+        // Doing this any earlier causes an immedidate disconnect
+        m_pipes.push_back(std::make_shared<DynSock::Pipes>());
+        ++m_pipes_i;
+        assert(static_cast<size_t>(m_pipes_i) < m_pipes.size());
 
         // Flush transport for handshake part 1
         SendPeerBytes();
@@ -198,6 +201,7 @@ public:
 BOOST_AUTO_TEST_CASE(client_tests)
 {
     ConnTester tester{};
+    BOOST_REQUIRE(tester.start());
 
     BOOST_REQUIRE(!tester.IsConnected());
     tester.handshake();
