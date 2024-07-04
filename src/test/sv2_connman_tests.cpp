@@ -90,8 +90,6 @@ public:
         Sv2SignatureNoiseMessage certificate{version, valid_from, valid_to, XOnlyPubKey(static_key.GetPubKey()), authority_key};
 
         m_connman = std::make_unique<Sv2Connman>(TP_SUBPROTOCOL, static_key, m_connman_authority_pubkey, certificate);
-
-        BOOST_REQUIRE(m_connman->Start(this, "127.0.0.1", 18447));
     }
 
     ~ConnTester()
@@ -101,8 +99,7 @@ public:
 
     bool start()
     {
-        bool started = m_connman->Start(this, "127.0.0.1", 18447);
-        if (! started) return false;
+        BOOST_REQUIRE(m_connman->Start(this, "127.0.0.1", 18447));
         return true;
     }
 
@@ -221,6 +218,7 @@ BOOST_AUTO_TEST_CASE(client_tests)
 
     // Reconnect
     tester.handshake();
+    BOOST_REQUIRE(tester.IsConnected());
     BOOST_TEST_MESSAGE("Handshake done, send SetupConnectionMsg");
 
     node::Sv2NetMsg setup{tester.SetupConnectionMsg()};
