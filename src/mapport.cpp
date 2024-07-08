@@ -40,14 +40,14 @@ static std::atomic_uint g_mapport_enabled_protos{MapPortProtoFlag::NONE};
 static std::atomic<MapPortProtoFlag> g_mapport_current_proto{MapPortProtoFlag::NONE};
 
 using namespace std::chrono_literals;
-static constexpr auto PORT_MAPPING_REANNOUNCE_PERIOD{20min};
-static constexpr auto PORT_MAPPING_RETRY_PERIOD{5min};
+static constexpr auto PORT_MAPPING_REANNOUNCE_PERIOD{3min};
+static constexpr auto PORT_MAPPING_RETRY_PERIOD{2min};
 
 static bool ProcessPCP()
 {
     // The same nonce is used for all mappings, this is allowed by the spec, and simplifies keeping track of them.
     PCPMappingNonce pcp_nonce;
-    GetRandBytes(pcp_nonce);
+    // GetRandBytes(pcp_nonce);
 
     bool ret = false;
     bool no_resources = false;
@@ -87,6 +87,7 @@ static bool ProcessPCP()
             // Open a port mapping on whatever local address we have toward the gateway.
             struct in_addr inaddr_any;
             inaddr_any.s_addr = htonl(INADDR_ANY);
+            GetRandBytes(pcp_nonce);
             auto res = PCPRequestPortMap(pcp_nonce, *gateway4, CNetAddr(inaddr_any), private_port, requested_lifetime);
             MappingError* pcp_err = std::get_if<MappingError>(&res);
             if (pcp_err && *pcp_err == MappingError::UNSUPP_VERSION) {
@@ -106,6 +107,7 @@ static bool ProcessPCP()
             // Try to open pinholes for all routable local IPv6 addresses.
             for (const auto &addr: GetLocalAddresses()) {
                 if (!addr.IsRoutable() || !addr.IsIPv6()) continue;
+                GetRandBytes(pcp_nonce);
                 auto res = PCPRequestPortMap(pcp_nonce, *gateway6, addr, private_port, requested_lifetime);
                 handle_mapping(res);
             }
