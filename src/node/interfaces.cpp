@@ -936,6 +936,14 @@ public:
         return tip->GetBlockHash();
     }
 
+    std::optional<int> getTipHeight() override
+    {
+        LOCK(::cs_main);
+        CBlockIndex* tip{chainman().ActiveChain().Tip()};
+        if (!tip) return {};
+        return tip->nHeight;
+    }
+
     std::pair<uint256, int> waitTipChanged(MillisecondsDouble timeout) override
     {
         uint256 previous_hash{WITH_LOCK(::cs_main, return chainman().ActiveChain().Tip()->GetBlockHash();)};
