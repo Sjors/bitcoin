@@ -6,6 +6,7 @@
 #define BITCOIN_INTERFACES_MINING_H
 
 #include <consensus/amount.h>
+#include <interfaces/types.h>
 #include <primitives/transaction.h>
 #include <node/types.h>
 #include <uint256.h>
@@ -54,8 +55,8 @@ public:
     //! Returns whether IBD is still in progress.
     virtual bool isInitialBlockDownload() = 0;
 
-    //! Returns the hash for the tip of this chain
-    virtual std::optional<uint256> getTipHash() = 0;
+    //! Returns the hash and height for the tip of this chain
+    virtual std::optional<BlockRef> getTip() = 0;
 
    /**
      * Construct a new block template
