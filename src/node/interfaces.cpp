@@ -916,6 +916,30 @@ public:
         return BlockRef{tip->GetBlockHash(), tip->nHeight};
     }
 
+    BlockRef waitTipChanged(uint256 current_tip, MillisecondsDouble timeout) override
+    {
+        // Interrupt check interval
+        const MillisecondsDouble tick{1000};
+        auto now{std::chrono::steady_clock::now()};
+        auto deadline = now + timeout;
+        // std::chrono does not check against overflow
+        if (deadline < now) deadline = std::chrono::steady_clock::time_point::max();
+        {
+            WAIT_LOCK(g_best_block_mutex, lock);
+            while ((g_best_block == uint256() || g_best_block == current_tip) && !chainman().m_interrupt) {
+                now = std::chrono::steady_clock::now();
+                if (now >= deadline) break;
+                const MillisecondsDouble remaining{deadline - now};
+                const auto interval{std::min(remaining, tick)};
+                g_best_block_cv.wait_until(lock, now + interval);
+                // Obtaining the height here using chainman().ActiveChain().Tip()->nHeight
+                // would result in a deadlock, because UpdateTip requires holding cs_main.
+            }
+        }
+        LOCK(::cs_main);
+        return BlockRef{chainman().ActiveChain().Tip()->GetBlockHash(), chainman().ActiveChain().Tip()->nHeight};
+    }
+
     bool processNewBlock(const std::shared_ptr<const CBlock>& block, bool* new_block) override
     {
         return chainman().ProcessNewBlock(block, /*force_processing=*/true, /*min_pow_checked=*/true, /*new_block=*/new_block);
