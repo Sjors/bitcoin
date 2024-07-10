@@ -253,6 +253,110 @@ std::vector<FeeFrac> ChunkLinearization(const DepGraph<SetType>& depgraph, Span<
     return ret;
 }
 
+/** Data structure encapsulating the chunking of a linearization, permitting removal of subsets. */
+template<typename SetType>
+class LinearizationChunking
+{
+    /** The depgraph this linearization is for. */
+    const DepGraph<SetType>& m_depgraph;
+
+    /** The linearization we started from. */
+    Span<const ClusterIndex> m_linearization;
+
+    /** Chunk sets and their feerates, of what remains of the linearization. */
+    std::vector<SetInfo<SetType>> m_chunks;
+
+    /** Which transactions remain in the linearization. */
+    SetType m_todo;
+
+    /** Fill the m_chunks variable, updating lin_done in the process. */
+    void BuildChunks() noexcept
+    {
+        // Caller must clear m_chunks.
+        Assume(m_chunks.empty());
+
+        // Iterate over the remaining entries in m_linearization. This is effectively the same
+        // algorithm as ChunkLinearization, but supports skipping parts of the linearization and
+        // keeps track of the sets themselves instead of just their feerates.
+        for (auto idx : m_linearization) {
+            if (!m_todo[idx]) continue;
+            // Start with an initial chunk containing just element idx.
+            SetInfo add(m_depgraph, idx);
+            // Absorb existing final chunks into add while they have lower feerate.
+            while (!m_chunks.empty() && add.feerate >> m_chunks.back().feerate) {
+                add |= m_chunks.back();
+                m_chunks.pop_back();
+            }
+            // Remember new chunk.
+            m_chunks.push_back(std::move(add));
+        }
+    }
+
+public:
+    /** Initialize a LinearizationSubset object for a given length of linearization. */
+    explicit LinearizationChunking(const DepGraph<SetType>& depgraph LIFETIMEBOUND, Span<const ClusterIndex> lin LIFETIMEBOUND) noexcept :
+        m_depgraph(depgraph), m_linearization(lin)
+    {
+        // Mark everything in lin as todo still.
+        for (auto i : m_linearization) m_todo.Set(i);
+        // Compute the initial chunking.
+        m_chunks.reserve(depgraph.TxCount());
+        BuildChunks();
+    }
+
+    /** Determine how many chunks remain in the linearization. */
+    ClusterIndex ChunksLeft() const noexcept { return m_chunks.size(); }
+
+    /** Access a chunk. Chunk 0 is the highest-feerate prefix of what remains. */
+    const SetInfo<SetType>& GetChunk(ClusterIndex n) const noexcept
+    {
+        Assume(n < m_chunks.size());
+        return m_chunks[n];
+    }
+
+    /** Remove some subset of transactions from the linearization. */
+    void MarkDone(SetType subset) noexcept
+    {
+        Assume(subset.IsSubsetOf(m_todo));
+        m_todo -= subset;
+        // Rechunk what remains of m_linearization.
+        m_chunks.clear();
+        BuildChunks();
+    }
+
+    /** Find the shortest intersection between subset and the prefixes of remaining chunks
+     *  of the linearization that has a feerate not below best's.
+     *
+     * This is a crucial operation in guaranteeing improvements to linearizations. The set
+     * returned by this function, when moved to the front of (what remains of) the linearization,
+     * is guaranteed not to make the linearization worse.
+     *
+     * See https://delvingbitcoin.org/t/introduction-to-cluster-linearization/1032 for background.
+     */
+    SetInfo<SetType> Intersect(const SetInfo<SetType>& subset) const noexcept
+    {
+        Assume(subset.transactions.IsSubsetOf(m_todo));
+        SetInfo<SetType> accumulator;
+        // Iterate over all chunks of the remaining linearization.
+        for (ClusterIndex i = 0; i < ChunksLeft(); ++i) {
+            // Find what (if any) intersection the chunk has with subset.
+            const SetType to_add = GetChunk(i).transactions & subset.transactions;
+            if (to_add.Any()) {
+                // If adding that to accumulator makes us hit all of subset, we are done as no
+                // shorter intersection with higher/equal feerate exists.
+                accumulator.transactions |= to_add;
+                if (accumulator.transactions == subset.transactions) break;
+                // Otherwise update the accumulator feerate.
+                accumulator.feerate += m_depgraph.FeeRate(to_add);
+                // If that does result in something better, return that.
+                if (!(accumulator.feerate << subset.feerate)) return accumulator;
+            }
+        }
+        return subset;
+    }
+};
+
+
 /** Class encapsulating the state needed to find the best remaining ancestor set.
  *
  * It is initialized for an entire DepGraph, and parts of the graph can be dropped by calling
