@@ -4,6 +4,7 @@
 
 #include <addrdb.h>
 #include <banman.h>
+#include <bitcoind.h>
 #include <blockfilter.h>
 #include <chain.h>
 #include <chainparams.h>
@@ -25,6 +26,7 @@
 #include <kernel/mempool_entry.h>
 #include <logging.h>
 #include <mapport.h>
+#include <noui.h>
 #include <net.h>
 #include <net_processing.h>
 #include <netaddress.h>
@@ -847,6 +849,32 @@ class MinerImpl : public Mining
 {
 public:
     explicit MinerImpl(NodeContext& node) : m_node(node) {}
+
+    bool startNode(const common::Settings& settings, int argc, const char* const argv[]) override
+    {
+        if (m_node.kernel || m_node.init_thread.joinable()) return false;
+
+        ArgsManager& args = *Assert(m_node.args);
+        args.LockSettings([&](common::Settings& node_settings) {
+            node_settings = settings;
+            node_settings.forced_settings["ipcbind"] = "unix";
+        });
+
+        if (!ParseArgs(m_node, argc, (char**)argv)) return false;
+        SelectParams(args.GetChainType());
+
+        SetupEnvironment();
+        noui_connect();
+        return AppInit(m_node);
+    }
+
+    bool stopNode(int& exit_status) override
+    {
+        if (!m_node.kernel) return false;
+        Interrupt(m_node);
+        Shutdown(m_node);
+        return true;
+    }
 
     bool isTestChain() override
     {

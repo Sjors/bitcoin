@@ -90,6 +90,10 @@ if BUILD_BITCOIN_NODE
   bin_PROGRAMS += bitcoin-node
 endif
 
+if BUILD_BITCOIN_MINE
+  bin_PROGRAMS += bitcoin-mine
+endif
+
 if BUILD_BITCOIN_CLI
   bin_PROGRAMS += bitcoin-cli
 endif
@@ -124,6 +128,7 @@ BITCOIN_CORE_H = \
   base58.h \
   bech32.h \
   bip324.h \
+  bitcoind.h \
   blockencodings.h \
   blockfilter.h \
   chain.h \
@@ -875,6 +880,23 @@ bitcoin_wallet_SOURCES += bitcoin-wallet-res.rc
 endif
 #
 
+# bitcoin-mine binary #
+bitcoin_mine_SOURCES = bitcoin-mine.cpp init/bitcoin-mine.cpp
+bitcoin_mine_CPPFLAGS = $(bitcoin_bin_cppflags)
+bitcoin_mine_CXXFLAGS = $(bitcoin_bin_cxxflags)
+bitcoin_mine_LDFLAGS = $(bitcoin_bin_ldflags)
+bitcoin_mine_LDADD = \
+  $(LIBBITCOIN_IPC) \
+  $(LIBBITCOIN_COMMON) \
+  $(LIBBITCOIN_CONSENSUS) \
+  $(LIBBITCOIN_UTIL) \
+  $(LIBBITCOIN_CRYPTO) \
+  $(LIBBITCOIN_WALLET) \
+  $(LIBMULTIPROCESS_LIBS) \
+  $(LIBSECP256K1) \
+  $(LIBUNIVALUE)
+#
+
 # bitcoin-util binary #
 bitcoin_util_SOURCES = bitcoin-util.cpp
 bitcoin_util_CPPFLAGS = $(AM_CPPFLAGS) $(BITCOIN_INCLUDES)
@@ -1069,6 +1091,7 @@ libbitcoin_ipc_mpgen_input = \
   ipc/capnp/echo.capnp \
   ipc/capnp/handler.capnp \
   ipc/capnp/init.capnp \
+  ipc/capnp/mining.capnp \
   ipc/capnp/node.capnp \
   ipc/capnp/wallet.capnp
 EXTRA_DIST += $(libbitcoin_ipc_mpgen_input)
@@ -1078,6 +1101,7 @@ EXTRA_DIST += $(libbitcoin_ipc_mpgen_input)
 # https://www.gnu.org/software/automake/manual/html_node/Built-Sources-Example.html#Recording-Dependencies-manually
 ipc/capnp/libbitcoin_ipc_a-chain.$(OBJEXT): $(libbitcoin_ipc_mpgen_input:=.h)
 ipc/capnp/libbitcoin_ipc_a-common.$(OBJEXT): $(libbitcoin_ipc_mpgen_input:=.h)
+ipc/capnp/libbitcoin_ipc_a-mining.$(OBJEXT): $(libbitcoin_ipc_mpgen_input:=.h)
 ipc/capnp/libbitcoin_ipc_a-protocol.$(OBJEXT): $(libbitcoin_ipc_mpgen_input:=.h)
 
 if BUILD_MULTIPROCESS
@@ -1091,6 +1115,9 @@ libbitcoin_ipc_a_SOURCES = \
   ipc/capnp/context.h \
   ipc/capnp/init-types.h \
   ipc/capnp/init.cpp \
+  ipc/capnp/mining-types.h \
+  ipc/capnp/mining.cpp \
+  ipc/capnp/mining.h \
   ipc/capnp/node-types.h \
   ipc/capnp/node.cpp \
   ipc/capnp/node.h \

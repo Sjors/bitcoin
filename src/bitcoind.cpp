@@ -20,6 +20,7 @@
 #include <node/interface_ui.h>
 #include <node/warnings.h>
 #include <noui.h>
+#include <univalue.h>
 #include <util/check.h>
 #include <util/exception.h>
 #include <util/signalinterrupt.h>
@@ -110,7 +111,7 @@ int fork_daemon(bool nochdir, bool noclose, TokenPipeEnd& endpoint)
 
 #endif
 
-static bool ParseArgs(NodeContext& node, int argc, char* argv[])
+bool ParseArgs(NodeContext& node, int argc, char* argv[])
 {
     ArgsManager& args{*Assert(node.args)};
     // If Qt is used, parameters/bitcoin.conf are parsed in qt/bitcoin.cpp's main()
@@ -154,7 +155,7 @@ static bool ProcessInitCommands(ArgsManager& args)
     return false;
 }
 
-static bool AppInit(NodeContext& node)
+bool AppInit(NodeContext& node)
 {
     bool fRet = false;
     ArgsManager& args = *Assert(node.args);

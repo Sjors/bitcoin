@@ -8,6 +8,7 @@
 #include <ipc/capnp/chain.capnp.proxy-types.h>
 #include <ipc/capnp/echo.capnp.proxy-types.h>
 #include <ipc/capnp/init.capnp.proxy.h>
+#include <ipc/capnp/mining.capnp.proxy-types.h>
 #include <ipc/capnp/node.capnp.proxy-types.h>
 
 namespace mp {

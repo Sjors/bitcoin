@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <functional>
 #include <memory>
+#include <thread>
 #include <vector>
 
 class ArgsManager;
@@ -40,6 +41,7 @@ class SignalInterrupt;
 
 namespace node {
 class KernelNotifications;
+class Server;
 class Warnings;
 
 //! NodeContext struct containing references to chain state and connection
@@ -86,6 +88,10 @@ struct NodeContext {
     std::atomic<int> exit_status{EXIT_SUCCESS};
     //! Manages all the node warnings
     std::unique_ptr<node::Warnings> warnings;
+    //! Thread that initializes the node and waits for shutdown, if
+    //! initialization happens on a dedicated thread. This will be unset if the
+    //! node is not initialized by IPC.
+    std::thread init_thread;
 
     //! Declare default constructor and destructor that are not inline, so code
     //! instantiating the NodeContext struct doesn't need to #include class
