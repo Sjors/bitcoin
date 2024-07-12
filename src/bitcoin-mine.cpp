@@ -26,14 +26,9 @@ Usage:
 
 static const char* HELP_EXAMPLES{R"(
 Examples:
-  # Start separate bitcoin-node that bitcoin-mine can connect to.
-  bitcoin-node -regtest -ipcbind=unix
 
-  # Connect to existing bitcoin-node or spawn new one if not running.
+  # Connect to existing bitcoin-node
   bitcoin-mine -regtest
-
-  # Stop bitcoin node.
-  bitcoin-mine -regtest -stop;
 
   # Run with debug output.
   bitcoin-mine -regtest -debug
@@ -48,25 +43,14 @@ static void AddArgs(ArgsManager& args)
     args.AddArg("-version", "Print version and exit", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     args.AddArg("-datadir=<dir>", "Specify data directory", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     args.AddArg("-debug=<category>", "Output debugging information (default: 0).", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
-    args.AddArg("-stop", "Stop bitcoin-node process if it is running.", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::OPTIONS);
-    args.AddArg("-ipcconnect=<address>", "Connect to bitcoin-node process in the background to perform online operations. Valid <address> values are 'auto' to try connecting to default socket in <datadir>/sockets/node.sock, but and spawn a node if it isn't available, 'unix' to connect to the default socket and fail if it isn't available, 'unix:<socket path>' to connect to a socket at a nonstandard path, and -noipcconnect to not try to connect. Default value: auto", ArgsManager::ALLOW_ANY, OptionsCategory::IPC);
+    args.AddArg("-ipcconnect=<address>", "Connect to bitcoin-node process in the background to perform online operations. Valid <address> values are 'auto' to try connecting to default socket in <datadir>/sockets/node.sock, 'unix' to connect to the default socket and fail if it isn't available, 'unix:<socket path>' to connect to a socket at a nonstandard path, and -noipcconnect to not try to connect. Default value: auto", ArgsManager::ALLOW_ANY, OptionsCategory::IPC);
 }
 
 MAIN_FUNCTION
 {
-    // Look for -- separator for arguments which should be passed to bitcoin-node.
-    int argc_mine{argc};
-    for (int i{0}; i < argc; ++i) {
-       if (std::string_view{argv[i]} == "--") argc_mine = i;
-    }
-
     ArgsManager& args = gArgs;
     AddArgs(args);
     std::string error_message;
-    if (!args.ParseParameters(argc_mine, argv, error_message)) {
-        tfm::format(std::cerr, "Error parsing command line arguments: %s\n", error_message);
-        return EXIT_FAILURE;
-    }
     if (!args.ReadConfigFiles(error_message, true)) {
         tfm::format(std::cerr, "Error reading config files: %s\n", error_message);
         return EXIT_FAILURE;
@@ -97,41 +81,26 @@ MAIN_FUNCTION
         return EXIT_FAILURE;
     }
 
-    // Connect to bitcoin-node process or spawn.
+    // Connect to bitcoin-node process
     std::unique_ptr<interfaces::Init> mine_init{interfaces::MakeMineInit(argc, argv)};
     assert(mine_init);
     std::string address{args.GetArg("-ipcconnect", "auto")};
     std::unique_ptr<interfaces::Init> node_init{mine_init->ipc()->connectAddress(address)};
-    bool spawn{!node_init};
-    if (spawn) {
-        tfm::format(std::cout, "Spawning bitcoin-node\n");
-        node_init = mine_init->ipc()->spawnProcess("bitcoin-node", /*detach=*/true);
-        assert(node_init);
-    } else {
-        tfm::format(std::cout, "Connected to bitcoin-node\n");
+
+    if (!node_init) {
+        tfm::format(std::cout, "Please start Bitcoin Core: bitcoin-node -ipcbind=unix\n");
+        return EXIT_FAILURE;
     }
+
+    tfm::format(std::cout, "Connected to bitcoin-node\n");
     std::unique_ptr<interfaces::Mining> mining{node_init->makeMining()};
     assert(mining);
-    if (spawn) {
-        args.LockSettings([&](common::Settings& settings) {
-            const int node_argc{argc - std::min(argc, argc_mine + 1)};
-            const char* const* node_argv{argv + argc - node_argc};
-            mining->startNode(settings, node_argc, node_argv);
-        });
-    }
 
     std::optional<uint256> tip_hash{mining->getTipHash()};
     if (tip_hash) {
         tfm::format(std::cout, "Tip hash is %s.\n", tip_hash->ToString());
     } else {
         tfm::format(std::cout, "Tip hash is null.\n");
-    }
-
-    if (args.GetBoolArg("-stop", false)) {
-        tfm::format(std::cout, "Stopping bitcoin-node.\n");
-        int exit_status;
-        mining->stopNode(exit_status);
-        tfm::format(std::cout, "bitcoin-node exited with status %i.\n", exit_status);
     }
 
     return EXIT_SUCCESS;
