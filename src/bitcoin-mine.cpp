@@ -13,6 +13,7 @@
 #include <init/common.h>
 #include <interfaces/init.h>
 #include <interfaces/ipc.h>
+#include <logging.h>
 #include <tinyformat.h>
 #include <util/translation.h>
 
