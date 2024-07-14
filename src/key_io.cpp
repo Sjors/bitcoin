@@ -329,48 +329,55 @@ std::string EncodeExtKey(const CExtKey& key)
 SpKey DecodeSpKey(const std::string& str)
 {
     SpKey key;
-    std::vector<unsigned char> data;
-    const std::vector<unsigned char>& prefix = Params().Base58Prefix(CChainParams::SP_SECRET_KEY);
-    if (DecodeBase58Check(str, data, prefix.size() + BIP352_SPKEY_SIZE)) {
-        if (data.size() == BIP352_SPKEY_SIZE + prefix.size() && std::equal(prefix.begin(), prefix.end(), data.begin())) {
-            key.Decode(data.data() + prefix.size());
-        }
+    auto result = bech32::Decode(str, bech32::CharLimit::SILENT_PAYMENTS);
+    bool isValid = result.encoding == bech32::Encoding::BECH32M && result.hrp == Params().SilentPaymentKeyHRP(false);
+    std::vector<unsigned char> data_out = {};
+    data_out.reserve(BIP352_SPKEY_SIZE);
+    isValid &= ConvertBits<5, 8, false>([&](unsigned char c) { data_out.push_back(c); }, result.data.begin(), result.data.end());
+    if (isValid) {
+        key.Decode(data_out.data());
     }
     return key;
 }
 
 std::string EncodeSpKey(const SpKey& key)
 {
-    std::vector<unsigned char> data = Params().Base58Prefix(CChainParams::SP_SECRET_KEY);
-    size_t size = data.size();
-    data.resize(size + BIP352_SPKEY_SIZE);
-    key.Encode(data.data() + size);
-    std::string ret = EncodeBase58Check(data);
+    std::vector<unsigned char> data(BIP352_SPKEY_SIZE);
+    key.Encode(data.data());
+    std::vector<unsigned char> data_out = {};
+    data_out.reserve(((BIP352_SPKEY_SIZE * 8) / 5)+1);
+    ConvertBits<8, 5, true>([&](unsigned char c) { data_out.push_back(c); }, data.begin(), data.end());
+    auto ret = bech32::Encode(bech32::Encoding::BECH32M, Params().SilentPaymentKeyHRP(false), data_out);
     memory_cleanse(data.data(), data.size());
+    memory_cleanse(data_out.data(), data_out.size());
     return ret;
 }
 
 SpPubKey DecodeSpPubKey(const std::string& str)
 {
     SpPubKey key;
-    std::vector<unsigned char> data;
-    const std::vector<unsigned char>& prefix = Params().Base58Prefix(CChainParams::SP_PUBLIC_KEY);
-    if (DecodeBase58Check(str, data, prefix.size() + BIP352_SPKEY_SIZE)) {
-        if (data.size() == BIP352_SPKEY_SIZE + prefix.size() && std::equal(prefix.begin(), prefix.end(), data.begin())) {
-            key.Decode(data.data() + prefix.size());
-        }
+    auto result = bech32::Decode(str, bech32::CharLimit::SILENT_PAYMENTS);
+    bool isValid = result.encoding == bech32::Encoding::BECH32M &&
+        result.hrp == Params().SilentPaymentKeyHRP();
+    std::vector<unsigned char> data_out = {};
+    data_out.reserve(BIP352_SPKEY_SIZE);
+    isValid &= ConvertBits<5, 8, false>([&](unsigned char c) { data_out.push_back(c); }, result.data.begin(), result.data.end());
+    if (isValid) {
+        key.Decode(data_out.data());
     }
     return key;
 }
 
 std::string EncodeSpPubKey(const SpPubKey& key)
 {
-    std::vector<unsigned char> data = Params().Base58Prefix(CChainParams::SP_PUBLIC_KEY);
-    size_t size = data.size();
-    data.resize(size + BIP352_SPKEY_SIZE);
-    key.Encode(data.data() + size);
-    std::string ret = EncodeBase58Check(data);
+    std::vector<unsigned char> data(BIP352_SPKEY_SIZE);
+    key.Encode(data.data());
+    std::vector<unsigned char> data_out = {};
+    data_out.reserve(((BIP352_SPKEY_SIZE * 8) / 5)+1);
+    ConvertBits<8, 5, true>([&](unsigned char c) { data_out.push_back(c); }, data.begin(), data.end());
+    auto ret = bech32::Encode(bech32::Encoding::BECH32M, Params().SilentPaymentKeyHRP(), data_out);
     memory_cleanse(data.data(), data.size());
+    memory_cleanse(data_out.data(), data_out.size());
     return ret;
 }
 
