@@ -119,6 +119,7 @@ add_executable(test_bitcoin
   sock_tests.cpp
   span_tests.cpp
   streams_tests.cpp
+  sv2_connman_tests.cpp
   sv2_messages_tests.cpp
   sv2_noise_tests.cpp
   sv2_transport_tests.cpp
