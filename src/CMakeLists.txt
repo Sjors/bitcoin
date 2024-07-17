@@ -334,7 +334,15 @@ target_link_libraries(bitcoin_node
     $<TARGET_NAME_IF_EXISTS:libevent::extra>
     $<TARGET_NAME_IF_EXISTS:libevent::pthreads>
     $<TARGET_NAME_IF_EXISTS:USDT::headers>
+    $<TARGET_NAME_IF_EXISTS:bitcoin_sv2>
 )
+
+if(WITH_SV2)
+  target_compile_definitions(bitcoin_node
+  PUBLIC
+    WITH_SV2=1
+  )
+endif()
 
 # Bitcoin wrapper executable that can call other executables.
 if(BUILD_BITCOIN_BIN)
