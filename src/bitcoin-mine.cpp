@@ -17,6 +17,11 @@
 #include <tinyformat.h>
 #include <util/translation.h>
 
+#ifndef WIN32
+// #include <cerrno>
+#include <signal.h>
+// #include <sys/stat.h>
+#endif
 static const char* const HELP_USAGE{R"(
 bitcoin-mine is a test program for interacting with bitcoin-node via IPC.
 
@@ -47,6 +52,24 @@ static void AddArgs(ArgsManager& args)
     args.AddArg("-ipcconnect=<address>", "Connect to bitcoin-node process in the background to perform online operations. Valid <address> values are 'unix' to connect to the default socket, 'unix:<socket path>' to connect to a socket at a nonstandard path. Default value: unix", ArgsManager::ALLOW_ANY, OptionsCategory::IPC);
     init::AddLoggingArgs(args);
 }
+
+static bool g_interrupt{false};
+
+#ifndef WIN32
+static void registerSignalHandler(int signal, void(*handler)(int))
+{
+    struct sigaction sa;
+    sa.sa_handler = handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(signal, &sa, nullptr);
+}
+static void HandleSIGTERM(int)
+{
+    g_interrupt = true;
+}
+
+#endif
 
 MAIN_FUNCTION
 {
@@ -112,6 +135,15 @@ MAIN_FUNCTION
     tfm::format(std::cout, "Connected to bitcoin-node\n");
     std::unique_ptr<interfaces::Mining> mining{node_init->makeMining()};
     assert(mining);
+
+#ifndef WIN32
+    registerSignalHandler(SIGTERM, HandleSIGTERM);
+    registerSignalHandler(SIGINT, HandleSIGTERM);
+#endif
+
+    while(!g_interrupt) {
+        UninterruptibleSleep(100ms);
+    }
 
     return EXIT_SUCCESS;
 }
