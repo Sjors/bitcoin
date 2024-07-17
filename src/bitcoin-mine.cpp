@@ -113,12 +113,5 @@ MAIN_FUNCTION
     std::unique_ptr<interfaces::Mining> mining{node_init->makeMining()};
     assert(mining);
 
-    auto tip{mining->getTip()};
-    if (tip) {
-        tfm::format(std::cout, "Tip hash is %s.\n", tip->hash.ToString());
-    } else {
-        tfm::format(std::cout, "Tip hash is null.\n");
-    }
-
     return EXIT_SUCCESS;
 }
