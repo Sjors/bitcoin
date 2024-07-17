@@ -17,14 +17,13 @@ interface Mining $Proxy.wrap("interfaces::Mining") {
     isTestChain @0 (context :Proxy.Context) -> (result: Bool);
     isInitialBlockDownload @1 (context :Proxy.Context) -> (result: Bool);
     getTipHash @2 (context :Proxy.Context) -> (result: Data);
-    createNewBlock @3 (context :Proxy.Context, scriptPubKey: Data, options: BlockCreateOptions) -> (result: CBlockTemplate);
+    createNewBlock @3 (scriptPubKey: Data, options: BlockCreateOptions) -> (result: BlockTemplate);
     processNewBlock @4 (context :Proxy.Context, block: Data) -> (newBlock: Bool, result: Bool);
     getTransactionsUpdated @5 (context :Proxy.Context) -> (result: UInt32);
     testBlockValidity @6 (context :Proxy.Context, block: Data, checkMerkleRoot: Bool) -> (state: BlockValidationState, result: Bool);
     getTipHeight @7 (context :Proxy.Context) -> (hasResult: Bool, result: Int32);
     waitTipChanged @8 (timeout: Float64) -> (result: BlockInfo);
     waitFeesChanged @9 (timeout: Float64, tip: Data, feeDelta: Int64, feesBefore: Int64) -> (result: Bool);
-    createNewBlock2 @10 (scriptPubKey: Data, options: BlockCreateOptions) -> (result: BlockTemplate);
 }
 
 interface BlockTemplate $Proxy.wrap("interfaces::BlockTemplate") {
