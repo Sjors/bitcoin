@@ -893,6 +893,7 @@ bitcoin_mine_CXXFLAGS = $(bitcoin_bin_cxxflags)
 bitcoin_mine_LDFLAGS = $(bitcoin_bin_ldflags)
 bitcoin_mine_LDADD = \
   $(LIBBITCOIN_IPC) \
+  $(LIBBITCOIN_NODE) \
   $(LIBBITCOIN_COMMON) \
   $(LIBBITCOIN_CONSENSUS) \
   $(LIBBITCOIN_UTIL) \
