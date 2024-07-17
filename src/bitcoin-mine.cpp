@@ -51,6 +51,7 @@ static void AddArgs(ArgsManager& args)
 MAIN_FUNCTION
 {
     ArgsManager& args = gArgs;
+    SelectParams(args.GetChainType());
     AddArgs(args);
     std::string error_message;
     if (!args.ParseParameters(argc, argv, error_message)) {
@@ -77,7 +78,6 @@ MAIN_FUNCTION
         tfm::format(std::cerr, "Error: Specified data directory \"%s\" does not exist.\n", args.GetArg("-datadir", ""));
         return EXIT_FAILURE;
     }
-    SelectParams(args.GetChainType());
 
     // Set logging options but override -printtoconsole default to depend on -debug rather than -daemon
     init::SetLoggingOptions(args);
