@@ -189,10 +189,8 @@ private:
 
     /**
      * Sends the best NewTemplate and SetNewPrevHash to a client.
-     *
-     * TODO: drop fees_before argument after cluster mempool
      */
-    [[nodiscard]] bool SendWork(Sv2Client& client, bool send_new_prevhash, CAmount& fees_before) EXCLUSIVE_LOCKS_REQUIRED(m_tp_mutex);
+    [[nodiscard]] bool SendWork(Sv2Client& client, bool send_new_prevhash) EXCLUSIVE_LOCKS_REQUIRED(m_tp_mutex);
 
 };
 

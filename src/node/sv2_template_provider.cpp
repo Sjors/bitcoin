@@ -151,8 +151,7 @@ void Sv2TemplateProvider::ThreadSv2Handler()
                 if (client.m_coinbase_tx_outputs_size == 0) return;
 
                 LOCK(this->m_tp_mutex);
-                CAmount dummy_last_fees;
-                if (!SendWork(client, /*send_new_prevhash=*/best_block_changed, dummy_last_fees)) {
+                if (!SendWork(client, /*send_new_prevhash=*/best_block_changed)) {
                     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Disconnecting client id=%zu\n",
                                     client.m_id);
                     client.m_disconnect_flag = true;
@@ -193,6 +192,7 @@ public:
 void Sv2TemplateProvider::ThreadSv2MempoolHandler()
 {
     Timer timer(m_options.fee_check_interval);
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Sending templates with higher fees at most once per %d.\n", m_options.fee_check_interval);
 
     //! Fees for the previous fee_check_interval
     CAmount fees_previous_interval{0};
@@ -220,28 +220,19 @@ void Sv2TemplateProvider::ThreadSv2MempoolHandler()
 
         // TODO ensure all connected clients have had work queued up for the latest prevhash.
 
-        // This doesn't have any effect, but it will once waitFeesChanged() updates the last_fees value.
         fees_previous_interval = last_fees;
 
-        m_connman->ForEachClient([this, last_fees, &fees_previous_interval](Sv2Client& client) {
+        m_connman->ForEachClient([this](Sv2Client& client) {
             // For newly connected clients, we call SendWork after receiving
             // CoinbaseOutputDataSize.
             if (client.m_coinbase_tx_outputs_size == 0) return;
 
             LOCK(this->m_tp_mutex);
-            // fees_previous_interval is only updated if the fee increase was sufficient,
-            // since waitFeesChanged doesn't actually check this yet.
-
-            CAmount fees_before = last_fees;
-            if (!SendWork(client, /*send_new_prevhash=*/false, fees_before)) {
+            if (!SendWork(client, /*send_new_prevhash=*/false)) {
                 LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Disconnecting client id=%zu\n",
                                 client.m_id);
                 client.m_disconnect_flag = true;
             }
-
-            // We don't track fees_before for individual connected clients. Pick the
-            // highest value amongst all connected clients (which may vary in additional_coinbase_weight).
-            if (fees_before > fees_previous_interval) fees_previous_interval = fees_before;
         });
     }
 }
@@ -253,8 +244,7 @@ void Sv2TemplateProvider::ReceivedMessage(Sv2Client& client, node::Sv2MsgType ms
     case node::Sv2MsgType::COINBASE_OUTPUT_DATA_SIZE:
     {
         LOCK(m_tp_mutex);
-        CAmount dummy_last_fees;
-        if (!SendWork(client, /*send_new_prevhash=*/true, dummy_last_fees)) {
+        if (!SendWork(client, /*send_new_prevhash=*/true)) {
             return;
         }
         break;
@@ -367,7 +357,7 @@ void Sv2TemplateProvider::PruneBlockTemplateCache()
     });
 }
 
-bool Sv2TemplateProvider::SendWork(Sv2Client& client, bool send_new_prevhash, CAmount& fees_before)
+bool Sv2TemplateProvider::SendWork(Sv2Client& client, bool send_new_prevhash)
 {
     AssertLockHeld(m_tp_mutex);
 
@@ -390,17 +380,6 @@ bool Sv2TemplateProvider::SendWork(Sv2Client& client, bool send_new_prevhash, CA
         // and no new blocks have arrived.
         m_best_prev_hash = new_work_set.block_template->getBlockHeader().hashPrevBlock;
     }
-
-    // Do not submit new template if the fee increase is insufficient.
-    // TODO: drop this when waitFeesChanged actually checks fee_delta.
-    CAmount fees = 0;
-    for (CAmount fee : new_work_set.block_template->getTxFees()) {
-        // Skip coinbase
-        if (fee < 0) continue;
-        fees += fee;
-    }
-    if (!send_new_prevhash && fees_before + m_options.fee_delta > fees) return true;
-    fees_before = fees;
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Send 0x71 NewTemplate id=%lu to client id=%zu\n", m_template_id, client.m_id);
     client.m_send_messages.emplace_back(new_work_set.new_template);
