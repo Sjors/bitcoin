@@ -12,5 +12,5 @@ export APT_LLVM_V="19"
 export PACKAGES="clang-${APT_LLVM_V} llvm-${APT_LLVM_V} libclang-rt-${APT_LLVM_V}-dev libc++abi-${APT_LLVM_V}-dev libc++-${APT_LLVM_V}-dev python3-zmq"
 export DEP_OPTS="CC=clang-${APT_LLVM_V} CXX='clang++-${APT_LLVM_V} -stdlib=libc++'"
 export GOAL="install"
-export BITCOIN_CONFIG="-DWITH_ZMQ=ON -DSANITIZERS=thread \
+export BITCOIN_CONFIG="-DSANITIZERS=thread \
 -DAPPEND_CPPFLAGS='-DARENA_DEBUG -DDEBUG_LOCKORDER -DDEBUG_LOCKCONTENTION -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES'"
