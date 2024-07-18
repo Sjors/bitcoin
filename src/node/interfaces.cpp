@@ -966,9 +966,31 @@ public:
                     return false;
                 }
 
-                // TODO: when cluster mempool is available, actually calculate
-                // fees for the next block. This is currently too expensive.
-                if (context()->mempool->GetTransactionsUpdated() > last_mempool_update) return true;
+                // Did anything change at all?
+                if (context()->mempool->GetTransactionsUpdated() == last_mempool_update) continue;
+
+                // Ignore coinbase_max_additional_weight, as this is neglible and can vary per client.
+                BlockAssembler::Options assemble_options{};
+                ApplyArgsManOptions(*Assert(m_node.args), assemble_options);
+                const auto time_start{SteadyClock::now()};
+                auto block_template{BlockAssembler{chainman().ActiveChainstate(), context()->mempool.get(), assemble_options}.CreateNewBlock(CScript())};
+
+                LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Assemble template for fees: %.2fms\n",
+                              Ticks<MillisecondsDouble>(SteadyClock::now() - time_start));
+
+                CAmount fees = 0;
+                for (CAmount fee : block_template->vTxFees) {
+                    // Skip coinbase
+                    if (fee < 0) continue;
+                    fees += fee;
+                }
+                LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Fees: before=%d, now=%d\n", fees_before, fees);
+
+                if (fees <= fees_before + fee_delta) continue;
+
+                LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Fees increased by more than fee_delta=%d\n", fee_delta);
+                fees_before = fees;
+                return true;
             }
         }
         return false;

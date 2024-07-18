@@ -80,8 +80,8 @@ public:
      *
      * @param[in] timeout how long to wait for a fee increase
      * @param[in] tip block hash that the most recent template builds on
-     * @param[in] fee_delta currently ignored: how much total fees in the next block should rise.
-     * @param[in,out] fees_before currently ignored: fees for the most recent template
+     * @param[in] fee_delta how much total fees in the next block should rise.
+     * @param[in,out] fees_before fees for the most recent template
      * @param[out] tip_changed whether a new tip arrived during the wait
      *
      * @returns true if fees increased, false if a new tip arrives or the timeout occurs
