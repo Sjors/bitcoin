@@ -19,6 +19,7 @@ export GOAL="install"
 # Setting CMAKE_{C,CXX}_FLAGS_DEBUG flags to an empty string ensures that the flags set in MSAN_FLAGS remain unaltered.
 # _FORTIFY_SOURCE is not compatible with MSAN.
 export BITCOIN_CONFIG="\
+ -DENABLE_WALLET=OFF \
  -DCMAKE_BUILD_TYPE=Debug \
  -DCMAKE_C_FLAGS_DEBUG='' \
  -DCMAKE_CXX_FLAGS_DEBUG='' \

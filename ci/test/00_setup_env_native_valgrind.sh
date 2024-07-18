@@ -14,7 +14,6 @@ export NO_DEPENDS=1
 # bind tests excluded for now, see https://github.com/bitcoin/bitcoin/issues/17765#issuecomment-602068547
 export TEST_RUNNER_EXTRA="--exclude rpc_bind,feature_bind_extra"
 export GOAL="install"
-# TODO enable GUI
 export BITCOIN_CONFIG="\
- -DWITH_ZMQ=ON -DBUILD_GUI=OFF \
+ -DBUILD_GUI=OFF \
 "
