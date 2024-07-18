@@ -35,7 +35,7 @@ struct Sv2TemplateProviderOptions
     /**
      * Block template update interval (to check for increased fees)
      */
-    std::chrono::seconds fee_check_interval{30};
+    std::chrono::seconds fee_check_interval{1};
 };
 
 /**
