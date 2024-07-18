@@ -110,7 +110,8 @@ fi
 ccache --zero-stats
 PRINT_CCACHE_STATISTICS="ccache --version | head -n 1 && ccache --show-stats"
 
-BITCOIN_CONFIG_ALL="${BITCOIN_CONFIG_ALL} --enable-external-signer --prefix=$BASE_OUTDIR"
+# Disable things the Template Provider binary doesn't use
+BITCOIN_CONFIG_ALL="${BITCOIN_CONFIG_ALL} --disable-zmq --without-gui --disable-wallet --disable-external-signer --prefix=$BASE_OUTDIR"
 
 if [ -n "$CONFIG_SHELL" ]; then
   "$CONFIG_SHELL" -c "./autogen.sh"
