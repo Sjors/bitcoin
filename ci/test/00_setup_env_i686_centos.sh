@@ -13,5 +13,5 @@ export CI_BASE_PACKAGES="gcc-c++ glibc-devel.x86_64 libstdc++-devel.x86_64 glibc
 export PIP_PACKAGES="pyzmq"
 export GOAL="install"
 export NO_WERROR=1  # Suppress error: #warning _FORTIFY_SOURCE > 2 is treated like 2 on this platform [-Werror=cpp]
-export BITCOIN_CONFIG="-DWITH_ZMQ=ON -DBUILD_GUI=ON -DREDUCE_EXPORTS=ON"
+export BITCOIN_CONFIG="-DENABLE_WALLET=OFF -DWITH_ZMQ=OFF -DBUILD_GUI=OFF -DREDUCE_EXPORTS=ON"
 export CONFIG_SHELL="/bin/dash"
