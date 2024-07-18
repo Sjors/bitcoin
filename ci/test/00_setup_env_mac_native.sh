@@ -13,8 +13,6 @@ export GOAL="install"
 export CMAKE_GENERATOR="Ninja"
 export BITCOIN_CONFIG="\
 -DWITH_MULTIPROCESS=ON \
--DBUILD_GUI=ON \
--DWITH_ZMQ=ON \
 -DREDUCE_EXPORTS=ON \
 "
 export CI_OS_NAME="macos"
