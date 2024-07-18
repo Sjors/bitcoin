@@ -12,8 +12,6 @@ export PIP_PACKAGES="--break-system-packages zmq"
 export GOAL="install"
 export CMAKE_GENERATOR="Ninja"
 export BITCOIN_CONFIG="\
- -DBUILD_GUI=ON \
- -DWITH_ZMQ=ON \
  -DREDUCE_EXPORTS=ON \
 "
 export CI_OS_NAME="macos"
