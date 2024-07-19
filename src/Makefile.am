@@ -888,7 +888,7 @@ endif
 
 # bitcoin-mine binary #
 bitcoin_mine_SOURCES = bitcoin-mine.cpp init/bitcoin-mine.cpp
-bitcoin_mine_CPPFLAGS = $(bitcoin_bin_cppflags)
+bitcoin_mine_CPPFLAGS = $(bitcoin_bin_cppflags) $(BOOST_CPPFLAGS)
 bitcoin_mine_CXXFLAGS = $(bitcoin_bin_cxxflags)
 bitcoin_mine_LDFLAGS = $(bitcoin_bin_ldflags)
 bitcoin_mine_LDADD = \
