@@ -179,8 +179,12 @@ make -C depends --jobs="$JOBS" HOST="$HOST" \
                                    x86_64_linux_RANLIB=x86_64-linux-gnu-gcc-ranlib \
                                    x86_64_linux_NM=x86_64-linux-gnu-gcc-nm \
                                    x86_64_linux_STRIP=x86_64-linux-gnu-strip \
-                                   MULTIPROCESS=1
-
+                                   MULTIPROCESS=1 \
+                                   NO_QT=1 \
+                                   NO_WALLET=1 \
+                                   NO_UPNP=1 \
+                                   NO_NATPMP=1 \
+                                   NO_ZMQ=1
 
 ###########################
 # Source Tarball Building #
@@ -201,7 +205,7 @@ mkdir -p "$OUTDIR"
 ###########################
 
 # CONFIGFLAGS
-CONFIGFLAGS="--enable-reduce-exports --disable-bench --disable-gui-tests --disable-fuzz-binary"
+CONFIGFLAGS="--enable-multiprocess --without-natpmp --without-upnp --disable-wallet --without-daemon --without-utils --without-gui --disable-zmq --disable-external-signer --disable-tests --enable-reduce-exports --disable-bench --disable-gui-tests --disable-fuzz-binary"
 
 # CFLAGS
 HOST_CFLAGS="-O2 -g"
@@ -286,20 +290,20 @@ mkdir -p "$DISTSRC"
 
     case "$HOST" in
         *darwin*)
-            make deploydir ${V:+V=1}
-            mkdir -p "unsigned-app-${HOST}"
-            cp  --target-directory="unsigned-app-${HOST}" \
-                contrib/macdeploy/detached-sig-create.sh
-            mv --target-directory="unsigned-app-${HOST}" dist
-            (
-                cd "unsigned-app-${HOST}"
-                find . -print0 \
-                    | sort --zero-terminated \
-                    | tar --create --no-recursion --mode='u+rw,go+r-w,a+X' --null --files-from=- \
-                    | gzip -9n > "${OUTDIR}/${DISTNAME}-${HOST}-unsigned.tar.gz" \
-                    || ( rm -f "${OUTDIR}/${DISTNAME}-${HOST}-unsigned.tar.gz" && exit 1 )
-            )
-            make deploy ${V:+V=1} OSX_ZIP="${OUTDIR}/${DISTNAME}-${HOST}-unsigned.zip"
+            # make deploydir ${V:+V=1}
+            # mkdir -p "unsigned-app-${HOST}"
+            # cp  --target-directory="unsigned-app-${HOST}" \
+            #     contrib/macdeploy/detached-sig-create.sh
+            # mv --target-directory="unsigned-app-${HOST}" dist
+            # (
+            #     cd "unsigned-app-${HOST}"
+            #     find . -print0 \
+            #         | sort --zero-terminated \
+            #         | tar --create --no-recursion --mode='u+rw,go+r-w,a+X' --null --files-from=- \
+            #         | gzip -9n > "${OUTDIR}/${DISTNAME}-${HOST}-unsigned.tar.gz" \
+            #         || ( rm -f "${OUTDIR}/${DISTNAME}-${HOST}-unsigned.tar.gz" && exit 1 )
+            # )
+            # make deploy ${V:+V=1} OSX_ZIP="${OUTDIR}/${DISTNAME}-${HOST}-unsigned.zip"
             ;;
     esac
     (
