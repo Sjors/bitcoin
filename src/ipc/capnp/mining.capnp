@@ -23,7 +23,7 @@ interface Mining $Proxy.wrap("interfaces::Mining") {
     testBlockValidity @6 (context :Proxy.Context, block: Data, checkMerkleRoot: Bool) -> (state: BlockValidationState, result: Bool);
     getTipHeight @7 (context :Proxy.Context) -> (hasResult: Bool, result: Int32);
     waitTipChanged @8 (timeout: Float64) -> (result: BlockInfo);
-    waitFeesChanged @9 (timeout: Float64, tip: Data, feeDelta: Int64, feesBefore: Int64) -> (result: Bool);
+    waitFeesChanged @9 (timeout: Float64, tip: Data, feeDelta: Int64, feesBefore: Int64, tipChanged: Bool) -> (result: Bool);
 }
 
 interface BlockTemplate $Proxy.wrap("interfaces::BlockTemplate") {
