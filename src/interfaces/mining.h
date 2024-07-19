@@ -66,6 +66,9 @@ public:
     //! Returns the hash for the tip of this chain
     virtual std::optional<uint256> getTipHash() = 0;
 
+    //! Returns the height for the tip of this chain
+    virtual std::optional<int> getTipHeight() = 0;
+
     /**
      * Waits for the tip to change
      *

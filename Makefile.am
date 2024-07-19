@@ -22,6 +22,7 @@ BITCOIN_TX_BIN=$(top_builddir)/src/$(BITCOIN_TX_NAME)$(EXEEXT)
 BITCOIN_UTIL_BIN=$(top_builddir)/src/$(BITCOIN_UTIL_NAME)$(EXEEXT)
 BITCOIN_WALLET_BIN=$(top_builddir)/src/$(BITCOIN_WALLET_TOOL_NAME)$(EXEEXT)
 BITCOIN_NODE_BIN=$(top_builddir)/src/$(BITCOIN_MP_NODE_NAME)$(EXEEXT)
+BITCOIN_MINE_BIN=$(top_builddir)/src/$(BITCOIN_MP_MINE_NAME)$(EXEEXT)
 BITCOIN_GUI_BIN=$(top_builddir)/src/$(BITCOIN_MP_GUI_NAME)$(EXEEXT)
 BITCOIN_WIN_INSTALLER=$(PACKAGE)-$(PACKAGE_VERSION)-win64-setup$(EXEEXT)
 
@@ -85,6 +86,7 @@ deploy: $(BITCOIN_WIN_INSTALLER)
 endif
 
 if TARGET_DARWIN
+if BUILD_BITCOIN_GUI
 $(OSX_APP)/Contents/PkgInfo:
 	$(MKDIR_P) $(@D)
 	@echo "APPL????" > $@
@@ -132,7 +134,8 @@ deploydir: $(APP_DIST_DIR)/$(OSX_APP)/Contents/MacOS/Bitcoin-Qt
 endif !BUILD_DARWIN
 
 deploy: $(OSX_ZIP)
-endif
+endif BUILD_BITCOIN_GUI
+endif TARGET_DARWIN
 
 $(BITCOIN_QT_BIN): FORCE
 	$(MAKE) -C src qt/$(@F)
@@ -153,6 +156,9 @@ $(BITCOIN_WALLET_BIN): FORCE
 	$(MAKE) -C src $(@F)
 
 $(BITCOIN_NODE_BIN): FORCE
+	$(MAKE) -C src $(@F)
+
+$(BITCOIN_MINE_BIN): FORCE
 	$(MAKE) -C src $(@F)
 
 $(BITCOIN_GUI_BIN): FORCE

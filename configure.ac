@@ -39,6 +39,7 @@ BITCOIN_CHAINSTATE_NAME=bitcoin-chainstate
 BITCOIN_WALLET_TOOL_NAME=bitcoin-wallet
 dnl Multi Process
 BITCOIN_MP_NODE_NAME=bitcoin-node
+BITCOIN_MP_MINE_NAME=bitcoin-mine
 BITCOIN_MP_GUI_NAME=bitcoin-gui
 
 dnl Unless the user specified ARFLAGS, force it to be cr
@@ -1328,40 +1329,6 @@ if test "$use_tests" = "yes"; then
   fi
 fi
 
-dnl libevent check
-
-use_libevent=no
-if test "$build_bitcoin_cli$build_bitcoind$bitcoin_enable_qt$enable_fuzz_binary$use_tests$use_bench" != "nononononono"; then
-  PKG_CHECK_MODULES([EVENT], [libevent >= 2.1.8], [use_libevent=yes], [AC_MSG_ERROR([libevent version 2.1.8 or greater not found.])])
-  if test "$TARGET_OS" != "windows"; then
-    PKG_CHECK_MODULES([EVENT_PTHREADS], [libevent_pthreads >= 2.1.8], [], [AC_MSG_ERROR([libevent_pthreads version 2.1.8 or greater not found.])])
-  fi
-
-  if test "$suppress_external_warnings" != "no"; then
-    EVENT_CFLAGS=SUPPRESS_WARNINGS($EVENT_CFLAGS)
-  fi
-fi
-
-if test x$use_libevent = xyes; then
-  TEMP_CXXFLAGS="$CXXFLAGS"
-  CXXFLAGS="$CXXFLAGS $EVENT_CFLAGS"
-  AC_MSG_CHECKING([if evhttp_connection_get_peer expects const char**])
-  AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
-      #include <cstdint>
-      #include <event2/http.h>
-    ]], [[
-      evhttp_connection *conn = (evhttp_connection *)1;
-      const char *host;
-      uint16_t port;
-
-      evhttp_connection_get_peer(conn, &host, &port);
-    ]])],
-    [ AC_MSG_RESULT([yes]); AC_DEFINE([HAVE_EVHTTP_CONNECTION_GET_PEER_CONST_CHAR], [1], [Define this symbol if evhttp_connection_get_peer expects const char**]) ],
-    [ AC_MSG_RESULT([no]) ]
-  )
-  CXXFLAGS="$TEMP_CXXFLAGS"
-fi
-
 dnl QR Code encoding library check
 
 if test "$use_qr" != "no"; then
@@ -1418,7 +1385,8 @@ fi
 
 AM_CONDITIONAL([BUILD_MULTIPROCESS], [test "$build_multiprocess" = "yes"])
 AM_CONDITIONAL([BUILD_BITCOIN_NODE], [test "$build_multiprocess" = "yes"])
-AM_CONDITIONAL([BUILD_BITCOIN_GUI], [test "$build_multiprocess" = "yes"])
+AM_CONDITIONAL([BUILD_BITCOIN_GUI], [test "$build_multiprocess" = "yes" && test "$bitcoin_enable_qt" != "no"])
+AM_CONDITIONAL([BUILD_BITCOIN_MINE], [test "$build_multiprocess" = "yes"])
 
 dnl codegen tools check
 
@@ -1429,6 +1397,40 @@ if test "$build_multiprocess" != "no"; then
     MPGEN_PREFIX="$with_mpgen";
   fi
   AC_SUBST(MPGEN_PREFIX)
+fi
+
+dnl libevent check
+
+use_libevent=no
+if test "$build_bitcoin_cli$build_bitcoind$build_multiprocess$bitcoin_enable_qt$enable_fuzz_binary$use_tests$use_bench" != "nononononono"; then
+  PKG_CHECK_MODULES([EVENT], [libevent >= 2.1.8], [use_libevent=yes], [AC_MSG_ERROR([libevent version 2.1.8 or greater not found.])])
+  if test "$TARGET_OS" != "windows"; then
+    PKG_CHECK_MODULES([EVENT_PTHREADS], [libevent_pthreads >= 2.1.8], [], [AC_MSG_ERROR([libevent_pthreads version 2.1.8 or greater not found.])])
+  fi
+
+  if test "$suppress_external_warnings" != "no"; then
+    EVENT_CFLAGS=SUPPRESS_WARNINGS($EVENT_CFLAGS)
+  fi
+fi
+
+if test x$use_libevent = xyes; then
+  TEMP_CXXFLAGS="$CXXFLAGS"
+  CXXFLAGS="$CXXFLAGS $EVENT_CFLAGS"
+  AC_MSG_CHECKING([if evhttp_connection_get_peer expects const char**])
+  AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+      #include <cstdint>
+      #include <event2/http.h>
+    ]], [[
+      evhttp_connection *conn = (evhttp_connection *)1;
+      const char *host;
+      uint16_t port;
+
+      evhttp_connection_get_peer(conn, &host, &port);
+    ]])],
+    [ AC_MSG_RESULT([yes]); AC_DEFINE([HAVE_EVHTTP_CONNECTION_GET_PEER_CONST_CHAR], [1], [Define this symbol if evhttp_connection_get_peer expects const char**]) ],
+    [ AC_MSG_RESULT([no]) ]
+  )
+  CXXFLAGS="$TEMP_CXXFLAGS"
 fi
 
 AC_MSG_CHECKING([whether to build bitcoind])
@@ -1595,8 +1597,8 @@ else
   AC_MSG_RESULT([no])
 fi
 
-if test "$build_bitcoin_wallet$build_bitcoin_cli$build_bitcoin_tx$build_bitcoin_util$build_bitcoind$bitcoin_enable_qt$enable_fuzz_binary$use_bench$use_tests" = "nonononononononono"; then
-  AC_MSG_ERROR([No targets! Please specify at least one of: --with-utils --with-daemon --with-gui --enable-fuzz(-binary) --enable-bench or --enable-tests])
+if test "$build_bitcoin_wallet$build_bitcoin_cli$build_bitcoin_tx$build_bitcoin_util$build_bitcoind$bitcoin_enable_qt$build_multiprocess$enable_fuzz_binary$use_bench$use_tests" = "nonononononononono"; then
+  AC_MSG_ERROR([No targets! Please specify at least one of: --with-utils --with-daemon --with-gui --enable-multiprocess --enable-fuzz(-binary) --enable-bench or --enable-tests])
 fi
 
 AM_CONDITIONAL([TARGET_DARWIN], [test "$TARGET_OS" = "darwin"])
@@ -1654,6 +1656,7 @@ AC_SUBST(BITCOIN_UTIL_NAME)
 AC_SUBST(BITCOIN_CHAINSTATE_NAME)
 AC_SUBST(BITCOIN_WALLET_TOOL_NAME)
 AC_SUBST(BITCOIN_MP_NODE_NAME)
+AC_SUBST(BITCOIN_MP_MINE_NAME)
 AC_SUBST(BITCOIN_MP_GUI_NAME)
 
 AC_SUBST(RELDFLAGS)

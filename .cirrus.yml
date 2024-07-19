@@ -7,6 +7,7 @@ env:  # Global defaults
   CCACHE_MAXSIZE: "200M"
   CCACHE_DIR: "/tmp/ccache_dir"
   CCACHE_NOHASHDIR: "1"  # Debug info might contain a stale path if the build dir changes, but this is fine
+  RUN_FUNCTIONAL_TESTS: false # Template Provider doesn't have its own functional tests
 
 # A self-hosted machine(s) can be used via Cirrus CI. It can be configured with
 # multiple users to run tasks in parallel. No sudo permission is required.
@@ -136,6 +137,8 @@ task:
 
 task:
   name: 'Win64, unit tests, no gui tests, no functional tests'
+  # Template Provider doesn't support Windows (can't use skip keyword twice)
+  only_if: false
   << : *GLOBAL_TASK_TEMPLATE
   persistent_worker:
     labels:

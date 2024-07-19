@@ -16,5 +16,5 @@ export XCODE_VERSION=15.0
 export XCODE_BUILD_ID=15A240d
 export RUN_UNIT_TESTS=false
 export RUN_FUNCTIONAL_TESTS=false
-export GOAL="deploy"
-export BITCOIN_CONFIG="--with-gui --enable-reduce-exports"
+export GOAL="install"
+export BITCOIN_CONFIG="--enable-reduce-exports"
