@@ -87,6 +87,16 @@ MAIN_FUNCTION
         return EXIT_FAILURE;
     }
 
+    if (auto result{init::SetLoggingCategories(args)}; !result) {
+        tfm::format(std::cerr, "Error: SetLoggingCategories failed\n");
+        return EXIT_FAILURE;
+    }
+
+    if (auto result{init::SetLoggingLevel(args)}; !result) {
+        tfm::format(std::cerr, "Error: SetLoggingLevel failed\n");
+        return EXIT_FAILURE;
+    }
+
     // Connect to existing bitcoin-node process or spawn new one.
     std::unique_ptr<interfaces::Init> mine_init{interfaces::MakeMineInit(argc, argv)};
     assert(mine_init);
