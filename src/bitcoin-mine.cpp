@@ -14,6 +14,7 @@
 #include <interfaces/init.h>
 #include <interfaces/ipc.h>
 #include <logging.h>
+#include <sv2/template_provider.h>
 #include <tinyformat.h>
 #include <util/translation.h>
 
@@ -22,6 +23,7 @@
 #include <signal.h>
 // #include <sys/stat.h>
 #endif
+
 static const char* const HELP_USAGE{R"(
 bitcoin-mine is a test program for interacting with bitcoin-node via IPC.
 
@@ -38,7 +40,7 @@ Examples:
   bitcoin-mine -regtest
 
   # Run with debug output.
-  bitcoin-mine -regtest -debug
+  bitcoin-mine -regtest -debug=sv2 -loglevel=sv2:trace
 )"};
 
 const std::function<std::string(const char*)> G_TRANSLATION_FUN = nullptr;
@@ -118,6 +120,42 @@ MAIN_FUNCTION
         return EXIT_FAILURE;
     }
 
+    ECC_Context ecc_context{};
+
+    // Parse -sv2... params
+    Sv2TemplateProviderOptions options{};
+
+    const std::string sv2_port_arg = args.GetArg("-sv2port", "");
+
+    if (sv2_port_arg.empty()) {
+        options.port = BaseParams().Sv2Port();
+    } else {
+        if (!ParseUInt16(sv2_port_arg, &options.port) || options.port == 0) {
+            tfm::format(std::cerr, "Invalid port %s\n", sv2_port_arg);
+            return EXIT_FAILURE;
+        }
+    }
+
+    if (args.IsArgSet("-sv2bind")) { // Specific bind address
+        std::optional<std::string> sv2_bind{args.GetArg("-sv2bind")};
+        if (sv2_bind) {
+            if (!SplitHostPort(sv2_bind.value(), options.port, options.host)) {
+                tfm::format(std::cerr, "Invalid port %d\n", options.port);
+                return EXIT_FAILURE;
+            }
+        }
+    }
+
+    options.fee_delta = args.GetIntArg("-sv2feedelta", Sv2TemplateProviderOptions().fee_delta);
+
+    if (args.IsArgSet("-sv2interval")) {
+        if (args.GetIntArg("-sv2interval", 0) < 1) {
+            tfm::format(std::cerr, "-sv2interval must be at least one second\n");
+            return EXIT_FAILURE;
+        }
+        options.fee_check_interval = std::chrono::seconds(args.GetIntArg("-sv2interval", 0));
+    }
+
     // Connect to existing bitcoin-node process or spawn new one.
     std::unique_ptr<interfaces::Init> mine_init{interfaces::MakeMineInit(argc, argv)};
     assert(mine_init);
@@ -136,6 +174,13 @@ MAIN_FUNCTION
     std::unique_ptr<interfaces::Mining> mining{node_init->makeMining()};
     assert(mining);
 
+    auto tp = std::make_unique<Sv2TemplateProvider>(*mining);
+
+    if (!tp->Start(options)) {
+        tfm::format(std::cerr, "Unable to start Stratum v2 Template Provider");
+        return EXIT_FAILURE;
+    }
+
 #ifndef WIN32
     registerSignalHandler(SIGTERM, HandleSIGTERM);
     registerSignalHandler(SIGINT, HandleSIGTERM);
@@ -144,6 +189,10 @@ MAIN_FUNCTION
     while(!g_interrupt) {
         UninterruptibleSleep(100ms);
     }
+
+    tp->Interrupt();
+    tp->StopThreads();
+    tp.reset();
 
     return EXIT_SUCCESS;
 }
