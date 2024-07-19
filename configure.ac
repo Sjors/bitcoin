@@ -1597,8 +1597,8 @@ else
   AC_MSG_RESULT([no])
 fi
 
-if test "$build_bitcoin_wallet$build_bitcoin_cli$build_bitcoin_tx$build_bitcoin_util$build_bitcoind$bitcoin_enable_qt$enable_fuzz_binary$use_bench$use_tests" = "nonononononononono"; then
-  AC_MSG_ERROR([No targets! Please specify at least one of: --with-utils --with-daemon --with-gui --enable-fuzz(-binary) --enable-bench or --enable-tests])
+if test "$build_bitcoin_wallet$build_bitcoin_cli$build_bitcoin_tx$build_bitcoin_util$build_bitcoind$bitcoin_enable_qt$build_multiprocess$enable_fuzz_binary$use_bench$use_tests" = "nonononononononono"; then
+  AC_MSG_ERROR([No targets! Please specify at least one of: --with-utils --with-daemon --with-gui --enable-multiprocess --enable-fuzz(-binary) --enable-bench or --enable-tests])
 fi
 
 AM_CONDITIONAL([TARGET_DARWIN], [test "$TARGET_OS" = "darwin"])
