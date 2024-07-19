@@ -86,6 +86,7 @@ deploy: $(BITCOIN_WIN_INSTALLER)
 endif
 
 if TARGET_DARWIN
+if BUILD_BITCOIN_GUI
 $(OSX_APP)/Contents/PkgInfo:
 	$(MKDIR_P) $(@D)
 	@echo "APPL????" > $@
@@ -133,7 +134,8 @@ deploydir: $(APP_DIST_DIR)/$(OSX_APP)/Contents/MacOS/Bitcoin-Qt
 endif !BUILD_DARWIN
 
 deploy: $(OSX_ZIP)
-endif
+endif BUILD_BITCOIN_GUI
+endif TARGET_DARWIN
 
 $(BITCOIN_QT_BIN): FORCE
 	$(MAKE) -C src qt/$(@F)
