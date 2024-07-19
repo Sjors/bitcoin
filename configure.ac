@@ -1329,40 +1329,6 @@ if test "$use_tests" = "yes"; then
   fi
 fi
 
-dnl libevent check
-
-use_libevent=no
-if test "$build_bitcoin_cli$build_bitcoind$bitcoin_enable_qt$enable_fuzz_binary$use_tests$use_bench" != "nononononono"; then
-  PKG_CHECK_MODULES([EVENT], [libevent >= 2.1.8], [use_libevent=yes], [AC_MSG_ERROR([libevent version 2.1.8 or greater not found.])])
-  if test "$TARGET_OS" != "windows"; then
-    PKG_CHECK_MODULES([EVENT_PTHREADS], [libevent_pthreads >= 2.1.8], [], [AC_MSG_ERROR([libevent_pthreads version 2.1.8 or greater not found.])])
-  fi
-
-  if test "$suppress_external_warnings" != "no"; then
-    EVENT_CFLAGS=SUPPRESS_WARNINGS($EVENT_CFLAGS)
-  fi
-fi
-
-if test x$use_libevent = xyes; then
-  TEMP_CXXFLAGS="$CXXFLAGS"
-  CXXFLAGS="$CXXFLAGS $EVENT_CFLAGS"
-  AC_MSG_CHECKING([if evhttp_connection_get_peer expects const char**])
-  AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
-      #include <cstdint>
-      #include <event2/http.h>
-    ]], [[
-      evhttp_connection *conn = (evhttp_connection *)1;
-      const char *host;
-      uint16_t port;
-
-      evhttp_connection_get_peer(conn, &host, &port);
-    ]])],
-    [ AC_MSG_RESULT([yes]); AC_DEFINE([HAVE_EVHTTP_CONNECTION_GET_PEER_CONST_CHAR], [1], [Define this symbol if evhttp_connection_get_peer expects const char**]) ],
-    [ AC_MSG_RESULT([no]) ]
-  )
-  CXXFLAGS="$TEMP_CXXFLAGS"
-fi
-
 dnl QR Code encoding library check
 
 if test "$use_qr" != "no"; then
@@ -1431,6 +1397,40 @@ if test "$build_multiprocess" != "no"; then
     MPGEN_PREFIX="$with_mpgen";
   fi
   AC_SUBST(MPGEN_PREFIX)
+fi
+
+dnl libevent check
+
+use_libevent=no
+if test "$build_bitcoin_cli$build_bitcoind$build_multiprocess$bitcoin_enable_qt$enable_fuzz_binary$use_tests$use_bench" != "nononononono"; then
+  PKG_CHECK_MODULES([EVENT], [libevent >= 2.1.8], [use_libevent=yes], [AC_MSG_ERROR([libevent version 2.1.8 or greater not found.])])
+  if test "$TARGET_OS" != "windows"; then
+    PKG_CHECK_MODULES([EVENT_PTHREADS], [libevent_pthreads >= 2.1.8], [], [AC_MSG_ERROR([libevent_pthreads version 2.1.8 or greater not found.])])
+  fi
+
+  if test "$suppress_external_warnings" != "no"; then
+    EVENT_CFLAGS=SUPPRESS_WARNINGS($EVENT_CFLAGS)
+  fi
+fi
+
+if test x$use_libevent = xyes; then
+  TEMP_CXXFLAGS="$CXXFLAGS"
+  CXXFLAGS="$CXXFLAGS $EVENT_CFLAGS"
+  AC_MSG_CHECKING([if evhttp_connection_get_peer expects const char**])
+  AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
+      #include <cstdint>
+      #include <event2/http.h>
+    ]], [[
+      evhttp_connection *conn = (evhttp_connection *)1;
+      const char *host;
+      uint16_t port;
+
+      evhttp_connection_get_peer(conn, &host, &port);
+    ]])],
+    [ AC_MSG_RESULT([yes]); AC_DEFINE([HAVE_EVHTTP_CONNECTION_GET_PEER_CONST_CHAR], [1], [Define this symbol if evhttp_connection_get_peer expects const char**]) ],
+    [ AC_MSG_RESULT([no]) ]
+  )
+  CXXFLAGS="$TEMP_CXXFLAGS"
 fi
 
 AC_MSG_CHECKING([whether to build bitcoind])
