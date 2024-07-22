@@ -98,7 +98,7 @@ void BlockAssembler::resetBlock()
     nFees = 0;
 }
 
-std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& scriptPubKeyIn)
+std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& scriptPubKeyIn, std::unique_ptr<CBlockTemplate>parent_tp)
 {
     const auto time_start{SteadyClock::now()};
 
@@ -119,20 +119,33 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     LOCK(::cs_main);
     CBlockIndex* pindexPrev = m_chainstate.m_chain.Tip();
     assert(pindexPrev != nullptr);
-    nHeight = pindexPrev->nHeight + 1;
 
+    if (!parent_tp) {
+        nHeight = pindexPrev->nHeight + 1;
+    } else {
+        // TODO: store height in CBlockTemplate
+        nHeight = pindexPrev->nHeight + 2;
+    }
+
+    // TODO: assert parent_tp is not at the end of a retarget period, and/or refactor ComputeBlockVersion to take an offset
     pblock->nVersion = m_chainstate.m_chainman.m_versionbitscache.ComputeBlockVersion(pindexPrev, chainparams.GetConsensus());
     // -regtest only: allow overriding block.nVersion with
     // -blockversion=N to test forking scenarios
-    if (chainparams.MineBlocksOnDemand()) {
+    if (!parent_tp && chainparams.MineBlocksOnDemand()) {
         pblock->nVersion = gArgs.GetIntArg("-blockversion", pblock->nVersion);
     }
 
     pblock->nTime = TicksSinceEpoch<std::chrono::seconds>(NodeClock::now());
-    m_lock_time_cutoff = pindexPrev->GetMedianTimePast();
+    if (!parent_tp) {
+        m_lock_time_cutoff = pindexPrev->GetMedianTimePast();
+    } else {
+        m_lock_time_cutoff = parent_tp->block.GetBlockTime(); // GetMedianTimePast
+    }
 
-    int nPackagesSelected = 0;
+    // TODO: create mempool view based on what's included in parent_tp
+
     int nDescendantsUpdated = 0;
+    int nPackagesSelected = 0;
     if (m_mempool) {
         LOCK(m_mempool->cs);
         addPackageTxs(*m_mempool, nPackagesSelected, nDescendantsUpdated);
@@ -149,22 +162,28 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     coinbaseTx.vin[0].prevout.SetNull();
     coinbaseTx.vout.resize(1);
     coinbaseTx.vout[0].scriptPubKey = scriptPubKeyIn;
-    coinbaseTx.vout[0].nValue = nFees + GetBlockSubsidy(nHeight, chainparams.GetConsensus());
+    coinbaseTx.vout[0].nValue = nFees + GetBlockSubsidy(nHeight + parent_tp ? 1 : 0, chainparams.GetConsensus());
     coinbaseTx.vin[0].scriptSig = CScript() << nHeight << OP_0;
     pblock->vtx[0] = MakeTransactionRef(std::move(coinbaseTx));
+    // TODO: this can't be done yet for parent_tp??
     pblocktemplate->vchCoinbaseCommitment = m_chainstate.m_chainman.GenerateCoinbaseCommitment(*pblock, pindexPrev);
     pblocktemplate->vTxFees[0] = -nFees;
 
     LogPrintf("CreateNewBlock(): block weight: %u txs: %u fees: %ld sigops %d\n", GetBlockWeight(*pblock), nBlockTx, nFees, nBlockSigOpsCost);
 
     // Fill in header
-    pblock->hashPrevBlock  = pindexPrev->GetBlockHash();
+    if (!parent_tp) {
+        pblock->hashPrevBlock  = pindexPrev->GetBlockHash();
+    }
+    // TODO: just add a second?
     UpdateTime(pblock, chainparams.GetConsensus(), pindexPrev);
+    // TODO: add offset
     pblock->nBits          = GetNextWorkRequired(pindexPrev, pblock, chainparams.GetConsensus());
     pblock->nNonce         = 0;
     pblocktemplate->vTxSigOpsCost[0] = WITNESS_SCALE_FACTOR * GetLegacySigOpCount(*pblock->vtx[0]);
 
     BlockValidationState state;
+    // assert that test_block_validity is false when parent_tp is present
     if (m_options.test_block_validity && !TestBlockValidity(state, chainparams, m_chainstate, *pblock, pindexPrev,
                                                             /*fCheckPOW=*/false, /*fCheckMerkleRoot=*/false)) {
         throw std::runtime_error(strprintf("%s: TestBlockValidity failed: %s", __func__, state.ToString()));

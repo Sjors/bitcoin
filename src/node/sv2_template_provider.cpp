@@ -151,12 +151,37 @@ void Sv2TemplateProvider::ThreadSv2Handler()
                 if (client.m_coinbase_tx_outputs_size == 0) return;
 
                 LOCK(this->m_tp_mutex);
+                // TODO:
+                // - figure out if we have a (empty block) template lined up
+                // - if so, send SetPrevOut for it now, then continue as normal.
+
+                // Note: if we won the previous block, the SubmitBlock handing has already sent
+                // NewPrevHash referring to our optimistic template. Here we're constructing and
+                // then sending them pretty much the same template, but that's fine.
+
                 CAmount dummy_last_fees;
                 if (!SendWork(client, /*send_new_prevhash=*/best_block_changed, dummy_last_fees)) {
                     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Disconnecting client id=%zu\n",
                                     client.m_id);
                     client.m_disconnect_flag = true;
                 }
+
+                // Optimistically create a (high fee) template for the next block if ours wins,
+                // i.e. if we receive SubmitSolution for it.
+                if (!SendFutureWork(client, /*optimistic=*/true)) {
+                    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Disconnecting client id=%zu\n",
+                                    client.m_id);
+                    client.m_disconnect_flag = true;
+                }
+
+                // Create another template for the next (empty) block if ours doesn't win.
+                if (!SendFutureWork(client, /*optimistic=*/false)) {
+                    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Disconnecting client id=%zu\n",
+                                    client.m_id);
+                    client.m_disconnect_flag = true;
+                }
+
+
             });
         }
 
@@ -238,6 +263,8 @@ void Sv2TemplateProvider::ThreadSv2MempoolHandler()
                                 client.m_id);
                 client.m_disconnect_flag = true;
             }
+
+            // TODO: create a new corresponding optimistic template (the empty block template remains valid)
 
             // We don't track fees_before for individual connected clients. Pick the
             // highest value amongst all connected clients (which may vary in additional_coinbase_weight).
@@ -327,10 +354,36 @@ void Sv2TemplateProvider::SubmitSolution(node::Sv2SubmitSolutionMsg solution)
             block_template = std::move(cached_block_template->second);
         }
 
-        block_template->submitSolution(solution.m_version, solution.m_header_timestamp, solution.m_header_nonce, solution.m_coinbase_tx);
+        uint256 new_block_hash;
+        block_template->submitSolution(solution.m_version, solution.m_header_timestamp, solution.m_header_nonce, solution.m_coinbase_tx, new_block_hash);
+
+        // TODO:
+        // - send NewPrevHash
+        // client.m_send_messages.emplace_back(new_block_hash);
 }
 
 Sv2TemplateProvider::NewWorkSet Sv2TemplateProvider::BuildNewWorkSet(bool future_template, unsigned int coinbase_output_max_additional_size)
+{
+    AssertLockHeld(m_tp_mutex);
+
+    const auto time_start{SteadyClock::now()};
+    auto block_template = m_mining.createNewBlock(CScript(), {.use_mempool = true, .coinbase_max_additional_weight = coinbase_output_max_additional_size});
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Assemble template: %.2fms\n",
+        Ticks<MillisecondsDouble>(SteadyClock::now() - time_start));
+    CBlockHeader header{block_template->getBlockHeader()};
+    node::Sv2NewTemplateMsg new_template{header,
+                                         block_template->getCoinbaseTx(),
+                                         block_template->getCoinbaseMerklePath(),
+                                         block_template->getWitnessCommitmentIndex(),
+                                         m_template_id,
+                                         future_template};
+    node::Sv2SetNewPrevHashMsg set_new_prev_hash{header, m_template_id};
+
+    return NewWorkSet { new_template, std::move(block_template), set_new_prev_hash};
+}
+
+
+Sv2TemplateProvider::NewWorkSet Sv2TemplateProvider::BuildFutureWorkSet(bool future_template, bool optimistic, unsigned int coinbase_output_max_additional_size)
 {
     AssertLockHeld(m_tp_mutex);
 
@@ -381,14 +434,16 @@ bool Sv2TemplateProvider::SendWork(Sv2Client& client, bool send_new_prevhash, CA
 
     // TODO: reuse template_id for clients with the same m_default_coinbase_tx_additional_output_size
     ++m_template_id;
+
     // https://github.com/bitcoin/bitcoin/pull/30356#issuecomment-2199791658
     uint32_t additional_coinbase_weight{(client.m_coinbase_tx_outputs_size + 100 + 0 + 2) * 4};
     auto new_work_set = BuildNewWorkSet(/*future_template=*/send_new_prevhash, additional_coinbase_weight);
+    uint256 prev_hash = new_work_set.block_template->getBlockHeader().hashPrevBlock;
 
     if (m_best_prev_hash == uint256(0)) {
         // g_best_block is set UpdateTip(), so will be 0 when the node starts
         // and no new blocks have arrived.
-        m_best_prev_hash = new_work_set.block_template->getBlockHeader().hashPrevBlock;
+        m_best_prev_hash = prev_hash;
     }
 
     // Do not submit new template if the fee increase is insufficient.
@@ -405,10 +460,29 @@ bool Sv2TemplateProvider::SendWork(Sv2Client& client, bool send_new_prevhash, CA
     LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Send 0x71 NewTemplate id=%lu to client id=%zu\n", m_template_id, client.m_id);
     client.m_send_messages.emplace_back(new_work_set.new_template);
 
+    m_block_template_cache.insert({m_template_id, std::move(new_work_set.block_template)});
+
     if (send_new_prevhash) {
         LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Send 0x72 SetNewPrevHash to client id=%zu\n", client.m_id);
         client.m_send_messages.emplace_back(new_work_set.prev_hash);
     }
+
+    return true;
+}
+
+bool Sv2TemplateProvider::SendFutureWork(Sv2Client& client, bool optimistic)
+{
+    AssertLockHeld(m_tp_mutex);
+    // TODO: reuse template_id for clients with the same m_default_coinbase_tx_additional_output_size
+    ++m_template_id;
+
+    // https://github.com/bitcoin/bitcoin/pull/30356#issuecomment-2199791658
+    uint32_t additional_coinbase_weight{(client.m_coinbase_tx_outputs_size + 100 + 0 + 2) * 4};
+
+    auto new_work_set = BuildNewWorkSet(/*future_template=*/true, optimistic, additional_coinbase_weight);
+
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Send %s 0x71 NewTemplate id=%lu to client id=%zu\n", optimistic ? "optimistic " : "", m_template_id, client.m_id);
+    client.m_send_messages.emplace_back(new_work_set.new_template);
 
     m_block_template_cache.insert({m_template_id, std::move(new_work_set.block_template)});
 

@@ -885,7 +885,7 @@ public:
         return GetCoinBaseMerklePath(m_block_template->block);
     }
 
-    bool submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CMutableTransaction coinbase) override
+    bool submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CMutableTransaction coinbase, uint256& new_block_hash) override
     {
         CBlock block{m_block_template->block};
 
@@ -904,6 +904,7 @@ public:
         block.hashMerkleRoot = BlockMerkleRoot(block);
 
         auto block_ptr = std::make_shared<const CBlock>(block);
+        new_block_hash = block.GetHash();
         return chainman().ProcessNewBlock(block_ptr, /*force_processing=*/true, /*min_pow_checked=*/true, /*new_block=*/nullptr);
     }
 
