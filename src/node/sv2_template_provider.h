@@ -110,6 +110,8 @@ private:
 
     /**
      * A cache that maps ids used in NewTemplate messages and its associated block template.
+     *
+     * TODO: include list of which clients it was made for
      */
     using BlockTemplateCache = std::map<uint64_t, std::unique_ptr<BlockTemplate>>;
     BlockTemplateCache m_block_template_cache GUARDED_BY(m_tp_mutex);
@@ -181,8 +183,20 @@ private:
 
     /**
      * Builds a NewWorkSet that contains the Sv2NewTemplateMsg, a new full block and a Sv2SetNewPrevHashMsg that are all linked to the same work.
+     *
+     * @param[in] future_template true if the template is intended for future SetNewPrevHash message sent on the channel.
+     *                            If False, the job relates to the last sent SetNewPrevHash message on the channel
+     *                            and the miner should start to work on the job immediately.
      */
     [[nodiscard]] NewWorkSet BuildNewWorkSet(bool future_template, unsigned int coinbase_output_max_additional_size) EXCLUSIVE_LOCKS_REQUIRED(m_tp_mutex);
+
+    /**
+     * Same as BuildNewWorkSet but for the next block
+     *
+     * @param[in] optimistic if we win the current block, add transactions.
+     */
+    [[nodiscard]] NewWorkSet BuildNewWorkSet(bool optimistic, unsigned int coinbase_output_max_additional_size) EXCLUSIVE_LOCKS_REQUIRED(m_tp_mutex);
+
 
     /* Forget templates from before the last block, but with a few seconds margin. */
     void PruneBlockTemplateCache() EXCLUSIVE_LOCKS_REQUIRED(m_tp_mutex);
@@ -193,6 +207,23 @@ private:
      * TODO: drop fees_before argument after cluster mempool
      */
     [[nodiscard]] bool SendWork(Sv2Client& client, bool send_new_prevhash, CAmount& fees_before) EXCLUSIVE_LOCKS_REQUIRED(m_tp_mutex);
+
+    /**
+     * Sends the best NewTemplate to a client for a future block.
+     *
+     * @param[in] optimistic if we win the current block, add transactions.
+     *
+     * Note that although we can send out new work real fast, it apparently
+     * can take ASICs a while to load up the new work. So once a new block
+     * comes in, and it wasn't ours, we send three messages in quick
+     * succcession. First a NewPrevHash message referring to the pessimisic
+     * template, then a NewTemplate message and then another NewPrevHash
+     * message referring to the new template.
+     *
+     * When we win the block we only send one message: NewPrevHash referring
+     * to the optimistic template.
+     */
+    [[nodiscard]] bool SendFutureWork(Sv2Client& client, bool optimistic) EXCLUSIVE_LOCKS_REQUIRED(m_tp_mutex);
 
 };
 

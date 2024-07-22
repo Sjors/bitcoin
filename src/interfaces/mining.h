@@ -47,7 +47,7 @@ public:
      *
      * @returns if the block was processed, independent of block validity
      */
-    virtual bool submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CMutableTransaction coinbase) = 0;
+    virtual bool submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CMutableTransaction coinbase, uint256& new_block_hash) = 0;
 };
 
 //! Interface giving clients (RPC, Stratum v2 Template Provider in the future)
@@ -94,6 +94,10 @@ public:
      * @param[in] script_pub_key the coinbase output
      * @param[in] options options for creating the block
      * @returns a block template
+     *
+     * TODO: add params for:
+     * 1. refering to a previous template, to a block on top of that
+     * 2. to build an empty block (on top of the previous template)
      */
     virtual std::unique_ptr<BlockTemplate> createNewBlock(const CScript& script_pub_key, const node::BlockCreateOptions& options={}) = 0;
 
