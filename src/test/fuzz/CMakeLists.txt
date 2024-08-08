@@ -111,6 +111,7 @@ add_executable(fuzz
   span.cpp
   string.cpp
   strprintf.cpp
+  sv2_noise.cpp
   system.cpp
   timeoffsets.cpp
   torcontrol.cpp
