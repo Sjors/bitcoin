@@ -138,6 +138,7 @@ BITCOIN_CORE_H = \
   common/bloom.h \
   common/init.h \
   common/run_command.h \
+  common/sv2_connman.h \
   common/sv2_messages.h \
   common/sv2_noise.h \
   common/sv2_transport.h \
@@ -690,6 +691,7 @@ libbitcoin_common_a_SOURCES = \
   common/interfaces.cpp \
   common/messages.cpp \
   common/run_command.cpp \
+  common/sv2_connman.cpp \
   common/sv2_noise.cpp \
   common/settings.cpp \
   common/signmessage.cpp \
