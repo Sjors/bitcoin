@@ -666,11 +666,6 @@ is ZFS with the utf8only=on option set.
 
 More information: https://github.com/python/cpython/issues/81765
 
-### openssl-1.1.1l and openssl-1.1.1n
-
-OpenSSL includes tests that will fail once some certificate has expired.
-The workarounds from the GnuTLS section immediately below can be used.
-
 ### GnuTLS: test-suite FAIL: status-request-revoked
 
 *The derivation is likely identified by: `/gnu/store/vhphki5sg9xkdhh2pbc8gi6vhpfzryf0-gnutls-3.6.12.drv`*
