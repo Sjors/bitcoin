@@ -33,6 +33,13 @@ int64_t UpdateTime(CBlockHeader* pblock, const Consensus::Params& consensusParam
     int64_t nOldTime = pblock->nTime;
     int64_t nNewTime{std::max<int64_t>(pindexPrev->GetMedianTimePast() + 1, TicksSinceEpoch<std::chrono::seconds>(NodeClock::now()))};
 
+    if (consensusParams.enforce_BIP94) {
+        const int nHeight = pindexPrev->nHeight + 1;
+        if (nHeight % consensusParams.DifficultyAdjustmentInterval() == 0) {
+            nNewTime = std::max<int64_t>(nNewTime, pindexPrev->GetBlockTime() - MAX_TIMEWARP);
+        }
+    }
+
     if (nOldTime < nNewTime) {
         pblock->nTime = nNewTime;
     }

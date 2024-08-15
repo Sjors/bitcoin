@@ -28,6 +28,7 @@ from test_framework.p2p import P2PDataStore
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal,
+    assert_greater_than_or_equal,
     assert_raises_rpc_error,
     get_fee,
 )
@@ -135,19 +136,24 @@ class MiningTest(BitcoinTestFramework):
         assert_equal(node.getblock(node.getbestblockhash())['time'], t + 2 * 3600)
 
         self.log.info("First block template of retarget period can't use wall clock time")
+        self.nodes[0].setmocktime(t)
         tmpl = node.getblocktemplate(NORMAL_GBT_REQUEST_PARAMS)
+        assert_greater_than_or_equal(tmpl['curtime'], t + 2 * 3600 - 600)
 
         block = CBlock()
         block.nVersion = tmpl["version"]
         block.hashPrevBlock = int(tmpl["previousblockhash"], 16)
-        block.nTime = t
+        block.nTime = tmpl["curtime"]
         block.nBits = int(tmpl["bits"], 16)
         block.nNonce = 0
         block.vtx = [create_coinbase(height=int(tmpl["height"]))]
         block.solve()
+        assert_template(node, block, None)
 
-        self.nodes[0].setmocktime(t)
-        assert_raises_rpc_error(-25, 'time-timewarp-attack', lambda: node.submitheader(hexdata=CBlockHeader(block).serialize().hex()))
+        bad_block = copy.deepcopy(block)
+        bad_block.nTime = t
+        bad_block.solve()
+        assert_raises_rpc_error(-25, 'time-timewarp-attack', lambda: node.submitheader(hexdata=CBlockHeader(bad_block).serialize().hex()))
 
     def run_test(self):
         node = self.nodes[0]
