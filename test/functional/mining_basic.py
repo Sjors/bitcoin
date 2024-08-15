@@ -115,6 +115,40 @@ class MiningTest(BitcoinTestFramework):
             assert tx_below_min_feerate['txid'] not in block_template_txids
             assert tx_below_min_feerate['txid'] not in block_txids
 
+    def test_timewarp(self):
+        self.log.info("Test timewarp attack mitigation (BIP94)")
+        node = self.nodes[0]
+
+        self.log.info("Mine until the last block of the retarget period")
+        blockchain_info = self.nodes[0].getblockchaininfo()
+        n = 144 - blockchain_info['blocks'] % 144 - 2
+        t = blockchain_info['time']
+
+        for _ in range(n):
+            t += 600
+            self.nodes[0].setmocktime(t)
+            self.generate(self.wallet, 1, sync_fun=self.no_op)
+
+        self.log.info("Create block two hours in the future")
+        self.nodes[0].setmocktime(t + 2 * 3600)
+        self.generate(self.wallet, 1, sync_fun=self.no_op)
+        assert_equal(node.getblock(node.getbestblockhash())['time'], t + 2 * 3600)
+
+        self.log.info("First block template of retarget period can't use wall clock time")
+        tmpl = node.getblocktemplate(NORMAL_GBT_REQUEST_PARAMS)
+
+        block = CBlock()
+        block.nVersion = tmpl["version"]
+        block.hashPrevBlock = int(tmpl["previousblockhash"], 16)
+        block.nTime = t
+        block.nBits = int(tmpl["bits"], 16)
+        block.nNonce = 0
+        block.vtx = [create_coinbase(height=int(tmpl["height"]))]
+        block.solve()
+
+        self.nodes[0].setmocktime(t)
+        assert_raises_rpc_error(-25, 'time-timewarp-attack', lambda: node.submitheader(hexdata=CBlockHeader(block).serialize().hex()))
+
     def run_test(self):
         node = self.nodes[0]
         self.wallet = MiniWallet(node)
@@ -322,6 +356,7 @@ class MiningTest(BitcoinTestFramework):
         assert_equal(node.submitblock(hexdata=block.serialize().hex()), 'duplicate')  # valid
 
         self.test_blockmintxfee_parameter()
+        self.test_timewarp()
 
 
 if __name__ == '__main__':
