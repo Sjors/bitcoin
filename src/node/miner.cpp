@@ -91,6 +91,7 @@ void ApplyArgsManOptions(const ArgsManager& args, BlockAssembler::Options& optio
         if (const auto parsed{ParseMoney(*blockmintxfee)}) options.blockMinFeeRate = CFeeRate{*parsed};
     }
     options.print_modified_fee = args.GetBoolArg("-printpriority", options.print_modified_fee);
+    options.coinbase_locktime = args.GetBoolArg("-coinbaselocktime", DEFAULT_COINBASE_LOCKTIME);
 }
 
 void BlockAssembler::resetBlock()
@@ -159,6 +160,9 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     coinbaseTx.vout[0].scriptPubKey = scriptPubKeyIn;
     coinbaseTx.vout[0].nValue = nFees + GetBlockSubsidy(nHeight, chainparams.GetConsensus());
     coinbaseTx.vin[0].scriptSig = CScript() << nHeight << OP_0;
+    if (m_options.coinbase_locktime) {
+        coinbaseTx.nLockTime = nHeight;
+    }
     pblock->vtx[0] = MakeTransactionRef(std::move(coinbaseTx));
     pblocktemplate->vchCoinbaseCommitment = m_chainstate.m_chainman.GenerateCoinbaseCommitment(*pblock, pindexPrev);
     pblocktemplate->vTxFees[0] = -nFees;

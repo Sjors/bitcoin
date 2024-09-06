@@ -79,6 +79,7 @@ class MiningTest(BitcoinTestFramework):
         assert_equal(VERSIONBITS_TOP_BITS + (1 << VERSIONBITS_DEPLOYMENT_TESTDUMMY_BIT), self.nodes[0].getblocktemplate(NORMAL_GBT_REQUEST_PARAMS)['version'])
         self.restart_node(0)
         self.connect_nodes(0, 1)
+        return t
 
     def test_blockmintxfee_parameter(self):
         self.log.info("Test -blockmintxfee setting")
@@ -171,7 +172,7 @@ class MiningTest(BitcoinTestFramework):
     def run_test(self):
         node = self.nodes[0]
         self.wallet = MiniWallet(node)
-        self.mine_chain()
+        t = self.mine_chain()
 
         def assert_submitblock(block, result_str_1, result_str_2=None):
             block.solve()
@@ -188,6 +189,15 @@ class MiningTest(BitcoinTestFramework):
         assert_equal(mining_info['difficulty'], Decimal('4.656542373906925E-10'))
         assert_equal(mining_info['networkhashps'], Decimal('0.003333333333333334'))
         assert_equal(mining_info['pooledtx'], 0)
+
+        self.log.info('check coinbase transaction')
+        coinbase = node.getblock(node.getbestblockhash(), verbosity=3)['tx'][0]
+        assert_equal(coinbase['locktime'], 0)
+        self.restart_node(0, extra_args=[f'-mocktime={t}', '-coinbaselocktime'])
+        self.connect_nodes(0, 1)
+        self.generate(self.wallet, 1, sync_fun=self.no_op)
+        coinbase = node.getblock(node.getbestblockhash(), verbosity=3)['tx'][0]
+        assert_equal(coinbase['locktime'], 201)
 
         self.log.info("getblocktemplate: Test default witness commitment")
         txid = int(self.wallet.send_self_transfer(from_node=node)['wtxid'], 16)
@@ -318,7 +328,7 @@ class MiningTest(BitcoinTestFramework):
         block.solve()
 
         def chain_tip(b_hash, *, status='headers-only', branchlen=1):
-            return {'hash': b_hash, 'height': 202, 'branchlen': branchlen, 'status': status}
+            return {'hash': b_hash, 'height': 203, 'branchlen': branchlen, 'status': status}
 
         assert chain_tip(block.hash) not in node.getchaintips()
         node.submitheader(hexdata=block.serialize().hex())
