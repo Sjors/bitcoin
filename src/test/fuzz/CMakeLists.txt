@@ -151,3 +151,12 @@ target_link_libraries(fuzz
 if(ENABLE_WALLET)
   add_subdirectory(${PROJECT_SOURCE_DIR}/src/wallet/test/fuzz wallet)
 endif()
+
+if(WITH_SV2)
+  target_sources(fuzz
+  PRIVATE
+  )
+  target_link_libraries(fuzz
+    bitcoin_sv2
+  )
+endif()
