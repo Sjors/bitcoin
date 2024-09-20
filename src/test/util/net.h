@@ -14,6 +14,7 @@
 #include <node/eviction.h>
 #include <span.h>
 #include <sync.h>
+#include <util/check.h>
 #include <util/sock.h>
 
 #include <algorithm>
@@ -42,7 +43,7 @@ struct ConnmanTestMsg : public CConnman {
         m_peer_connect_timeout = timeout;
     }
 
-    std::vector<CNode*> TestNodes()
+    auto TestNodes()
     {
         LOCK(m_nodes_mutex);
         return m_nodes;
@@ -51,7 +52,8 @@ struct ConnmanTestMsg : public CConnman {
     void AddTestNode(CNode& node)
     {
         LOCK(m_nodes_mutex);
-        m_nodes.push_back(&node);
+        auto [_, inserted] = m_nodes.emplace(node.GetId(), &node);
+        Assert(inserted);
 
         if (node.IsManualOrFullOutboundConn()) ++m_network_conn_counts[node.addr.GetNetwork()];
     }
@@ -59,7 +61,7 @@ struct ConnmanTestMsg : public CConnman {
     void ClearTestNodes()
     {
         LOCK(m_nodes_mutex);
-        for (CNode* node : m_nodes) {
+        for (auto& [_, node] : m_nodes) {
             delete node;
         }
         m_nodes.clear();
