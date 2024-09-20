@@ -203,6 +203,15 @@ static RPCHelpMan getpeerinfo()
     std::vector<CNodeStats> vstats;
     connman.GetNodeStats(vstats);
 
+    // An undocumented side effect of how CConnman previously stored nodes was
+    // that they were returned ordered by id. At least some functional tests
+    // rely on that, so keep it that way. An alternative is to remove this sort
+    // and fix the tests and take the risk of breaking other users of the
+    // "getpeerinfo" RPC.
+    std::sort(vstats.begin(), vstats.end(), [](const CNodeStats& a, const CNodeStats& b) {
+        return a.nodeid < b.nodeid;
+    });
+
     UniValue ret(UniValue::VARR);
 
     for (const CNodeStats& stats : vstats) {
