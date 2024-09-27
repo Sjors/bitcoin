@@ -9,6 +9,7 @@
 #include <bip324.h>
 #include <chainparams.h>
 #include <common/bloom.h>
+#include <common/sockman.h>
 #include <common/transport.h>
 #include <compat/compat.h>
 #include <consensus/amount.h>
@@ -25,7 +26,6 @@
 #include <policy/feerate.h>
 #include <protocol.h>
 #include <random.h>
-#include <sockman.h>
 #include <span.h>
 #include <streams.h>
 #include <sync.h>

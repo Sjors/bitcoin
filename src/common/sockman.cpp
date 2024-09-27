@@ -4,9 +4,9 @@
 
 #include <config/bitcoin-config.h> // IWYU pragma: keep
 
+#include <common/sockman.h>
 #include <netbase.h>
 #include <logging.h>
-#include <sockman.h>
 #include <util/sock.h>
 #include <util/thread.h>
 
