@@ -5,6 +5,7 @@
 #ifndef BITCOIN_SV2_CONNMAN_H
 #define BITCOIN_SV2_CONNMAN_H
 
+#include <common/sockman.h>
 #include <sv2/messages.h>
 #include <sv2/transport.h>
 #include <pubkey.h>
@@ -24,11 +25,6 @@ struct Sv2Client
 {
     /* Ephemeral identifier for debugging purposes */
     size_t m_id;
-
-    /**
-     * Receiving and sending socket for the connected client
-     */
-    std::shared_ptr<Sock> m_sock;
 
     /**
      * Transport
@@ -58,8 +54,8 @@ struct Sv2Client
      */
     unsigned int m_coinbase_tx_outputs_size;
 
-    explicit Sv2Client(size_t id, std::shared_ptr<Sock> sock, std::unique_ptr<Sv2Transport> transport) :
-                       m_id{id}, m_sock{std::move(sock)}, m_transport{std::move(transport)} {};
+    explicit Sv2Client(size_t id, std::unique_ptr<Sv2Transport> transport) :
+                       m_id{id}, m_transport{std::move(transport)} {};
 
     bool IsFullyConnected()
     {
@@ -89,10 +85,10 @@ public:
 };
 
 /*
- * Handle Stratum v2 connections, similar to CConnman.
+ * Handle Stratum v2 connections.
  * Currently only supports inbound connections.
  */
-class Sv2Connman
+class Sv2Connman : SockMan
 {
 private:
     /** Interface to pass events up */
@@ -115,11 +111,6 @@ private:
      */
     const uint8_t m_subprotocol;
 
-    /**
-     * The main listening socket for new stratum v2 connections.
-     */
-    std::shared_ptr<Sock> m_listening_socket;
-
     CKey m_static_key;
 
     XOnlyPubKey m_authority_pubkey;
@@ -127,9 +118,9 @@ private:
     std::optional<Sv2SignatureNoiseMessage> m_certificate;
 
     /**
-     * A list of all connected stratum v2 clients.
+     * A map of all connected stratum v2 clients.
      */
-    using Clients = std::vector<std::unique_ptr<Sv2Client>>;
+    using Clients = std::unordered_map<NodeId, std::shared_ptr<Sv2Client>>;
     Clients m_sv2_clients GUARDED_BY(m_clients_mutex);
 
     /**
@@ -145,9 +136,8 @@ private:
 
     /**
      * Creates a socket and binds the port for new stratum v2 connections.
-     * @throws std::runtime_error if port is unable to bind.
      */
-    [[nodiscard]] std::shared_ptr<Sock> BindListenPort(std::string host, uint16_t port) const;
+    [[nodiscard]] bool Bind(std::string host, uint16_t port);
 
     void DisconnectFlagged() EXCLUSIVE_LOCKS_REQUIRED(m_clients_mutex);
 
@@ -158,9 +148,28 @@ private:
     void ThreadSv2Handler();
 
     /**
-     * Generates the socket events for each Sv2Client socket and the main listening socket.
+     * Create a `Sv2Client` object and add it to the `m_sv2_clients` member.
+     * @param[in] node_id Id of the newly accepted connection.
+     * @param[in] me The address and port at our side of the connection.
+     * @param[in] them The address and port at the peer's side of the connection.
+     * @retval true on success
+     * @retval false on failure, meaning that the associated socket and node_id should be discarded
      */
-    [[nodiscard]] Sock::EventsPerSock GenerateWaitSockets(const std::shared_ptr<Sock>& listen_socket, const Clients& sv2_clients) const;
+    virtual bool EventNewConnectionAccepted(NodeId node_id,
+                                            const CService& me,
+                                            const CService& them) override;
+
+    void EventReadyToSend(NodeId node_id, bool& cancel_recv) override
+        EXCLUSIVE_LOCKS_REQUIRED(!m_clients_mutex);
+
+    virtual void EventGotData(NodeId node_id, const uint8_t* data, size_t n) override
+        EXCLUSIVE_LOCKS_REQUIRED(!mutexMsgProc, !m_clients_mutex);
+
+    virtual void EventGotEOF(NodeId node_id) override
+        EXCLUSIVE_LOCKS_REQUIRED(!m_clients_mutex) { fprintf(stderr, "EventGotEOF\n"); }; // TODO in sv2/conmman.cpp
+
+    virtual void EventGotPermanentReadError(NodeId node_id, const std::string& errmsg) override
+        EXCLUSIVE_LOCKS_REQUIRED(!m_clients_mutex) { fprintf(stderr, "EventGotPermanentReadError\n"); }; // TODO in sv2/conmman.cpp
 
     /**
      * Encrypt the header and message payload and send it.
@@ -173,6 +182,8 @@ private:
      */
     std::vector<node::Sv2NetMsg> ReadAndDecryptSv2NetMsgs(Sv2Client& client, Span<std::byte> buffer);
 
+    std::shared_ptr<Sv2Client> GetClientById(NodeId node_id) const EXCLUSIVE_LOCKS_REQUIRED(!m_clients_mutex);
+
 public:
     Sv2Connman(uint8_t subprotocol, CKey static_key, XOnlyPubKey authority_pubkey, Sv2SignatureNoiseMessage certificate) :
                m_subprotocol(subprotocol), m_static_key(static_key), m_authority_pubkey(authority_pubkey), m_certificate(certificate) {};
@@ -180,6 +191,9 @@ public:
     ~Sv2Connman();
 
     Mutex m_clients_mutex;
+
+    // TODO: what is this for and do we need it?
+    Mutex mutexMsgProc;
 
     /**
      * Starts the Stratum v2 server and thread.
@@ -208,7 +222,7 @@ public:
     {
         LOCK(m_clients_mutex);
         for (const auto& client : m_sv2_clients) {
-            if (client->IsFullyConnected()) func(*client);
+            if (client.second->IsFullyConnected()) func(*client.second);
         }
     };
 
@@ -216,7 +230,7 @@ public:
     size_t ConnectedClients() EXCLUSIVE_LOCKS_REQUIRED(m_clients_mutex)
     {
         return std::count_if(m_sv2_clients.begin(), m_sv2_clients.end(), [](const auto& c) {
-            return !c->m_disconnect_flag;
+            return !c.second->m_disconnect_flag;
         });
     }
 
@@ -224,7 +238,7 @@ public:
     size_t FullyConnectedClients() EXCLUSIVE_LOCKS_REQUIRED(m_clients_mutex)
     {
         return std::count_if(m_sv2_clients.begin(), m_sv2_clients.end(), [](const auto& c) {
-            return c->IsFullyConnected();
+            return c.second->IsFullyConnected();
         });
     }
 

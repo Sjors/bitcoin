@@ -18,8 +18,9 @@ Sv2Connman::~Sv2Connman()
         LOCK(m_clients_mutex);
         for (const auto& client : m_sv2_clients) {
             LogTrace(BCLog::SV2, "Disconnecting client id=%zu\n",
-                    client->m_id);
-            client->m_disconnect_flag = true;
+                    client.first);
+            CloseConnection(client.second->m_id);
+            client.second->m_disconnect_flag = true;
         }
         DisconnectFlagged();
     }
@@ -32,51 +33,29 @@ bool Sv2Connman::Start(Sv2EventsInterface* msgproc, std::string host, uint16_t p
 {
     m_msgproc = msgproc;
 
-    try {
-        auto sock = BindListenPort(host, port);
-        m_listening_socket = std::move(sock);
-    } catch (const std::runtime_error& e) {
-        LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Template Provider failed to bind to port %d: %s\n", port, e.what());
-        return false;
-    }
+    if (!Bind(host, port)) return false;
+
+    SockMan::Options sockman_options;
+    StartSocketsThreads(sockman_options);
 
     m_thread_sv2_handler = std::thread(&util::TraceThread, "sv2connman", [this] { ThreadSv2Handler(); });
+
     return true;
 }
 
-std::shared_ptr<Sock> Sv2Connman::BindListenPort(std::string host, uint16_t port) const
+bool Sv2Connman::Bind(std::string host, uint16_t port)
 {
     const CService addr_bind = LookupNumeric(host, port);
 
-    auto sock = CreateSock(addr_bind.GetSAFamily(), SOCK_STREAM, IPPROTO_TCP);
-    if (!sock) {
-        throw std::runtime_error("Sv2 Template Provider cannot create socket");
-    }
-
-    struct sockaddr_storage sockaddr;
-    socklen_t len = sizeof(sockaddr);
-
-    if (!addr_bind.GetSockAddr(reinterpret_cast<struct sockaddr*>(&sockaddr), &len)) {
-        throw std::runtime_error("Sv2 Template Provider failed to get socket address");
-    }
-
-    if (sock->Bind(reinterpret_cast<struct sockaddr*>(&sockaddr), len) == SOCKET_ERROR) {
-        const int nErr = WSAGetLastError();
-        if (nErr == WSAEADDRINUSE) {
-            throw std::runtime_error(strprintf("Unable to bind to %d on this computer. Another Stratum v2 process is probably already running.\n", port));
-        }
-
-        throw std::runtime_error(strprintf("Unable to bind to %d on this computer (bind returned error %s )\n", port, NetworkErrorString(nErr)));
-    }
-
-    constexpr int max_pending_conns{4096};
-    if (sock->Listen(max_pending_conns) == SOCKET_ERROR) {
-        throw std::runtime_error("Sv2 listening socket has an error listening");
+    bilingual_str error;
+    if (!BindAndStartListening(addr_bind, error)) {
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Template Provider failed to bind to port %d: %s\n", port, error.original);
+        return false;
     }
 
     LogPrintLevel(BCLog::SV2, BCLog::Level::Info, "%s listening on %s:%d\n", SV2_PROTOCOL_NAMES.at(m_subprotocol), host, port);
 
-    return sock;
+    return true;
 }
 
 
@@ -85,10 +64,24 @@ void Sv2Connman::DisconnectFlagged()
     AssertLockHeld(m_clients_mutex);
 
     // Remove clients that are flagged for disconnection.
-    m_sv2_clients.erase(
-        std::remove_if(m_sv2_clients.begin(), m_sv2_clients.end(), [](const auto &client) {
-            return client->m_disconnect_flag;
-    }), m_sv2_clients.end());
+    auto it = m_sv2_clients.begin();
+    while(it != m_sv2_clients.end()) {
+        if (it->second->m_disconnect_flag) {
+            it = m_sv2_clients.erase(it);
+        } else {
+            it++;
+        }
+    }
+
+    for (auto& kv : m_sv2_clients) {
+
+
+    }
+
+    // m_sv2_clients.erase(
+    //     std::remove_if(m_sv2_clients.begin(), m_sv2_clients.end(), [](const auto *client) {
+    //         return client->second->m_disconnect_flag;
+    // }), m_sv2_clients.end());
 }
 
 void Sv2Connman::ThreadSv2Handler() EXCLUSIVE_LOCKS_REQUIRED(!m_clients_mutex)
@@ -101,39 +94,22 @@ void Sv2Connman::ThreadSv2Handler() EXCLUSIVE_LOCKS_REQUIRED(!m_clients_mutex)
             DisconnectFlagged();
         }
 
-        // Poll/Select the sockets that need handling.
-        Sock::EventsPerSock events_per_sock = WITH_LOCK(m_clients_mutex, return GenerateWaitSockets(m_listening_socket, m_sv2_clients));
-
         constexpr auto timeout = std::chrono::milliseconds(50);
-        if (!events_per_sock.begin()->first->WaitMany(timeout, events_per_sock)) {
-            continue;
-        }
 
-        // Accept any new connections for sv2 clients.
-        const auto listening_sock = events_per_sock.find(m_listening_socket);
-        if (listening_sock != events_per_sock.end() && listening_sock->second.occurred & Sock::RECV) {
-            struct sockaddr_storage sockaddr;
-            socklen_t sockaddr_len = sizeof(sockaddr);
+        // TODO: what?
+        continue;
 
-            auto sock = m_listening_socket->Accept(reinterpret_cast<struct sockaddr*>(&sockaddr), &sockaddr_len);
-            if (sock) {
-                Assume(m_certificate);
-                LOCK(m_clients_mutex);
-                std::unique_ptr transport = std::make_unique<Sv2Transport>(m_static_key, m_certificate.value());
-                size_t id{m_sv2_clients.size() + 1};
-                auto client = std::make_unique<Sv2Client>(id, std::move(sock), std::move(transport));
-                LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "New client id=%zu connected\n", client->m_id);
-                m_sv2_clients.emplace_back(std::move(client));
-            }
-        }
+        Sock::EventsPerSock events_per_sock; // wait sockets
 
         LOCK(m_clients_mutex);
         // Process messages from and for connected sv2_clients.
-        for (auto& client : m_sv2_clients) {
+        for (auto& c : m_sv2_clients) {
+            const NodeId node_id{c.first};
+            const auto& client{c.second};
             bool has_received_data = false;
             bool has_error_occurred = false;
 
-            const auto socket_it = events_per_sock.find(client->m_sock);
+            const auto socket_it = events_per_sock.end(); // events_per_sock.find(client->m_sock);
             if (socket_it != events_per_sock.end()) {
                 has_received_data = socket_it->second.occurred & Sock::RECV;
                 has_error_occurred = socket_it->second.occurred & Sock::ERR;
@@ -141,7 +117,7 @@ void Sv2Connman::ThreadSv2Handler() EXCLUSIVE_LOCKS_REQUIRED(!m_clients_mutex)
 
             if (has_error_occurred) {
                 LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Socket receive error, disconnecting client id=%zu\n",
-                client->m_id);
+                node_id);
                 client->m_disconnect_flag = true;
                 continue;
             }
@@ -181,7 +157,7 @@ void Sv2Connman::ThreadSv2Handler() EXCLUSIVE_LOCKS_REQUIRED(!m_clients_mutex)
 #endif
                     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Send %d bytes to client id=%zu\n",
                                   data.size() - total_sent, client->m_id);
-                    sent = client->m_sock->Send(data.data() + total_sent, data.size() - total_sent, flags);
+                    sent = false; // client->m_sock->Send(data.data() + total_sent, data.size() - total_sent, flags);
                 }
                 if (sent > 0) {
                     // Notify transport that bytes have been processed.
@@ -206,64 +182,8 @@ void Sv2Connman::ThreadSv2Handler() EXCLUSIVE_LOCKS_REQUIRED(!m_clients_mutex)
             // Clear messages that have been handed to transport from the queue
             client->m_send_messages.erase(client->m_send_messages.begin(), it);
 
-            // Stop processing this client if something went wrong during sending
-            if (client->m_disconnect_flag) break;
-
-            if (has_received_data) {
-                uint8_t bytes_received_buf[0x10000];
-
-                const auto num_bytes_received = client->m_sock->Recv(bytes_received_buf, sizeof(bytes_received_buf), MSG_DONTWAIT);
-                LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Num bytes received from client id=%zu: %d\n",
-                              client->m_id, num_bytes_received);
-
-                if (num_bytes_received <= 0) {
-                    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Disconnecting client id=%zu\n",
-                                  client->m_id);
-                    client->m_disconnect_flag = true;
-                    break;
-                }
-
-                try
-                {
-                    auto msg_ = Span(bytes_received_buf, num_bytes_received);
-                    Span<const uint8_t> msg(reinterpret_cast<const uint8_t*>(msg_.data()), msg_.size());
-                    while (msg.size() > 0) {
-                        // absorb network data
-                        if (!client->m_transport->ReceivedBytes(msg)) {
-                            // Serious transport problem
-                            LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Transport problem, disconnecting client id=%zu\n",
-                                          client->m_id);
-                            client->m_disconnect_flag = true;
-                            break;
-                        }
-
-                        if (client->m_transport->ReceivedMessageComplete()) {
-                            bool dummy_reject_message = false;
-                            Sv2NetMsg msg = client->m_transport->GetReceivedMessage(std::chrono::milliseconds(0), dummy_reject_message);
-                            ProcessSv2Message(msg, *client.get());
-                        }
-                    }
-                } catch (const std::exception& e) {
-                    LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received error when processing client id=%zu message: %s\n", client->m_id, e.what());
-                    client->m_disconnect_flag = true;
-                }
-            }
         }
     }
-}
-
-Sock::EventsPerSock Sv2Connman::GenerateWaitSockets(const std::shared_ptr<Sock>& listen_socket, const Clients& sv2_clients) const
-{
-    Sock::EventsPerSock events_per_sock;
-    events_per_sock.emplace(listen_socket, Sock::Events(Sock::RECV));
-
-    for (const auto& client : sv2_clients) {
-        if (!client->m_disconnect_flag && client->m_sock) {
-            events_per_sock.emplace(client->m_sock, Sock::Events{Sock::RECV | Sock::ERR});
-        }
-    }
-
-    return events_per_sock;
 }
 
 void Sv2Connman::Interrupt()
@@ -273,9 +193,144 @@ void Sv2Connman::Interrupt()
 
 void Sv2Connman::StopThreads()
 {
-    if (m_thread_sv2_handler.joinable()) {
-        m_thread_sv2_handler.join();
+    JoinSocketsThreads();
+}
+
+std::shared_ptr<Sv2Client> Sv2Connman::GetClientById(NodeId node_id) const
+{
+    // LOCK(m_clients_mutex);
+    auto it{m_sv2_clients.find(node_id)};
+    if (it != m_sv2_clients.end()) {
+        return it->second;
     }
+    return nullptr;
+}
+
+bool Sv2Connman::EventNewConnectionAccepted(NodeId node_id,
+                                          const CService& addr_bind_,
+                                          const CService& addr_)
+{
+    Assume(m_certificate);
+    LOCK(m_clients_mutex);
+    std::unique_ptr transport = std::make_unique<Sv2Transport>(m_static_key, m_certificate.value());
+    auto client = std::make_shared<Sv2Client>(node_id, std::move(transport));
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "New client id=%zu connected\n", node_id);
+    m_sv2_clients.emplace(node_id, std::move(client));
+    return true;
+}
+
+void Sv2Connman::EventReadyToSend(NodeId node_id, bool& cancel_recv)
+{
+    AssertLockNotHeld(m_clients_mutex);
+
+    auto client{GetClientById(node_id)};
+    if (client == nullptr) {
+        cancel_recv = true;
+        return;
+    }
+
+    auto it = client->m_send_messages.begin();
+    std::optional<bool> expected_more;
+
+    size_t total_sent = 0;
+
+    while(true) {
+        if (it != client->m_send_messages.end()) {
+            // If possible, move one message from the send queue to the transport.
+            // This fails when there is an existing message still being sent,
+            // or when the handshake has not yet completed.
+            //
+            // Wrap Sv2NetMsg inside CSerializedNetMsg for transport
+            CSerializedNetMsg net_msg{*it};
+            if (client->m_transport->SetMessageToSend(net_msg)) {
+                ++it;
+            }
+        }
+
+        const auto& [data, more, _m_message_type] = client->m_transport->GetBytesToSend(/*have_next_message=*/it != client->m_send_messages.end());
+
+
+        // We rely on the 'more' value returned by GetBytesToSend to correctly predict whether more
+        // bytes are still to be sent, to correctly set the MSG_MORE flag. As a sanity check,
+        // verify that the previously returned 'more' was correct.
+        if (expected_more.has_value()) Assume(!data.empty() == *expected_more);
+        expected_more = more;
+
+        ssize_t sent = 0;
+        std::string errmsg;
+
+        if (!data.empty()) {
+            LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Send %d bytes to client id=%zu\n",
+                            data.size() - total_sent, node_id);
+
+            sent = SendBytes(node_id, data, more, errmsg);
+        }
+
+        if (sent > 0) {
+            client->m_transport->MarkBytesSent(sent);
+            if (static_cast<size_t>(sent) != data.size()) {
+                // could not send full message; stop sending more
+                break;
+            }
+        } else {
+            if (sent < 0) {
+                LogDebug(BCLog::NET, "socket send error for peer=%d: %s\n", node_id, errmsg);
+                CloseConnection(node_id);
+            }
+            break;
+        }
+    }
+
+    // If both receiving and (non-optimistic) sending were possible, we first attempt
+    // sending. If that succeeds, but does not fully drain the send queue, do not
+    // attempt to receive. This avoids needlessly queueing data if the remote peer
+    // is slow at receiving data, by means of TCP flow control. We only do this when
+    // sending actually succeeded to make sure progress is always made; otherwise a
+    // deadlock would be possible when both sides have data to send, but neither is
+    // receiving.
+    //
+    // TODO: decide if this is useful for Sv2
+    cancel_recv = total_sent > 0; // && more;
+}
+
+void Sv2Connman::EventGotData(NodeId node_id, const uint8_t* data, size_t n)
+{
+    AssertLockNotHeld(m_clients_mutex);
+
+    auto client{GetClientById(node_id)};
+    if (client == nullptr) {
+        return;
+    }
+
+    fprintf(stderr, "Got %d bytes from client\n", n);
+
+    try {
+        auto msg_ = Span(data, n);
+        Span<const uint8_t> msg(reinterpret_cast<const uint8_t*>(msg_.data()), msg_.size());
+        while (msg.size() > 0) {
+            // absorb network data
+            if (!client->m_transport->ReceivedBytes(msg)) {
+                // Serious transport problem
+                LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Transport problem, disconnecting client id=%zu\n",
+                                client->m_id);
+                CloseConnection(node_id);
+                // TODO: should we even bother with this?
+                client->m_disconnect_flag = true;
+                break;
+            }
+
+            if (client->m_transport->ReceivedMessageComplete()) {
+                bool dummy_reject_message = false;
+                Sv2NetMsg msg = client->m_transport->GetReceivedMessage(std::chrono::milliseconds(0), dummy_reject_message);
+                ProcessSv2Message(msg, *client.get());
+            }
+        }
+    } catch (const std::exception& e) {
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received error when processing client id=%zu message: %s\n", client->m_id, e.what());
+        CloseConnection(node_id);
+        client->m_disconnect_flag = true;
+    }
+
 }
 
 void Sv2Connman::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Client& client)
@@ -305,6 +360,7 @@ void Sv2Connman::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Client& clie
         } catch (const std::exception& e) {
             LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received invalid SetupConnection message from client id=%zu: %s\n",
                           client.m_id, e.what());
+            CloseConnection(client.m_id);
             client.m_disconnect_flag = true;
             return;
         }
@@ -317,6 +373,7 @@ void Sv2Connman::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Client& clie
                           client.m_id);
             client.m_send_messages.emplace_back(setup_conn_err);
 
+            CloseConnection(client.m_id);
             client.m_disconnect_flag = true;
             return;
         }
@@ -330,6 +387,7 @@ void Sv2Connman::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Client& clie
 
             LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received a connection from client id=%zu with incompatible protocol_versions: min_version: %d, max_version: %d\n",
                           client.m_id, setup_conn.m_min_version, setup_conn.m_max_version);
+            CloseConnection(client.m_id);
             client.m_disconnect_flag = true;
             return;
         }
@@ -346,6 +404,7 @@ void Sv2Connman::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Client& clie
     case Sv2MsgType::COINBASE_OUTPUT_DATA_SIZE:
     {
         if (!client.m_setup_connection_confirmed) {
+            CloseConnection(client.m_id);
             client.m_disconnect_flag = true;
             return;
         }
@@ -357,6 +416,7 @@ void Sv2Connman::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Client& clie
         } catch (const std::exception& e) {
             LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received invalid CoinbaseOutputDataSize message from client id=%zu: %s\n",
                           client.m_id, e.what());
+            CloseConnection(client.m_id);
             client.m_disconnect_flag = true;
             return;
         }
@@ -367,6 +427,7 @@ void Sv2Connman::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Client& clie
         if (max_additional_size > MAX_BLOCK_WEIGHT) {
             LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received impossible CoinbaseOutputDataSize from client id=%zu: %d\n",
                           client.m_id, max_additional_size);
+            CloseConnection(client.m_id);
             client.m_disconnect_flag = true;
             return;
         }
