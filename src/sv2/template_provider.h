@@ -24,6 +24,16 @@ struct Sv2TemplateProviderOptions
      * The listening port for the server.
      */
     uint16_t port{8336};
+
+    /**
+     * Minimum fee delta to send new template upstream
+     */
+    CAmount fee_delta{1000};
+
+    /**
+     * Block template update interval (to check for increased fees)
+     */
+    std::chrono::seconds fee_check_interval{30};
 };
 
 /**

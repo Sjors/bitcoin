@@ -74,6 +74,31 @@ void Sv2TemplateProvider::StopThreads()
     }
 }
 
+class Timer {
+private:
+    std::chrono::seconds m_interval;
+    std::chrono::seconds m_last_triggered;
+
+public:
+    Timer(std::chrono::seconds interval) : m_interval(interval) {
+        reset();
+    }
+
+    bool trigger() {
+        auto now{GetTime<std::chrono::seconds>()};
+        if (now - m_last_triggered >= m_interval) {
+            m_last_triggered = now;
+            return true;
+        }
+        return false;
+    }
+
+    void reset() {
+        auto now{GetTime<std::chrono::seconds>()};
+        m_last_triggered = now;
+    }
+};
+
 void Sv2TemplateProvider::ThreadSv2Handler()
 {
     // Wait for the node chainstate to be ready if needed.
@@ -95,6 +120,8 @@ void Sv2TemplateProvider::ThreadSv2Handler()
         LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Waiting to come out of IBD\n");
         std::this_thread::sleep_for(1000ms);
     }
+
+    Timer timer(m_options.fee_check_interval);
 
     while (!m_flag_interrupt_sv2) {
         // We start with one template per client, which has an interface through
@@ -150,22 +177,26 @@ void Sv2TemplateProvider::ThreadSv2Handler()
             client.m_best_template_id = template_id;
         });
 
+        // Do not send templates with improved fees more frequently than the fee check interval
+        const bool check_fees{timer.trigger()};
         bool new_template{false};
 
         // Delay event loop is no client if fully connected
         if (!first_client_id) std::this_thread::sleep_for(1000ms);
 
-        // For the first connected client, wait for a new chaintip
-        m_connman->ForEachClient([this, first_client_id, &new_template](Sv2Client& client) {
-            if (!first_client_id || client.m_id != first_client_id.value()) return;
+        // For the first connected client, wait for fees to rise.
+        m_connman->ForEachClient([this, first_client_id, check_fees, &new_template](Sv2Client& client) {
+            if (!first_client_id || client.m_id != first_client_id) return;
             Assert(client.m_coinbase_output_data_size_recv);
 
             std::shared_ptr<BlockTemplate> block_template = WITH_LOCK(m_tp_mutex, return m_block_template_cache.find(client.m_best_template_id)->second;);
 
+            CAmount fee_delta{check_fees ? m_options.fee_delta : MAX_MONEY};
+
             // We give waitNext() a timeout of 1 second to prevent it from generating
             // new templates too quickly. During this wait we're not serving newly connected clients.
             // This can be cleaned up by having every client run its own thread.
-            block_template = block_template->waitNext(MAX_MONEY, MillisecondsDouble{1000});
+            block_template = block_template->waitNext(fee_delta, MillisecondsDouble{1000});
             if (block_template) {
                 new_template = true;
 
