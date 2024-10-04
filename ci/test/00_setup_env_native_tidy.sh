@@ -19,6 +19,7 @@ export RUN_TIDY=true
 export GOAL="install"
 export DEP_OPTS="NO_WALLET=1"
 export BITCOIN_CONFIG="\
+ -DWITH_MULTIPROCESS=ON \
  -DWITH_SV2=ON \
  -DENABLE_WALLET=OFF \
  -DBUILD_BENCH=ON \

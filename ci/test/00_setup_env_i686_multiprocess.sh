@@ -14,6 +14,7 @@ export DEP_OPTS="DEBUG=1"
 export GOAL="install"
 export TEST_RUNNER_EXTRA="--v2transport"
 export BITCOIN_CONFIG="\
+ -DWITH_SV2=ON \
  -DCMAKE_BUILD_TYPE=Debug \
  -DCMAKE_C_COMPILER='clang;-m32' \
  -DCMAKE_CXX_COMPILER='clang++;-m32' \
