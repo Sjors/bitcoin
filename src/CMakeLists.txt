@@ -26,6 +26,9 @@ add_dependencies(bitcoin_clientversion generate_build_info)
 add_subdirectory(crypto)
 add_subdirectory(univalue)
 add_subdirectory(util)
+
+set(installable_targets)
+
 if(ENABLE_IPC)
   add_subdirectory(ipc)
 endif()
@@ -190,7 +193,6 @@ target_link_libraries(bitcoin_common
 )
 
 
-set(installable_targets)
 if(ENABLE_WALLET)
   add_subdirectory(wallet)
 
