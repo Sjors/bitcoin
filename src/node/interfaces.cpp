@@ -8,6 +8,7 @@
 #include <chain.h>
 #include <chainparams.h>
 #include <common/args.h>
+#include <consensus/merkle.h>
 #include <consensus/validation.h>
 #include <deploymentstatus.h>
 #include <external_signer.h>
@@ -870,7 +871,7 @@ public:
 class BlockTemplateImpl : public BlockTemplate
 {
 public:
-    explicit BlockTemplateImpl(std::unique_ptr<CBlockTemplate> block_template) : m_block_template(std::move(block_template))
+    explicit BlockTemplateImpl(std::unique_ptr<CBlockTemplate> block_template, NodeContext& node) : m_block_template(std::move(block_template)), m_node(node)
     {
         assert(m_block_template);
     }
@@ -910,7 +911,37 @@ public:
         return GetWitnessCommitmentIndex(m_block_template->block);
     }
 
+    std::vector<uint256> getCoinbaseMerklePath() override
+    {
+        return BlockMerkleBranch(m_block_template->block);
+    }
+
+    bool submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CMutableTransaction coinbase) override
+    {
+        CBlock block{m_block_template->block};
+
+        auto cb = MakeTransactionRef(std::move(coinbase));
+
+        if (block.vtx.size() == 0) {
+            block.vtx.push_back(cb);
+        } else {
+            block.vtx[0] = cb;
+        }
+
+        block.nVersion = version;
+        block.nTime = timestamp;
+        block.nNonce = nonce;
+
+        block.hashMerkleRoot = BlockMerkleRoot(block);
+
+        auto block_ptr = std::make_shared<const CBlock>(block);
+        return chainman().ProcessNewBlock(block_ptr, /*force_processing=*/true, /*min_pow_checked=*/true, /*new_block=*/nullptr);
+    }
+
     const std::unique_ptr<CBlockTemplate> m_block_template;
+
+    ChainstateManager& chainman() { return *Assert(m_node.chainman); }
+    NodeContext& m_node;
 };
 
 class MinerImpl : public Mining
@@ -957,6 +988,47 @@ public:
         return BlockRef{chainman().ActiveChain().Tip()->GetBlockHash(), chainman().ActiveChain().Tip()->nHeight};
     }
 
+    bool waitFeesChanged(uint256 current_tip, CAmount fee_threshold, const BlockCreateOptions& options, MillisecondsDouble timeout) override
+    {
+        if (timeout > std::chrono::years{100}) timeout = std::chrono::years{100}; // Upper bound to avoid UB in std::chrono
+        auto now{std::chrono::steady_clock::now()};
+        const auto deadline = now + timeout;
+        const MillisecondsDouble tick{1000};
+
+        unsigned int last_mempool_update{context()->mempool->GetTransactionsUpdated()};
+
+        BlockAssembler::Options assemble_options{options};
+        ApplyArgsManOptions(*Assert(m_node.args), assemble_options);
+        // It's not necessary to verify the template, since we don't return it.
+        // This is also faster.
+        assemble_options.test_block_validity = false;
+
+        while (!chainman().m_interrupt) {
+            now = std::chrono::steady_clock::now();
+            if (now >= deadline) break;
+
+            if (getTip().value().hash != current_tip) {
+                return false;
+            }
+
+            // Did anything change at all?
+            if (context()->mempool->GetTransactionsUpdated() != last_mempool_update) {
+                auto block_template{BlockAssembler{chainman().ActiveChainstate(), context()->mempool.get(), assemble_options}.CreateNewBlock(CScript())};
+
+                CAmount fees = 0;
+                for (CAmount fee : block_template->vTxFees) {
+                    // Skip coinbase
+                    if (fee < 0) continue;
+                    fees += fee;
+                    if (fees >= fee_threshold) return true;
+                }
+            }
+
+            std::this_thread::sleep_until(std::min(deadline, now + tick));
+        }
+        return false;
+    }
+
     bool processNewBlock(const std::shared_ptr<const CBlock>& block, bool* new_block) override
     {
         return chainman().ProcessNewBlock(block, /*force_processing=*/true, /*min_pow_checked=*/true, /*new_block=*/new_block);
@@ -984,7 +1056,7 @@ public:
     {
         BlockAssembler::Options assemble_options{options};
         ApplyArgsManOptions(*Assert(m_node.args), assemble_options);
-        return std::make_unique<BlockTemplateImpl>(BlockAssembler{chainman().ActiveChainstate(), context()->mempool.get(), assemble_options}.CreateNewBlock(script_pub_key));
+        return std::make_unique<BlockTemplateImpl>(BlockAssembler{chainman().ActiveChainstate(), context()->mempool.get(), assemble_options}.CreateNewBlock(script_pub_key), m_node);
     }
 
     NodeContext* context() override { return &m_node; }
