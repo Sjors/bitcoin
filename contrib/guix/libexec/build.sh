@@ -208,6 +208,13 @@ mkdir -p "$OUTDIR"
 # CONFIGFLAGS
 CONFIGFLAGS="-DREDUCE_EXPORTS=ON -DBUILD_BENCH=OFF -DBUILD_GUI_TESTS=OFF -DBUILD_FUZZ_BINARY=OFF"
 
+case "$HOST" in
+    *mingw*) ;; # No SV2 until multiprocess supports windows
+    *)
+        CONFIGFLAGS="-DWITH_SV2=ON ${CONFIGFLAGS}"
+        ;;
+esac
+
 # CFLAGS
 HOST_CFLAGS="-O2 -g"
 HOST_CFLAGS+=$(find /gnu/store -maxdepth 1 -mindepth 1 -type d -exec echo -n " -ffile-prefix-map={}=/usr" \;)
