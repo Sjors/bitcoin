@@ -91,3 +91,15 @@ if [ -n "$XCODE_VERSION" ] && [ ! -d "${DEPENDS_DIR}/SDKs/${OSX_SDK_BASENAME}" ]
 fi
 
 git config --global ${CFG_DONE} "true"
+
+# Install libmultiprocess
+# TODO: build using depends system instead?
+if [ -n "$NO_DEPENDS" ]; then
+  git clone https://github.com/chaincodelabs/libmultiprocess.git
+  cd libmultiprocess
+  mkdir build
+  cd build
+  cmake ..
+  make
+  make install
+fi
