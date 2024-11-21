@@ -973,7 +973,10 @@ public:
         {
             WAIT_LOCK(notifications().m_tip_block_mutex, lock);
             notifications().m_tip_block_cv.wait_for(lock, timeout, [&]() EXCLUSIVE_LOCKS_REQUIRED(notifications().m_tip_block_mutex) {
-                return (notifications().m_tip_block != current_tip && notifications().m_tip_block != uint256::ZERO) || chainman().m_interrupt;
+                // Although C++17 allows safe comparison of optional<T> with
+                // another T, we need to wait for m_tip_block to be set AND
+                // for the value to be different than the current_tip value.
+                return (notifications().m_tip_block && notifications().m_tip_block != current_tip) || chainman().m_interrupt;
             });
         }
         // Must release m_tip_block_mutex before locking cs_main, to avoid deadlocks.
