@@ -197,7 +197,7 @@ void Sv2TemplateProvider::ThreadSv2Handler()
             uint32_t additional_coinbase_weight{(client.m_coinbase_tx_outputs_size + 100 + 0 + 2) * 4};
 
             const auto time_start{SteadyClock::now()};
-            auto block_template = m_mining.createNewBlock(CScript(), {.use_mempool = true, .coinbase_max_additional_weight = additional_coinbase_weight});
+            auto block_template = m_mining.createNewBlock({.use_mempool = true, .coinbase_max_additional_weight = additional_coinbase_weight});
             LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Assemble template: %.2fms\n",
                 Ticks<MillisecondsDouble>(SteadyClock::now() - time_start));
 
