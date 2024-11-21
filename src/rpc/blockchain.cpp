@@ -3425,7 +3425,7 @@ void RegisterBlockchainRPCCommands(CRPCTable& t)
         {"blockchain", &getchainstates},
         {"hidden", &invalidateblock},
         {"hidden", &reconsiderblock},
-        {"hidden", &waitfornewblock},
+        {"blockchain", &waitfornewblock},
         {"hidden", &waitforblock},
         {"hidden", &waitforblockheight},
         {"hidden", &syncwithvalidationinterfacequeue},
