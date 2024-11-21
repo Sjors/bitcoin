@@ -871,7 +871,7 @@ public:
 class BlockTemplateImpl : public BlockTemplate
 {
 public:
-    explicit BlockTemplateImpl(CScript script_pub_key, BlockAssembler::Options assemble_options, std::unique_ptr<CBlockTemplate> block_template, NodeContext& node) : m_script_pub_key(script_pub_key), m_assemble_options(std::move(assemble_options)), m_block_template(std::move(block_template)), m_node(node)
+    explicit BlockTemplateImpl(BlockAssembler::Options assemble_options, std::unique_ptr<CBlockTemplate> block_template, NodeContext& node) : m_assemble_options(std::move(assemble_options)), m_block_template(std::move(block_template)), m_node(node)
     {
         assert(m_block_template);
     }
@@ -977,7 +977,7 @@ public:
              * We'll also create a new template if the tip changed during the last tick.
              */
             if (fee_threshold < MAX_MONEY || tip_changed) {
-                auto block_template{std::make_unique<BlockTemplateImpl>(m_script_pub_key, m_assemble_options, BlockAssembler{chainman().ActiveChainstate(), context()->mempool.get(), m_assemble_options}.CreateNewBlock(m_script_pub_key), m_node)};
+                auto block_template{std::make_unique<BlockTemplateImpl>(m_assemble_options, BlockAssembler{chainman().ActiveChainstate(), context()->mempool.get(), m_assemble_options}.CreateNewBlock(), m_node)};
 
                 // If the tip changed, return the new template regardless of its fees.
                 if (block_template->m_block_template->block.hashPrevBlock != m_block_template->block.hashPrevBlock) {
@@ -1009,7 +1009,6 @@ public:
         return nullptr;
     }
 
-    const CScript m_script_pub_key;
     const BlockAssembler::Options m_assemble_options;
 
     const std::unique_ptr<CBlockTemplate> m_block_template;
@@ -1083,11 +1082,11 @@ public:
         return TestBlockValidity(state, chainman().GetParams(), chainman().ActiveChainstate(), block, tip, /*fCheckPOW=*/false, check_merkle_root);
     }
 
-    std::unique_ptr<BlockTemplate> createNewBlock(const CScript& script_pub_key, const BlockCreateOptions& options) override
+    std::unique_ptr<BlockTemplate> createNewBlock(const BlockCreateOptions& options) override
     {
         BlockAssembler::Options assemble_options{options};
         ApplyArgsManOptions(*Assert(m_node.args), assemble_options);
-        return std::make_unique<BlockTemplateImpl>(script_pub_key, assemble_options, BlockAssembler{chainman().ActiveChainstate(), context()->mempool.get(), assemble_options}.CreateNewBlock(script_pub_key), m_node);
+        return std::make_unique<BlockTemplateImpl>(assemble_options, BlockAssembler{chainman().ActiveChainstate(), context()->mempool.get(), assemble_options}.CreateNewBlock(), m_node);
     }
 
     NodeContext* context() override { return &m_node; }
