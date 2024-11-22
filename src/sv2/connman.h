@@ -54,6 +54,12 @@ struct Sv2Client
      */
     unsigned int m_coinbase_tx_outputs_size;
 
+    /**
+     * Tracks the best template in the Template Provider m_block_template_cache map.
+     * Not guaranteed to still exist.
+    */
+    uint64_t m_best_template_id = 0;
+
     explicit Sv2Client(size_t id, std::unique_ptr<Sv2Transport> transport) :
                        m_id{id}, m_transport{std::move(transport)} {};
 

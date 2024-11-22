@@ -1,12 +1,20 @@
+#include <addresstype.h>
 #include <boost/test/unit_test.hpp>
 #include <interfaces/mining.h>
+#include <node/miner.h>
+#include <node/transaction.h>
 #include <sv2/messages.h>
 #include <sv2/template_provider.h>
 #include <test/util/net.h>
 #include <test/util/setup_common.h>
+#include <test/util/transaction_utils.h>
 #include <util/sock.h>
+#include <util/strencodings.h>
 
 #include <memory>
+
+// For verbose debugging use:
+// build/src/test/test_bitcoin --run_test=sv2_template_provider_tests --log_level=all -- -debug=sv2 -loglevel=sv2:trace -printtoconsole=1 | grep -v disabled
 
 BOOST_FIXTURE_TEST_SUITE(sv2_template_provider_tests, TestChain100Setup)
 
@@ -122,6 +130,12 @@ public:
 
         return node::Sv2NetMsg{node::Sv2MsgType::SETUP_CONNECTION, std::move(bytes)};
     }
+
+    size_t GetBlockTemplateCount()
+    {
+        LOCK(m_tp->m_tp_mutex);
+        return m_tp->GetBlockTemplates().size();
+    }
 };
 
 BOOST_AUTO_TEST_CASE(client_tests)
@@ -142,13 +156,129 @@ BOOST_AUTO_TEST_CASE(client_tests)
     // SetupConnection.Success is 6 bytes
     BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), SV2_HEADER_ENCRYPTED_SIZE + 6 + Poly1305::TAGLEN);
 
+    // There should be no block templates before any client gave us their coinbase
+    // output data size:
+    BOOST_REQUIRE(tester.GetBlockTemplateCount() == 0);
+
     std::vector<uint8_t> coinbase_output_constraint_bytes{
         0x01, 0x00, 0x00, 0x00, // coinbase_output_max_additional_size
         0x00, 0x00              // coinbase_output_max_sigops
     };
     node::Sv2NetMsg msg{node::Sv2MsgType::COINBASE_OUTPUT_CONSTRAINTS, std::move(coinbase_output_constraint_bytes)};
-    // No reply expected, not yet implemented
     tester.receiveMessage(msg);
+    BOOST_TEST_MESSAGE("The reply should be NewTemplate and SetNewPrevHash");
+    BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), 2 * SV2_HEADER_ENCRYPTED_SIZE + 91 + 80 + 2 * Poly1305::TAGLEN);
+
+    // There should now be one template
+    BOOST_REQUIRE_EQUAL(tester.GetBlockTemplateCount(), 1);
+
+    // Move mock time
+    // If the mempool doesn't change, no new template is generated.
+    SetMockTime(GetMockTime() + std::chrono::seconds{10});
+    BOOST_REQUIRE_EQUAL(tester.GetBlockTemplateCount(), 1);
+
+    // Create a transaction with a large fee
+    CKey key = GenerateRandomKey();
+    CScript locking_script = GetScriptForDestination(PKHash(key.GetPubKey()));
+    // Don't hold on to the transaction
+    {
+        LOCK(cs_main);
+        BOOST_REQUIRE_EQUAL(m_node.mempool->size(), 0);
+
+        auto mtx = CreateValidMempoolTransaction(/*input_transaction=*/m_coinbase_txns[0], /*input_vout=*/0,
+                                                        /*input_height=*/0, /*input_signing_key=*/coinbaseKey,
+                                                        /*output_destination=*/locking_script,
+                                                        /*output_amount=*/CAmount(49 * COIN), /*submit=*/true);
+        CTransactionRef tx = MakeTransactionRef(mtx);
+
+        BOOST_REQUIRE_EQUAL(m_node.mempool->size(), 1);
+    }
+
+    // Move mock time
+    SetMockTime(GetMockTime() + std::chrono::seconds{tester.m_tp_options.fee_check_interval});
+
+    // Briefly wait for block creation
+    UninterruptibleSleep(std::chrono::milliseconds{200});
+
+    // Expect our peer to receive a NewTemplate message
+    // This time it should contain the 32 byte prevhash (unchanged)
+    constexpr size_t expected_len = SV2_HEADER_ENCRYPTED_SIZE + 91 + 32 + Poly1305::TAGLEN;
+    BOOST_TEST_MESSAGE("Receive NewTemplate");
+    BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), expected_len);
+
+    // Get the latest template id
+    uint64_t template_id = 0;
+    {
+        LOCK(tester.m_tp->m_tp_mutex);
+        for (auto& t : tester.m_tp->GetBlockTemplates()) {
+            if (t.first > template_id) {
+                template_id = t.first;
+            }
+        }
+    }
+
+    BOOST_REQUIRE_EQUAL(template_id, 2);
+
+    {
+        LOCK(cs_main);
+
+        // RBF the transaction with with > DEFAULT_SV2_FEE_DELTA
+        CreateValidMempoolTransaction(/*input_transaction=*/m_coinbase_txns[0], /*input_vout=*/0,
+                                                    /*input_height=*/0, /*input_signing_key=*/coinbaseKey,
+                                                    /*output_destination=*/locking_script,
+                                                    /*output_amount=*/CAmount(48 * COIN), /*submit=*/true);
+
+        BOOST_REQUIRE_EQUAL(m_node.mempool->size(), 1);
+    }
+
+    UninterruptibleSleep(std::chrono::milliseconds{200});
+
+    // Move mock time
+    SetMockTime(GetMockTime() + std::chrono::seconds{tester.m_tp_options.fee_check_interval});
+
+    // Briefly wait for the timer in ThreadSv2Handler and block creation
+    UninterruptibleSleep(std::chrono::milliseconds{200});
+
+    // Wait a bit more for macOS native CI
+    UninterruptibleSleep(std::chrono::milliseconds{1000});
+
+    // Expect our peer to receive a NewTemplate message
+    BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), SV2_HEADER_ENCRYPTED_SIZE + 91 + 32 + Poly1305::TAGLEN);
+
+    // Check that there's a new template
+    BOOST_REQUIRE_EQUAL(tester.GetBlockTemplateCount(), 3);
+
+    BOOST_TEST_MESSAGE("Create a new block");
+    mineBlocks(1);
+
+    UninterruptibleSleep(std::chrono::milliseconds{200});
+
+    // We should send out another NewTemplate and SetNewPrevHash
+    // The new template contains the new prevhash.
+    BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), 2 * SV2_HEADER_ENCRYPTED_SIZE + 91 + 32 + 80 + 2 * Poly1305::TAGLEN);
+    // The SetNewPrevHash message is redundant
+    // TODO: don't send it?
+    // Background: in the future we want to send an empty or optimistic template
+    //             before a block is found, so ASIC's can preload it. We would
+    //             then immedidately send a SetNewPrevHash message when there's
+    //             a new block, and construct a better template _after_ that.
+
+    // Templates are briefly preserved
+    BOOST_REQUIRE_EQUAL(tester.GetBlockTemplateCount(), 4);
+
+    // Do not provide transactions for stale templates
+    // TODO
+
+    // But do allow SubmitSolution
+    // TODO
+
+    // Until after some time
+    SetMockTime(GetMockTime() + std::chrono::seconds{15});
+    UninterruptibleSleep(std::chrono::milliseconds{1100});
+    BOOST_REQUIRE_EQUAL(tester.GetBlockTemplateCount(), 1);
+
+    // Mine a block in order to interrupt waitNext()
+    mineBlocks(1);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
