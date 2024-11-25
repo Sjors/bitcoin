@@ -25,6 +25,7 @@ export NO_DEPENDS=1
 export GOAL="install"
 export BITCOIN_CONFIG="\
  -DWITH_MULTIPROCESS=OFF \
+ -DWITH_SV2=OFF \
  -DSANITIZERS=address,float-divide-by-zero,integer,undefined \
  -DCMAKE_C_COMPILER=clang-${APT_LLVM_V} \
  -DCMAKE_CXX_COMPILER=clang++-${APT_LLVM_V} \
