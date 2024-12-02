@@ -133,7 +133,7 @@ void MinerTestingSetup::TestPackageSelection(const CScript& scriptPubKey, const 
     Txid hashHighFeeTx = tx.GetHash();
     AddToMempool(tx_mempool, entry.Fee(50000).Time(Now<NodeSeconds>()).SpendsCoinbase(false).FromTx(tx));
 
-    std::unique_ptr<BlockTemplate> block_template = miner->createNewBlock(scriptPubKey);
+    std::unique_ptr<BlockTemplate> block_template = miner->createNewBlock();
     CBlock block{block_template->getBlock()};
     BOOST_REQUIRE_EQUAL(block.vtx.size(), 4U);
     BOOST_CHECK(block.vtx[1]->GetHash() == hashParentTx);
@@ -204,7 +204,7 @@ void MinerTestingSetup::TestPackageSelection(const CScript& scriptPubKey, const 
     tx.vout[0].nValue = 5000000000LL - 100000000 - feeToUse;
     Txid hashLowFeeTx2 = tx.GetHash();
     AddToMempool(tx_mempool, entry.Fee(feeToUse).SpendsCoinbase(false).FromTx(tx));
-    block_template = miner->createNewBlock(scriptPubKey);
+    block_template = miner->createNewBlock();
     BOOST_REQUIRE(block_template);
     block = block_template->getBlock();
 
@@ -219,7 +219,7 @@ void MinerTestingSetup::TestPackageSelection(const CScript& scriptPubKey, const 
     tx.vin[0].prevout.n = 1;
     tx.vout[0].nValue = 100000000 - 10000; // 10k satoshi fee
     AddToMempool(tx_mempool, entry.Fee(10000).FromTx(tx));
-    block_template = miner->createNewBlock(scriptPubKey);
+    block_template = miner->createNewBlock();
     BOOST_REQUIRE(block_template);
     block = block_template->getBlock();
     BOOST_REQUIRE_EQUAL(block.vtx.size(), 9U);
@@ -247,7 +247,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
         LOCK(tx_mempool.cs);
 
         // Just to make sure we can still make simple blocks
-        auto block_template{miner->createNewBlock(scriptPubKey)};
+        auto block_template{miner->createNewBlock()};
         BOOST_REQUIRE(block_template);
         CBlock block{block_template->getBlock()};
 
@@ -268,7 +268,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
             tx.vin[0].prevout.hash = hash;
         }
 
-        BOOST_CHECK_EXCEPTION(miner->createNewBlock(scriptPubKey), std::runtime_error, HasReason("bad-blk-sigops"));
+        BOOST_CHECK_EXCEPTION(miner->createNewBlock(), std::runtime_error, HasReason("bad-blk-sigops"));
     }
 
     {
@@ -285,7 +285,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
             AddToMempool(tx_mempool, entry.Fee(LOWFEE).Time(Now<NodeSeconds>()).SpendsCoinbase(spendsCoinbase).SigOpsCost(80).FromTx(tx));
             tx.vin[0].prevout.hash = hash;
         }
-        BOOST_CHECK(miner->createNewBlock(scriptPubKey));
+        BOOST_CHECK(miner->createNewBlock());
     }
 
     {
@@ -309,7 +309,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
             AddToMempool(tx_mempool, entry.Fee(LOWFEE).Time(Now<NodeSeconds>()).SpendsCoinbase(spendsCoinbase).FromTx(tx));
             tx.vin[0].prevout.hash = hash;
         }
-        BOOST_CHECK(miner->createNewBlock(scriptPubKey));
+        BOOST_CHECK(miner->createNewBlock());
     }
 
     {
@@ -319,7 +319,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
         // orphan in tx_mempool, template creation fails
         hash = tx.GetHash();
         AddToMempool(tx_mempool, entry.Fee(LOWFEE).Time(Now<NodeSeconds>()).FromTx(tx));
-        BOOST_CHECK_EXCEPTION(miner->createNewBlock(scriptPubKey), std::runtime_error, HasReason("bad-txns-inputs-missingorspent"));
+        BOOST_CHECK_EXCEPTION(miner->createNewBlock(), std::runtime_error, HasReason("bad-txns-inputs-missingorspent"));
     }
 
     {
@@ -340,7 +340,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
         tx.vout[0].nValue = tx.vout[0].nValue + BLOCKSUBSIDY - HIGHERFEE; // First txn output + fresh coinbase - new txn fee
         hash = tx.GetHash();
         AddToMempool(tx_mempool, entry.Fee(HIGHERFEE).Time(Now<NodeSeconds>()).SpendsCoinbase(true).FromTx(tx));
-        BOOST_CHECK(miner->createNewBlock(scriptPubKey));
+        BOOST_CHECK(miner->createNewBlock());
     }
 
     {
@@ -356,7 +356,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
         // give it a fee so it'll get mined
         AddToMempool(tx_mempool, entry.Fee(LOWFEE).Time(Now<NodeSeconds>()).SpendsCoinbase(false).FromTx(tx));
         // Should throw bad-cb-multiple
-        BOOST_CHECK_EXCEPTION(miner->createNewBlock(scriptPubKey), std::runtime_error, HasReason("bad-cb-multiple"));
+        BOOST_CHECK_EXCEPTION(miner->createNewBlock(), std::runtime_error, HasReason("bad-cb-multiple"));
     }
 
     {
@@ -373,7 +373,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
         tx.vout[0].scriptPubKey = CScript() << OP_2;
         hash = tx.GetHash();
         AddToMempool(tx_mempool, entry.Fee(HIGHFEE).Time(Now<NodeSeconds>()).SpendsCoinbase(true).FromTx(tx));
-        BOOST_CHECK_EXCEPTION(miner->createNewBlock(scriptPubKey), std::runtime_error, HasReason("bad-txns-inputs-missingorspent"));
+        BOOST_CHECK_EXCEPTION(miner->createNewBlock(), std::runtime_error, HasReason("bad-txns-inputs-missingorspent"));
     }
 
     {
@@ -393,7 +393,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
             next->BuildSkip();
             m_node.chainman->ActiveChain().SetTip(*next);
         }
-        BOOST_CHECK(miner->createNewBlock(scriptPubKey));
+        BOOST_CHECK(miner->createNewBlock());
         // Extend to a 210000-long block chain.
         while (m_node.chainman->ActiveChain().Tip()->nHeight < 210000) {
             CBlockIndex* prev = m_node.chainman->ActiveChain().Tip();
@@ -405,7 +405,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
             next->BuildSkip();
             m_node.chainman->ActiveChain().SetTip(*next);
         }
-        BOOST_CHECK(miner->createNewBlock(scriptPubKey));
+        BOOST_CHECK(miner->createNewBlock());
 
         // invalid p2sh txn in tx_mempool, template creation fails
         tx.vin[0].prevout.hash = txFirst[0]->GetHash();
@@ -422,7 +422,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
         hash = tx.GetHash();
         AddToMempool(tx_mempool, entry.Fee(LOWFEE).Time(Now<NodeSeconds>()).SpendsCoinbase(false).FromTx(tx));
         // Should throw block-validation-failed
-        BOOST_CHECK_EXCEPTION(miner->createNewBlock(scriptPubKey), std::runtime_error, HasReason("block-validation-failed"));
+        BOOST_CHECK_EXCEPTION(miner->createNewBlock(), std::runtime_error, HasReason("block-validation-failed"));
 
         // Delete the dummy blocks again.
         while (m_node.chainman->ActiveChain().Tip()->nHeight > nHeight) {
@@ -524,7 +524,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
     tx.vin[0].nSequence = CTxIn::SEQUENCE_LOCKTIME_TYPE_FLAG | 1;
     BOOST_CHECK(!TestSequenceLocks(CTransaction{tx}, tx_mempool)); // Sequence locks fail
 
-    auto block_template = miner->createNewBlock(scriptPubKey);
+    auto block_template = miner->createNewBlock();
     BOOST_CHECK(block_template);
 
     // None of the of the absolute height/time locked tx should have made
@@ -541,7 +541,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
     m_node.chainman->ActiveChain().Tip()->nHeight++;
     SetMockTime(m_node.chainman->ActiveChain().Tip()->GetMedianTimePast() + 1);
 
-    block_template = miner->createNewBlock(scriptPubKey);
+    block_template = miner->createNewBlock();
     BOOST_REQUIRE(block_template);
     block = block_template->getBlock();
     BOOST_CHECK_EQUAL(block.vtx.size(), 5U);
@@ -613,7 +613,7 @@ void MinerTestingSetup::TestPrioritisedMining(const CScript& scriptPubKey, const
     Txid hashFreeGrandchild = tx.GetHash();
     AddToMempool(tx_mempool, entry.Fee(0).SpendsCoinbase(false).FromTx(tx));
 
-    auto block_template = miner->createNewBlock(scriptPubKey);
+    auto block_template = miner->createNewBlock();
     CBlock block{block_template->getBlock()};
     BOOST_REQUIRE_EQUAL(block.vtx.size(), 6U);
     BOOST_CHECK(block.vtx[1]->GetHash() == hashFreeParent);
@@ -649,7 +649,7 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
 
         // Simple block creation, nothing special yet:
         if (current_height % 2 == 0) {
-            block_template = miner->createNewBlock(scriptPubKey);
+            block_template = miner->createNewBlock();
         } // for odd heights the next template is created at the end of this loop
         BOOST_REQUIRE(block_template);
 

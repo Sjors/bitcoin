@@ -149,7 +149,7 @@ if(WITH_MULTIPROCESS)
   )
 endif()
 
-option(WITH_SV2 "Enable Stratum v2 functionality." ON)
+cmake_dependent_option(WITH_SV2 "Enable Stratum v2 functionality." ON "NOT WIN32" OFF)
 
 cmake_dependent_option(BUILD_GUI_TESTS "Build test_bitcoin-qt executable." ON "BUILD_GUI;BUILD_TESTS" OFF)
 if(BUILD_GUI)
