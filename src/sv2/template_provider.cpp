@@ -371,6 +371,7 @@ void Sv2TemplateProvider::SubmitSolution(node::Sv2SubmitSolutionMsg solution)
             if (cached_block_template == m_block_template_cache.end()) {
                 LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Template with id=%lu is no longer in cache\n",
                 solution.m_template_id);
+                return;
             }
             block_template = std::move(cached_block_template->second);
             m_block_template_cache.erase(solution.m_template_id);
