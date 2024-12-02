@@ -320,6 +320,9 @@ void Sv2TemplateProvider::ThreadSv2Handler()
         // Prune old templates and continue the loop.
         LOCK(m_tp_mutex);
         PruneBlockTemplateCache();
+
+        // Take a very short break, the tests seem to need it.
+        std::this_thread::sleep_for(1ms);
     }
 }
 
