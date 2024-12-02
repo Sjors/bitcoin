@@ -362,7 +362,7 @@ void Sv2TemplateProvider::SubmitSolution(node::Sv2SubmitSolutionMsg solution)
             solution.m_header_nonce
         );
 
-        std::unique_ptr<BlockTemplate> block_template;
+        std::shared_ptr<BlockTemplate> block_template;
         {
             // We can't hold this lock until submitSolution() because it's
             // possible that the new block arrives via the p2p network at the
@@ -374,8 +374,24 @@ void Sv2TemplateProvider::SubmitSolution(node::Sv2SubmitSolutionMsg solution)
                 solution.m_template_id);
                 return;
             }
-            block_template = std::move(cached_block_template->second);
-            m_block_template_cache.erase(solution.m_template_id);
+            /**
+             * It's important to not delete this template from the cache in case
+             * another solution is submitted for the same template later.
+             *
+             * This is very unlikely on mainnet, but not impossible. Many mining
+             * devices may be working on the default pool template at the same
+             * time and they may not update the new tip right away.
+             *
+             * The node will never broadcast the second block. It's marked
+             * valid-headers in getchaintips. However a node or pool operator
+             * may wish to manually inspect the block or keep it as a souvenir.
+             * Additionally, because in Stratum v2 the block solution is sent
+             * to both the pool node and the template provider node, it's
+             * possibly they arrive out of order and two competing blocks propagate
+             * on the network. In case of a reorg the node will be able to switch
+             * faster because it already has (but not fully validated) the block.
+             */
+            block_template = cached_block_template->second;
         }
 
         block_template->submitSolution(solution.m_version, solution.m_header_timestamp, solution.m_header_nonce, solution.m_coinbase_tx);
