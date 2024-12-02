@@ -230,36 +230,41 @@ void Sv2TemplateProvider::ThreadSv2Handler()
             if (!first_client_id || client.m_id != first_client_id) return;
             Assert(client.m_coinbase_output_data_size_recv);
 
-            LOCK(m_tp_mutex);
-            auto block_template_entry{m_block_template_cache.find(client.m_best_template_id)};
+            std::shared_ptr<BlockTemplate> block_template = WITH_LOCK(m_tp_mutex, return m_block_template_cache.find(client.m_best_template_id)->second;);
 
             CAmount fee_delta{check_fees ? m_options.fee_delta : MAX_MONEY};
 
             // We give waitNext() a timeout of 1 second to prevent it from generating
             // new templates too quickly. During this wait we're not serving newly connected clients.
             // This can be cleaned up by having every client run its own thread.
-            auto block_template = block_template_entry->second->waitNext(fee_delta, MillisecondsDouble{1000});
+            block_template = block_template->waitNext(fee_delta, MillisecondsDouble{1000});
             if (block_template) {
                 new_template = true;
 
                 uint256 prev_hash{block_template->getBlockHeader().hashPrevBlock};
                 bool future_template{false};
-                if (prev_hash != m_best_prev_hash) {
-                    future_template = true;
-                    m_best_prev_hash = prev_hash;
-                    // Does not need to be accurate
-                    m_last_block_time = GetTime<std::chrono::seconds>();
+
+                {
+                    LOCK(m_tp_mutex);
+                    if (prev_hash != m_best_prev_hash) {
+                        future_template = true;
+                        m_best_prev_hash = prev_hash;
+                        // Does not need to be accurate
+                        m_last_block_time = GetTime<std::chrono::seconds>();
+                    }
+
+                    ++m_template_id;
                 }
 
-                ++m_template_id;
 
                 // Send it the updated template
-                if (!SendWork(client, m_template_id, *block_template, future_template)) {
+                if (!SendWork(client, WITH_LOCK(m_tp_mutex, return m_template_id;), *block_template, future_template)) {
                     LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Disconnecting client id=%zu\n",
                                     client.m_id);
                     client.m_disconnect_flag = true;
                 }
 
+                LOCK(m_tp_mutex);
                 m_block_template_cache.insert({m_template_id, std::move(block_template)});
                 client.m_best_template_id = m_template_id;
 
@@ -416,8 +421,6 @@ void Sv2TemplateProvider::PruneBlockTemplateCache()
 
 bool Sv2TemplateProvider::SendWork(Sv2Client& client, uint64_t template_id, BlockTemplate& block_template, bool future_template)
 {
-    AssertLockHeld(m_tp_mutex);
-
     CBlockHeader header{block_template.getBlockHeader()};
 
     node::Sv2NewTemplateMsg new_template{header,

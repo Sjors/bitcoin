@@ -161,7 +161,7 @@ private:
      * When the template is update to take newer mempool transactions into
      * account, we set future_template to false and don't send SetNewPrevHash.
      */
-    [[nodiscard]] bool SendWork(Sv2Client& client, uint64_t template_id, BlockTemplate& block_template, bool future_template) EXCLUSIVE_LOCKS_REQUIRED(m_tp_mutex);
+    [[nodiscard]] bool SendWork(Sv2Client& client, uint64_t template_id, BlockTemplate& block_template, bool future_template);
 
 };
 
