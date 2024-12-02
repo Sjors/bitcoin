@@ -98,7 +98,7 @@ private:
     /**
      * A cache that maps ids used in NewTemplate messages and its associated block template.
      */
-    using BlockTemplateCache = std::map<uint64_t, std::unique_ptr<BlockTemplate>>;
+    using BlockTemplateCache = std::map<uint64_t, std::shared_ptr<BlockTemplate>>;
     BlockTemplateCache m_block_template_cache GUARDED_BY(m_tp_mutex);
 
 public:
