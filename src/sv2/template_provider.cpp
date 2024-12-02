@@ -190,9 +190,9 @@ void Sv2TemplateProvider::ThreadSv2Handler()
             }
 
             // Create block template and store interface reference
-            LOCK(m_tp_mutex);
             // TODO: reuse template_id for clients with the same m_default_coinbase_tx_additional_output_size
-            ++m_template_id;
+            uint64_t template_id{WITH_LOCK(m_tp_mutex, return ++m_template_id;)};
+
             // https://github.com/bitcoin/bitcoin/pull/30356#issuecomment-2199791658
             uint32_t additional_coinbase_weight{(client.m_coinbase_tx_outputs_size + 100 + 0 + 2) * 4};
 
@@ -202,20 +202,24 @@ void Sv2TemplateProvider::ThreadSv2Handler()
                 Ticks<MillisecondsDouble>(SteadyClock::now() - time_start));
 
             uint256 prev_hash{block_template->getBlockHeader().hashPrevBlock};
-            if (prev_hash != m_best_prev_hash) {
-                m_best_prev_hash = prev_hash;
-                // Does not need to be accurate
-                m_last_block_time = GetTime<std::chrono::seconds>();
+            {
+                LOCK(m_tp_mutex);
+                if (prev_hash != m_best_prev_hash) {
+                    m_best_prev_hash = prev_hash;
+                    // Does not need to be accurate
+                    m_last_block_time = GetTime<std::chrono::seconds>();
+                }
             }
 
-            if (!SendWork(client, m_template_id, *block_template, /*future_template=*/true)) {
+            if (!SendWork(client, template_id, *block_template, /*future_template=*/true)) {
                 LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Disconnecting client id=%zu\n",
                                 client.m_id);
                 client.m_disconnect_flag = true;
             }
 
-            m_block_template_cache.insert({m_template_id, std::move(block_template)});
-            client.m_best_template_id = m_template_id;
+            LOCK(m_tp_mutex);
+            m_block_template_cache.insert({template_id, std::move(block_template)});
+            client.m_best_template_id = template_id;
         });
 
         // Do not send templates with improved fees more frequently than the fee check interval
@@ -278,31 +282,34 @@ void Sv2TemplateProvider::ThreadSv2Handler()
                 if (!client.m_coinbase_output_data_size_recv) return;
                 if (client.m_id == first_client_id.value()) return;
 
-                LOCK(m_tp_mutex);
-                auto block_template_entry{m_block_template_cache.find(client.m_best_template_id)};
+                std::shared_ptr<BlockTemplate> block_template = WITH_LOCK(m_tp_mutex, return m_block_template_cache.find(client.m_best_template_id)->second;);
 
                 // Unconditionally make new template
                 CAmount fee_delta{0};
-                auto block_template{block_template_entry->second->waitNext(fee_delta, MillisecondsDouble{0})};
+                block_template = block_template->waitNext(fee_delta, MillisecondsDouble{0});
                 if (Assert(block_template)) {
                     uint256 prev_hash{block_template->getBlockHeader().hashPrevBlock};
                     bool future_template{false};
-                    if (prev_hash != m_best_prev_hash) {
-                        future_template = true;
-                        m_best_prev_hash = prev_hash;
-                        // Does not need to be accurate
-                        m_last_block_time = GetTime<std::chrono::seconds>();
+                    {
+                        LOCK(m_tp_mutex);
+                        if (prev_hash != m_best_prev_hash) {
+                            future_template = true;
+                            m_best_prev_hash = prev_hash;
+                            // Does not need to be accurate
+                            m_last_block_time = GetTime<std::chrono::seconds>();
+                        }
+
+                        ++m_template_id;
                     }
 
-                    ++m_template_id;
-
                     // Send it the updated template
-                    if (!SendWork(client, m_template_id, *block_template, future_template)) {
+                    if (!SendWork(client, WITH_LOCK(m_tp_mutex, return m_template_id;), *block_template, future_template)) {
                         LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Disconnecting client id=%zu\n",
                                         client.m_id);
                         client.m_disconnect_flag = true;
                     }
 
+                    LOCK(m_tp_mutex);
                     m_block_template_cache.insert({m_template_id, std::move(block_template)});
                     client.m_best_template_id = m_template_id;
                 }
@@ -318,11 +325,24 @@ void Sv2TemplateProvider::ThreadSv2Handler()
 
 void Sv2TemplateProvider::RequestTransactionData(Sv2Client& client, node::Sv2RequestTransactionDataMsg msg)
 {
-    LOCK(m_tp_mutex);
-    auto cached_block = m_block_template_cache.find(msg.m_template_id);
-    if (cached_block != m_block_template_cache.end()) {
-        CBlock block = (*cached_block->second).getBlock();
+    CBlock block;
+    {
+        LOCK(m_tp_mutex);
+        auto cached_block = m_block_template_cache.find(msg.m_template_id);
+        if (cached_block == m_block_template_cache.end()) {
+            node::Sv2RequestTransactionDataErrorMsg request_tx_data_error{msg.m_template_id, "template-id-not-found"};
 
+            LogDebug(BCLog::SV2, "Send 0x75 RequestTransactionData.Error (template-id-not-found: %zu) to client id=%zu\n",
+                    msg.m_template_id, client.m_id);
+            client.m_send_messages.emplace_back(request_tx_data_error);
+
+            return;
+        }
+        block = (*cached_block->second).getBlock();
+    }
+
+    {
+        LOCK(m_tp_mutex);
         if (block.hashPrevBlock != m_best_prev_hash) {
             LogTrace(BCLog::SV2, "Template id=%lu prevhash=%s, tip=%s\n", msg.m_template_id, HexStr(block.hashPrevBlock), HexStr(m_best_prev_hash));
             node::Sv2RequestTransactionDataErrorMsg request_tx_data_error{msg.m_template_id, "stale-template-id"};
@@ -333,29 +353,23 @@ void Sv2TemplateProvider::RequestTransactionData(Sv2Client& client, node::Sv2Req
             client.m_send_messages.emplace_back(request_tx_data_error);
             return;
         }
-
-        std::vector<uint8_t> witness_reserve_value;
-        auto scriptWitness = block.vtx[0]->vin[0].scriptWitness;
-        if (!scriptWitness.IsNull()) {
-            std::copy(scriptWitness.stack[0].begin(), scriptWitness.stack[0].end(), std::back_inserter(witness_reserve_value));
-        }
-        std::vector<CTransactionRef> txs;
-        if (block.vtx.size() > 0) {
-            std::copy(block.vtx.begin() + 1, block.vtx.end(), std::back_inserter(txs));
-        }
-
-        node::Sv2RequestTransactionDataSuccessMsg request_tx_data_success{msg.m_template_id, std::move(witness_reserve_value), std::move(txs)};
-
-        LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Send 0x74 RequestTransactionData.Success to client id=%zu\n",
-                        client.m_id);
-        client.m_send_messages.emplace_back(request_tx_data_success);
-    } else {
-        node::Sv2RequestTransactionDataErrorMsg request_tx_data_error{msg.m_template_id, "template-id-not-found"};
-
-        LogDebug(BCLog::SV2, "Send 0x75 RequestTransactionData.Error (template-id-not-found: %zu) to client id=%zu\n",
-                msg.m_template_id, client.m_id);
-        client.m_send_messages.emplace_back(request_tx_data_error);
     }
+
+    std::vector<uint8_t> witness_reserve_value;
+    auto scriptWitness = block.vtx[0]->vin[0].scriptWitness;
+    if (!scriptWitness.IsNull()) {
+        std::copy(scriptWitness.stack[0].begin(), scriptWitness.stack[0].end(), std::back_inserter(witness_reserve_value));
+    }
+    std::vector<CTransactionRef> txs;
+    if (block.vtx.size() > 0) {
+        std::copy(block.vtx.begin() + 1, block.vtx.end(), std::back_inserter(txs));
+    }
+
+    node::Sv2RequestTransactionDataSuccessMsg request_tx_data_success{msg.m_template_id, std::move(witness_reserve_value), std::move(txs)};
+
+    LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "Send 0x74 RequestTransactionData.Success to client id=%zu\n",
+                    client.m_id);
+    client.m_send_messages.emplace_back(request_tx_data_success);
 }
 
 void Sv2TemplateProvider::SubmitSolution(node::Sv2SubmitSolutionMsg solution)
