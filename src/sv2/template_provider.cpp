@@ -355,7 +355,8 @@ void Sv2TemplateProvider::RequestTransactionData(Sv2Client& client, node::Sv2Req
 
 void Sv2TemplateProvider::SubmitSolution(node::Sv2SubmitSolutionMsg solution)
 {
-        LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "version=%d, timestamp=%d, nonce=%d\n",
+        LogPrintLevel(BCLog::SV2, BCLog::Level::Debug, "id=%lu version=%d, timestamp=%d, nonce=%d\n",
+            solution.m_template_id,
             solution.m_version,
             solution.m_header_timestamp,
             solution.m_header_nonce
