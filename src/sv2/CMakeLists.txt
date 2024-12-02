@@ -6,6 +6,8 @@ add_library(bitcoin_sv2 STATIC EXCLUDE_FROM_ALL
   noise.cpp
   transport.cpp
   connman.cpp
+  messages.cpp
+  template_provider.cpp
 )
 
 target_link_libraries(bitcoin_sv2
