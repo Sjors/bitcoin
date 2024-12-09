@@ -871,7 +871,7 @@ public:
 class BlockTemplateImpl : public BlockTemplate
 {
 public:
-    explicit BlockTemplateImpl(CScript script_pub_key, BlockAssembler::Options assemble_options, std::unique_ptr<CBlockTemplate> block_template, NodeContext& node) : m_script_pub_key(script_pub_key), m_assemble_options(std::move(assemble_options)), m_block_template(std::move(block_template)), m_node(node)
+    explicit BlockTemplateImpl(CScript script_pub_key, BlockAssembler::Options assemble_options, std::shared_ptr<CBlockTemplate> block_template, NodeContext& node) : m_script_pub_key(script_pub_key), m_assemble_options(std::move(assemble_options)), m_block_template(block_template), m_node(node)
     {
         assert(m_block_template);
     }
@@ -920,6 +920,19 @@ public:
     {
         CBlock block{m_block_template->block};
 
+        if (block.hashPrevBlock == uint256()) {
+            /** 
+             * If we don't know the hash of the previous block, then it was not
+             * created from our template. Our best bet is the current tip.
+             * 
+             * The caller should try again a bit later if this fails.
+             */
+            LOCK(::cs_main);
+            CBlockIndex* tip{chainman().ActiveChain().Tip()};
+            LogPrintf("Received solution for unknown prev hash, trying tip.");
+            block.hashPrevBlock = tip->GetBlockHash();
+        }
+
         auto cb = MakeTransactionRef(std::move(coinbase));
 
         if (block.vtx.size() == 0) {
@@ -933,6 +946,11 @@ public:
         block.nNonce = nonce;
 
         block.hashMerkleRoot = BlockMerkleRoot(block);
+
+        if (m_child_block_template) {
+            // Set child block prevhash so it can always be submitted
+            m_child_block_template->block.hashPrevBlock = block.GetHash();
+        }
 
         auto block_ptr = std::make_shared<const CBlock>(block);
         return chainman().ProcessNewBlock(block_ptr, /*force_processing=*/true, /*min_pow_checked=*/true, /*new_block=*/nullptr);
@@ -1009,10 +1027,34 @@ public:
         return nullptr;
     }
 
+    std::unique_ptr<BlockTemplate> createFutureBlock(bool optimistic) override
+    {
+        // Only allow one child template
+        if (m_child_block_template) return nullptr;
+
+        BlockAssembler::Options assemble_options{m_assemble_options};
+        ApplyArgsManOptions(*Assert(m_node.args), assemble_options);
+        // TODO: implement optimistic mode, e.g. by passing the current template
+        //       CBlock to CreateNewBlock() and have addPackageTxs() account
+        //       for the block transactions.
+        optimistic = false;
+        assemble_options.use_mempool = optimistic;
+        assemble_options.is_future = true;
+        // TODO: implement TestBlockValidity() for future blocks
+        assemble_options.test_block_validity = false;
+        // TODO: drop m_script_pub_key after #31318, it doesn't make sense to
+        //       reuse it.
+        auto block_template{std::make_unique<BlockTemplateImpl>(m_script_pub_key, assemble_options, BlockAssembler{chainman().ActiveChainstate(), /*mempool=*/nullptr, assemble_options}.CreateNewBlock(m_script_pub_key), m_node)};
+        m_child_block_template = block_template->m_block_template;
+        return block_template;
+    }
+
     const CScript m_script_pub_key;
     const BlockAssembler::Options m_assemble_options;
 
-    const std::unique_ptr<CBlockTemplate> m_block_template;
+    const std::shared_ptr<CBlockTemplate> m_block_template;
+
+    std::shared_ptr<CBlockTemplate> m_child_block_template;
 
     NodeContext* context() { return &m_node; }
     ChainstateManager& chainman() { return *Assert(m_node.chainman); }

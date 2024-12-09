@@ -165,12 +165,16 @@ public:
         // Whether to call TestBlockValidity() at the end of CreateNewBlock().
         bool test_block_validity{true};
         bool print_modified_fee{DEFAULT_PRINT_MODIFIED_FEE};
+        // Build template for block at height n + 1. Such a template
+        // can be pre-loaded on a mining device, so that it only needs
+        // to receive and process the new prevhash.
+        bool is_future{false};
     };
 
     explicit BlockAssembler(Chainstate& chainstate, const CTxMemPool* mempool, const Options& options);
 
     /** Construct a new block template with coinbase to scriptPubKeyIn */
-    std::unique_ptr<CBlockTemplate> CreateNewBlock(const CScript& scriptPubKeyIn);
+    std::shared_ptr<CBlockTemplate> CreateNewBlock(const CScript& scriptPubKeyIn);
 
     inline static std::optional<int64_t> m_last_block_num_txs{};
     inline static std::optional<int64_t> m_last_block_weight{};

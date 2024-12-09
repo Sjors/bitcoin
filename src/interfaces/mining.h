@@ -69,6 +69,20 @@ public:
      *          timeout set to 0.
      */
     virtual std::unique_ptr<BlockTemplate> waitNext(CAmount fee_threshold = MAX_MONEY, MillisecondsDouble timeout = MillisecondsDouble::max()) = 0;
+
+   /**
+     * Construct a future block template
+     * 
+     * @param[in] optimistic   The future template is only intented to be
+     *                         hashed on after a submitSolution() call, so we
+     *                         know exactly which transactions are in the found
+     *                         block. The future template will be filled with
+     *                         transactions from the mempool which aren't in the
+     *                         current template. Currently ignored.
+     * @returns a block template
+     */
+    virtual std::unique_ptr<BlockTemplate> createFutureBlock(bool optimistic) = 0;
+
 };
 
 //! Interface giving clients (RPC, Stratum v2 Template Provider in the future)

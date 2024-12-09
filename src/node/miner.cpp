@@ -106,7 +106,7 @@ void BlockAssembler::resetBlock()
     nFees = 0;
 }
 
-std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& scriptPubKeyIn)
+std::shared_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& scriptPubKeyIn)
 {
     const auto time_start{SteadyClock::now()};
 
@@ -123,6 +123,36 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     LOCK(::cs_main);
     CBlockIndex* pindexPrev = m_chainstate.m_chain.Tip();
     assert(pindexPrev != nullptr);
+
+    // Placeholder for pindexPrev if we construct a template for the followup block. 
+    CBlockIndex index_next{};
+    if (m_options.is_future) {
+        index_next.pprev = pindexPrev;
+
+        // Fill out some details for the block that's currently being mined,
+        // in so far as they affect the block after.
+        
+        int next_height = index_next.nHeight + 1;
+        if (next_height + 1 % chainparams.GetConsensus().DifficultyAdjustmentInterval() == 0) {
+            // We can't contruct a future template for the first block of a
+            // retarget period, because we can't predict its nBits value.
+            return nullptr;
+        }
+
+        index_next.nBits = pindexPrev->nBits;
+
+        // TODO: we can't know nTime for the block that's currently being mined,
+        //       can that cause problems? Should we adjust it to account for some
+        //       worst case?
+        index_next.nTime = TicksSinceEpoch<std::chrono::seconds>(NodeClock::now());
+
+        // TODO: drop since this is ignored??
+        index_next.nVersion = m_chainstate.m_chainman.m_versionbitscache.ComputeBlockVersion(&index_next, chainparams.GetConsensus());
+
+        // Build the template on top of index_next
+        pindexPrev = &index_next;
+    }
+
     nHeight = pindexPrev->nHeight + 1;
 
     pblock->nVersion = m_chainstate.m_chainman.m_versionbitscache.ComputeBlockVersion(pindexPrev, chainparams.GetConsensus());
@@ -161,7 +191,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     LogPrintf("CreateNewBlock(): block weight: %u txs: %u fees: %ld sigops %d\n", GetBlockWeight(*pblock), nBlockTx, nFees, nBlockSigOpsCost);
 
     // Fill in header
-    pblock->hashPrevBlock  = pindexPrev->GetBlockHash();
+    pblock->hashPrevBlock  = m_options.is_future ? uint256{} : pindexPrev->GetBlockHash();
     UpdateTime(pblock, chainparams.GetConsensus(), pindexPrev);
     pblock->nBits          = GetNextWorkRequired(pindexPrev, pblock, chainparams.GetConsensus());
     pblock->nNonce         = 0;

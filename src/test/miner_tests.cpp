@@ -628,6 +628,20 @@ void MinerTestingSetup::TestPrioritisedMining(const CScript& scriptPubKey, const
     }
 }
 
+void PrepBlock(ChainstateManager& chainman, CBlock& block, const int current_height, CMutableTransaction& coinbase, unsigned char extranonce, unsigned int nonce)
+{
+    LOCK(cs_main);
+    block.nVersion = VERSIONBITS_TOP_BITS;
+    block.nTime = chainman.ActiveChain().Tip()->GetMedianTimePast()+1;
+    coinbase.version = 1;
+    coinbase.vin[0].scriptSig = CScript{} << (current_height + 1) << extranonce;
+    coinbase.vout.resize(1); // Ignore the (optional) segwit commitment added by CreateNewBlock (as the hardcoded nonces don't account for this)
+    coinbase.vout[0].scriptPubKey = CScript();
+    block.vtx[0] = MakeTransactionRef(coinbase);
+    block.hashMerkleRoot = BlockMerkleRoot(block);
+    block.nNonce = nonce;
+}
+
 // NOTE: These tests rely on CreateNewBlock doing its own self-validation!
 BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
 {
@@ -643,7 +657,8 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
     static_assert(std::size(BLOCKINFO) == 110, "Should have 110 blocks to import");
     int baseheight = 0;
     std::vector<CTransactionRef> txFirst;
-    for (const auto& bi : BLOCKINFO) {
+    for (size_t i = 0; i < 110; i++) {
+        const auto& bi{BLOCKINFO[i]};
         const int current_height{miner->getTip()->height};
 
         // Simple block creation, nothing special yet:
@@ -654,29 +669,51 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
 
         CBlock block{block_template->getBlock()};
         CMutableTransaction txCoinbase(*block.vtx[0]);
-        {
-            LOCK(cs_main);
-            block.nVersion = VERSIONBITS_TOP_BITS;
-            block.nTime = Assert(m_node.chainman)->ActiveChain().Tip()->GetMedianTimePast()+1;
-            txCoinbase.version = 1;
-            txCoinbase.vin[0].scriptSig = CScript{} << (current_height + 1) << bi.extranonce;
-            txCoinbase.vout.resize(1); // Ignore the (optional) segwit commitment added by CreateNewBlock (as the hardcoded nonces don't account for this)
-            txCoinbase.vout[0].scriptPubKey = CScript();
-            block.vtx[0] = MakeTransactionRef(txCoinbase);
-            if (txFirst.size() == 0)
-                baseheight = current_height;
-            if (txFirst.size() < 4)
-                txFirst.push_back(block.vtx[0]);
-            block.hashMerkleRoot = BlockMerkleRoot(block);
-            block.nNonce = bi.nonce;
-        }
+        PrepBlock(*Assert(m_node.chainman), block, current_height, txCoinbase, bi.extranonce, bi.nonce);
+        if (txFirst.size() == 0)
+            baseheight = current_height;
+        if (txFirst.size() < 4)
+            txFirst.push_back(block.vtx[0]);
+
         std::shared_ptr<const CBlock> shared_pblock = std::make_shared<const CBlock>(block);
         // Alternate calls between Chainman's ProcessNewBlock and submitSolution
         // via the Mining interface.
-        if (current_height % 2 == 0) {
+        if (current_height % 2 == 0 && current_height < 108) {
             BOOST_REQUIRE(Assert(m_node.chainman)->ProcessNewBlock(shared_pblock, /*force_processing=*/true, /*min_pow_checked=*/true, nullptr));
         } else {
+            // For the last block test createFutureBlock() by mining a block on top
+            std::unique_ptr<BlockTemplate> next_block_template;
+            if (current_height == 108) {
+                BOOST_TEST_MESSAGE("Test createFutureBlock()");
+                next_block_template = block_template->createFutureBlock(/*optimistic=*/false);
+                BOOST_REQUIRE(next_block_template);
+                // Prevhash must be zero so that submitSolution() knows it needs to set it
+                CBlock next_block{next_block_template->getBlock()};
+                BOOST_REQUIRE(next_block.hashPrevBlock == uint256());
+            }
+
             BOOST_REQUIRE(block_template->submitSolution(block.nVersion, block.nTime, block.nNonce, txCoinbase));
+            
+            if (current_height == 108) {
+                const auto& bi{BLOCKINFO[++i]};
+
+                CBlock next_block{next_block_template->getBlock()};
+                // submitSolution() should now have set hashPrevBlock
+                BOOST_REQUIRE_EQUAL(next_block.hashPrevBlock, miner->getTip()->hash);
+                CMutableTransaction tx_coinbase_next(*next_block.vtx[0]);
+
+                PrepBlock(*Assert(m_node.chainman), next_block, current_height + 1, tx_coinbase_next, bi.extranonce, bi.nonce);
+
+                // Wipe hashPrevBlock again to test the tip fallback in submitSolution()
+                next_block.hashPrevBlock = uint256();
+
+                BOOST_REQUIRE(next_block_template->submitSolution(VERSIONBITS_TOP_BITS, next_block.nTime, next_block.nNonce, tx_coinbase_next));
+                BOOST_REQUIRE_EQUAL(miner->getTip()->height, current_height + 2);
+
+                // This was the last block
+                break;
+            }
+        
         }
         // ProcessNewBlock and submitSolution do not check if the new block is
         // valid. If it is, they will wait for the tip to update. Therefore the
