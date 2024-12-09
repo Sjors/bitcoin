@@ -141,7 +141,7 @@ endif()
 
 cmake_dependent_option(WITH_DBUS "Enable DBus support." ON "CMAKE_SYSTEM_NAME STREQUAL \"Linux\" AND BUILD_GUI" OFF)
 
-option(WITH_MULTIPROCESS "Build multiprocess bitcoin-node and bitcoin-gui executables in addition to monolithic bitcoind and bitcoin-qt executables. Requires libmultiprocess library. Experimental." OFF)
+option(WITH_MULTIPROCESS "Build multiprocess bitcoin-node and bitcoin-gui executables in addition to monolithic bitcoind and bitcoin-qt executables. Requires libmultiprocess library. Experimental." ON)
 if(WITH_MULTIPROCESS)
   find_package(Libmultiprocess COMPONENTS Lib)
   find_package(LibmultiprocessNative COMPONENTS Bin
@@ -222,6 +222,7 @@ if(BUILD_FOR_FUZZING)
   set(BUILD_GUI OFF)
   set(ENABLE_EXTERNAL_SIGNER OFF)
   set(WITH_ZMQ OFF)
+  set(WITH_MULTIPROCESS OFF)
   set(BUILD_TESTS OFF)
   set(BUILD_GUI_TESTS OFF)
   set(BUILD_BENCH OFF)
