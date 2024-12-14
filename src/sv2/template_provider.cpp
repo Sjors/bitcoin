@@ -229,8 +229,12 @@ void Sv2TemplateProvider::ThreadSv2Handler()
         // Delay event loop is no client if fully connected
         if (!first_client_id) std::this_thread::sleep_for(1000ms);
 
+        // The future template flag is set when there's a new prevhash,
+        // not when there's only a fee increase.
+        bool future_template{false};
+
         // For the first connected client, wait for fees to rise.
-        m_connman->ForEachClient([this, first_client_id, check_fees, &new_template](Sv2Client& client) {
+        m_connman->ForEachClient([this, first_client_id, check_fees, &future_template, &new_template](Sv2Client& client) {
             if (!first_client_id || client.m_id != first_client_id) return;
             Assert(client.m_coinbase_output_data_size_recv);
 
@@ -244,9 +248,7 @@ void Sv2TemplateProvider::ThreadSv2Handler()
             block_template = block_template->waitNext(fee_delta, MillisecondsDouble{1000});
             if (block_template) {
                 new_template = true;
-
                 uint256 prev_hash{block_template->getBlockHeader().hashPrevBlock};
-                bool future_template{false};
 
                 {
                     LOCK(m_tp_mutex);
@@ -278,7 +280,7 @@ void Sv2TemplateProvider::ThreadSv2Handler()
 
         if (new_template) {
             // And generate new temlates for the other clients
-            m_connman->ForEachClient([this, first_client_id](Sv2Client& client) {
+            m_connman->ForEachClient([this, first_client_id, &future_template](Sv2Client& client) {
                 if (!client.m_coinbase_output_data_size_recv) return;
                 if (client.m_id == first_client_id.value()) return;
 
@@ -288,17 +290,8 @@ void Sv2TemplateProvider::ThreadSv2Handler()
                 CAmount fee_delta{0};
                 block_template = block_template->waitNext(fee_delta, MillisecondsDouble{0});
                 if (Assert(block_template)) {
-                    uint256 prev_hash{block_template->getBlockHeader().hashPrevBlock};
-                    bool future_template{false};
                     {
                         LOCK(m_tp_mutex);
-                        if (prev_hash != m_best_prev_hash) {
-                            future_template = true;
-                            m_best_prev_hash = prev_hash;
-                            // Does not need to be accurate
-                            m_last_block_time = GetTime<std::chrono::seconds>();
-                        }
-
                         ++m_template_id;
                     }
 
