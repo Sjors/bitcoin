@@ -166,7 +166,14 @@ struct Sv2CoinbaseOutputConstraintsMsg
     void Unserialize(Stream& s)
     {
         s >> m_coinbase_output_max_additional_size;
-        s >> m_coinbase_output_max_sigops;
+        try {
+            // This field was added to the spec on ...,
+            // SRI roles before ... do not provide it.
+            s >> m_coinbase_output_max_sigops;
+        } catch (const std::ios_base::failure& e) {
+            // Just use the default if it's missing
+            m_coinbase_output_max_sigops = 400;
+        }
     }
 };
 
