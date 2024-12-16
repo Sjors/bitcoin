@@ -41,7 +41,7 @@ enum class Sv2MsgType : uint8_t {
     REQUEST_TRANSACTION_DATA_SUCCESS = 0x74,
     REQUEST_TRANSACTION_DATA_ERROR = 0x75,
     SUBMIT_SOLUTION = 0x76,
-    COINBASE_OUTPUT_DATA_SIZE = 0x70,
+    COINBASE_OUTPUT_CONSTRAINTS = 0x70,
 };
 
 static const std::map<Sv2MsgType, std::string> SV2_MSG_NAMES{
@@ -54,7 +54,7 @@ static const std::map<Sv2MsgType, std::string> SV2_MSG_NAMES{
     {Sv2MsgType::REQUEST_TRANSACTION_DATA_SUCCESS, "RequestTransactionData.Success"},
     {Sv2MsgType::REQUEST_TRANSACTION_DATA_ERROR, "RequestTransactionData.Error"},
     {Sv2MsgType::SUBMIT_SOLUTION, "SubmitSolution"},
-    {Sv2MsgType::COINBASE_OUTPUT_DATA_SIZE, "CoinbaseOutputDataSize"},
+    {Sv2MsgType::COINBASE_OUTPUT_CONSTRAINTS, "CoinbaseOutputConstraints"},
 };
 
 struct Sv2SetupConnectionMsg
@@ -137,12 +137,12 @@ struct Sv2SetupConnectionMsg
  * The template provider MUST NOT provide NewWork messages which would represent consensus-invalid blocks once this
  * additional size — along with a maximally-sized (100 byte) coinbase field — is added.
  */
-struct Sv2CoinbaseOutputDataSizeMsg
+struct Sv2CoinbaseOutputConstraintsMsg
 {
     /**
      * The default message type value for this Stratum V2 message.
      */
-    static constexpr auto m_msg_type = Sv2MsgType::COINBASE_OUTPUT_DATA_SIZE;
+    static constexpr auto m_msg_type = Sv2MsgType::COINBASE_OUTPUT_CONSTRAINTS;
 
     /**
      * The maximum additional serialized bytes which the pool will add in coinbase transaction outputs.

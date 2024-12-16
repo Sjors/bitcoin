@@ -198,7 +198,7 @@ BOOST_AUTO_TEST_CASE(client_tests)
     std::vector<uint8_t> coinbase_output_max_additional_size_bytes{
         0x01, 0x00, 0x00, 0x00
     };
-    node::Sv2NetMsg msg{node::Sv2MsgType::COINBASE_OUTPUT_DATA_SIZE, std::move(coinbase_output_max_additional_size_bytes)};
+    node::Sv2NetMsg msg{node::Sv2MsgType::COINBASE_OUTPUT_CONSTRAINTS, std::move(coinbase_output_max_additional_size_bytes)};
     // No reply expected, not yet implemented
     tester.RemoteToLocalMsg(msg);
 }
