@@ -45,7 +45,7 @@ struct Sv2Client
     std::deque<Sv2NetMsg> m_send_messages;
 
     /**
-     * Whether the client has received CoinbaseOutputDataSize message.
+     * Whether the client has received CoinbaseOutputConstraints message.
      */
     bool m_coinbase_output_data_size_recv = false;
 
