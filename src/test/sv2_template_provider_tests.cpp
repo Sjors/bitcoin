@@ -157,10 +157,10 @@ BOOST_AUTO_TEST_CASE(client_tests)
     // output data size:
     BOOST_REQUIRE(tester.GetBlockTemplateCount() == 0);
 
-    std::vector<uint8_t> coinbase_output_max_additional_size_bytes{
+    std::vector<uint8_t> coinbase_output_constraint_bytes{
         0x01, 0x00, 0x00, 0x00
     };
-    node::Sv2NetMsg msg{node::Sv2MsgType::COINBASE_OUTPUT_DATA_SIZE, std::move(coinbase_output_max_additional_size_bytes)};
+    node::Sv2NetMsg msg{node::Sv2MsgType::COINBASE_OUTPUT_CONSTRAINTS, std::move(coinbase_output_constraint_bytes)};
     tester.receiveMessage(msg);
     BOOST_TEST_MESSAGE("The reply should be NewTemplate and SetNewPrevHash");
     BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), 2 * SV2_HEADER_ENCRYPTED_SIZE + 91 + 80 + 2 * Poly1305::TAGLEN);

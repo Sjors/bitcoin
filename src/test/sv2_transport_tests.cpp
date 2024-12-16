@@ -25,7 +25,7 @@
 
 using namespace std::literals;
 using node::Sv2NetMsg;
-using node::Sv2CoinbaseOutputDataSizeMsg;
+using node::Sv2CoinbaseOutputConstraintsMsg;
 using node::Sv2MsgType;
 
 BOOST_FIXTURE_TEST_SUITE(sv2_transport_tests, RegTestingSetup)
@@ -363,15 +363,15 @@ BOOST_AUTO_TEST_CASE(sv2_transport_responder_test)
         tester.CompareHash();
 
         // Handshake complete, have the initiator send us a message:
-        Sv2CoinbaseOutputDataSizeMsg body{4000};
+        Sv2CoinbaseOutputConstraintsMsg body{4000};
         Sv2NetMsg msg{body};
-        BOOST_REQUIRE(msg.m_msg_type == Sv2MsgType::COINBASE_OUTPUT_DATA_SIZE);
+        BOOST_REQUIRE(msg.m_msg_type == Sv2MsgType::COINBASE_OUTPUT_CONSTRAINTS);
 
         tester.SendPacket(msg);
         ret = tester.Interact();
         BOOST_REQUIRE(ret && ret->size() == 1);
         BOOST_CHECK((*ret)[0] &&
-                    (*ret)[0]->m_msg_type == Sv2MsgType::COINBASE_OUTPUT_DATA_SIZE);
+                    (*ret)[0]->m_msg_type == Sv2MsgType::COINBASE_OUTPUT_CONSTRAINTS);
 
         tester.CompareHash();
 
