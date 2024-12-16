@@ -158,7 +158,8 @@ BOOST_AUTO_TEST_CASE(client_tests)
     BOOST_REQUIRE(tester.GetBlockTemplateCount() == 0);
 
     std::vector<uint8_t> coinbase_output_constraint_bytes{
-        0x01, 0x00, 0x00, 0x00
+        0x01, 0x00, 0x00, 0x00, // coinbase_output_max_additional_size
+        0x00, 0x00              // coinbase_output_max_sigops
     };
     node::Sv2NetMsg msg{node::Sv2MsgType::COINBASE_OUTPUT_CONSTRAINTS, std::move(coinbase_output_constraint_bytes)};
     tester.receiveMessage(msg);

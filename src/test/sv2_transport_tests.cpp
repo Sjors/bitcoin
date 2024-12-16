@@ -363,7 +363,7 @@ BOOST_AUTO_TEST_CASE(sv2_transport_responder_test)
         tester.CompareHash();
 
         // Handshake complete, have the initiator send us a message:
-        Sv2CoinbaseOutputConstraintsMsg body{4000};
+        Sv2CoinbaseOutputConstraintsMsg body{4000, 400};
         Sv2NetMsg msg{body};
         BOOST_REQUIRE(msg.m_msg_type == Sv2MsgType::COINBASE_OUTPUT_CONSTRAINTS);
 
