@@ -14,8 +14,10 @@
 #define BITCOIN_NODE_TYPES_H
 
 #include <cstddef>
+#include <consensus/amount.h>
 #include <policy/policy.h>
 #include <script/script.h>
+#include <util/time.h>
 
 namespace node {
 enum class TransactionError {
@@ -61,6 +63,28 @@ struct BlockCreateOptions {
      */
     CScript coinbase_output_script{CScript() << OP_TRUE};
 };
+
+struct BlockWaitOptions {
+    /**
+     * How long to wait before returning nullptr instead of a new template.
+     * Default is to wait forever.
+     */
+    MillisecondsDouble timeout{MillisecondsDouble::max()};
+
+    /**
+     * Wait until total fees in the new template exceed fees in the origal
+     * template by at least this amount (in sats). The default is to ignore
+     * fee increases and only wait for a tip change.
+     *
+     * This is not an std::optional<CAmount> because (the current version of)
+     * libmultiprocess maps missing values to 0.
+     * https://github.com/bitcoin/bitcoin/pull/31283#discussion_r1937622086
+     *
+     * Use a magic value instead.
+     */
+    CAmount fee_threshold{MAX_MONEY};
+};
+
 } // namespace node
 
 #endif // BITCOIN_NODE_TYPES_H
