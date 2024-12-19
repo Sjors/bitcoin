@@ -26,11 +26,27 @@ add_dependencies(bitcoin_clientversion generate_build_info)
 add_subdirectory(crypto)
 add_subdirectory(univalue)
 add_subdirectory(util)
+
+set(installable_targets)
+
 if(WITH_MULTIPROCESS)
   add_subdirectory(ipc)
 endif()
 if(WITH_SV2)
   add_subdirectory(sv2)
+
+  # TOOD: move into sv2 directory
+  add_executable(bitcoin-mine
+    bitcoin-mine.cpp
+    init/bitcoin-mine.cpp
+  )
+  target_link_libraries(bitcoin-mine
+    core_interface
+    bitcoin_common
+    bitcoin_sv2
+    bitcoin_ipc
+  )
+list(APPEND installable_targets bitcoin-mine)
 endif()
 
 #=============================
@@ -144,6 +160,7 @@ add_library(bitcoin_common STATIC EXCLUDE_FROM_ALL
   net_types.cpp
   netaddress.cpp
   netbase.cpp
+  node/interface_ui.cpp
   outputtype.cpp
   policy/feerate.cpp
   policy/policy.cpp
@@ -174,7 +191,6 @@ target_link_libraries(bitcoin_common
 )
 
 
-set(installable_targets)
 if(ENABLE_WALLET)
   add_subdirectory(wallet)
 
@@ -241,7 +257,6 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/context.cpp
   node/database_args.cpp
   node/eviction.cpp
-  node/interface_ui.cpp
   node/interfaces.cpp
   node/kernel_notifications.cpp
   node/mempool_args.cpp
