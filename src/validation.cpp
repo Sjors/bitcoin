@@ -4582,6 +4582,205 @@ bool ChainstateManager::AcceptBlock(const std::shared_ptr<const CBlock>& pblock,
     return true;
 }
 
+void ChainstateManager::CheckNewBlock(const std::shared_ptr<const CBlock>& block, const bool check_pow, const unsigned int multiplier)
+{
+    AssertLockNotHeld(cs_main);
+
+    {
+        // TODO: cleanup the ret mess
+        bool ret{true};
+        BlockValidationState state;
+
+        // CheckBlock() does not support multi-threaded block validation because CBlock::fChecked can cause data race.
+        // Therefore, the following critical section must include the CheckBlock() call as well.
+        LOCK(cs_main);
+
+        CBlockIndex* tip = ActiveTip();
+
+        if (block->hashPrevBlock != *tip->phashBlock) {
+            state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "inconclusive-not-best-prevblk", "block not on tip");
+            ret = false;
+        }
+
+        // Check the actual proof-of-work. The nBits value is checked by
+        // ContextualCheckBlock below later as part of AcceptBlock. 
+        const CChainParams& params{GetParams()};
+        if (ret && check_pow) {
+            ret = CheckWeakProofOfWork(block->GetHash(), block->nBits, multiplier, params.GetConsensus());
+            if (!ret) {
+                if (multiplier == 1) {
+                    state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "high-hash", "proof of work failed");
+                } else {
+                    state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "high-weak-hash", "weak proof of work failed");
+                }
+            }
+        }
+        if (ret) {
+            ret = CheckBlock(*block, state, GetConsensus(), /*fCheckPow=*/false);
+        }
+        if (ret) {
+            /** 
+             * At this point ProcessNewBlock would call AcceptBlock(), but we
+             * don't want to store the block or its header. Run individual checks
+             * instead.
+             * 
+             * - don't run AcceptBlockHeader(): it doesn't check anything we care about
+             * - we already ran CheckBlock()
+             * - do run ContextualCheckBlockHeader()
+             * - do run ContextualCheckBlock()
+             */
+            
+            if (!ContextualCheckBlockHeader(*block, state, ActiveChainstate().m_blockman, ActiveChainstate().m_chainman, tip)) {
+                ret = false;
+            }
+
+            if (ret && !ContextualCheckBlock(*block, state, *this, tip)) {
+                ret = false;
+            }
+
+            if (ret) {
+                // Run a subset of ConnectBlock() to check the transactions, without updating
+                // the UTXO set. Does update validation caches.
+
+                // Skip BIP34-implies-BIP30 check
+                // TODO: only on mainnet (disallow testnet3 altogether??)
+                Assert(tip->nHeight < 1983702 - 1); // BIP34_IMPLIES_BIP30_LIMIT
+                // TODO: assert height is above BIP34 and BIP68 activation
+
+                CBlockIndex index{*block};
+                uint256 block_hash(block->GetHash());
+                index.pprev = tip;
+                index.nHeight = tip->nHeight + 1;
+                index.phashBlock = &block_hash;
+
+                const bool parallel_script_checks{ActiveChainstate().m_chainman.GetCheckQueue().HasThreads()};
+
+                int nLockTimeFlags = LOCKTIME_VERIFY_SEQUENCE;
+                
+                // Get the script flags for this block
+                unsigned int flags{GetBlockScriptFlags(index, ActiveChainstate().m_chainman)};
+
+                // We don't want to update the actual chainstate, so create
+                // a cache on top of it.
+                CCoinsViewCache tipView(&ActiveChainstate().CoinsTip());
+                CCoinsView blockCoins;
+                CCoinsViewCache view(&blockCoins);
+                view.SetBackend(tipView);
+
+                // verify that the view's current state corresponds to the previous block
+                Assume(index.pprev->GetBlockHash() == view.GetBestBlock());
+
+                // Precomputed transaction data pointers must not be invalidated
+                // until after `control` has run the script checks (potentially
+                // in multiple threads). Preallocate the vector size so a new allocation
+                // doesn't invalidate pointers into the vector, and keep txsdata in scope
+                // for as long as `control`.
+                CCheckQueueControl<CScriptCheck> control(parallel_script_checks ? &ActiveChainstate().m_chainman.GetCheckQueue() : nullptr);
+                std::vector<PrecomputedTransactionData> txsdata(block->vtx.size());
+
+                std::vector<int> prevheights;
+                CAmount nFees = 0;
+                int64_t nSigOpsCost = 0;
+                for (unsigned int i = 0; i < block->vtx.size(); i++)
+                {
+                    if (!state.IsValid()) break;
+                    const CTransaction &tx = *(block->vtx[i]);
+
+                    if (!tx.IsCoinBase())
+                    {
+                        CAmount txfee = 0;
+                        TxValidationState tx_state;
+                        if (!Consensus::CheckTxInputs(tx, tx_state, view, index.nHeight, txfee)) {
+                            // Any transaction validation failure is a block consensus failure
+                            state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
+                                        tx_state.GetRejectReason(),
+                                        tx_state.GetDebugMessage() + " in transaction " + tx.GetHash().ToString());
+                            break;
+                        }
+                        nFees += txfee;
+                        if (!MoneyRange(nFees)) {
+                            state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-txns-accumulated-fee-outofrange",
+                                        "accumulated fee in the block out of range");
+                            break;
+                        }
+
+                        // Check that transaction is BIP68 final
+                        // BIP68 lock checks (as opposed to nLockTime checks) must
+                        // be in ConnectBlock because they require the UTXO set
+                        prevheights.resize(tx.vin.size());
+                        for (size_t j = 0; j < tx.vin.size(); j++) {
+                            prevheights[j] = view.AccessCoin(tx.vin[j].prevout).nHeight;
+                        }
+
+                        if (!SequenceLocks(tx, nLockTimeFlags, prevheights, index)) {
+                            state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-txns-nonfinal",
+                                        "contains a non-BIP68-final transaction " + tx.GetHash().ToString());
+                            break;
+                        }
+                    }
+
+                    // GetTransactionSigOpCost counts 3 types of sigops:
+                    // * legacy (always)
+                    // * p2sh (when P2SH enabled in flags and excludes coinbase)
+                    // * witness (when witness enabled in flags and excludes coinbase)
+                    nSigOpsCost += GetTransactionSigOpCost(tx, view, flags);
+                    if (nSigOpsCost > MAX_BLOCK_SIGOPS_COST) {
+                        state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-blk-sigops", "too many sigops");
+                        break;
+                    }
+
+                    if (!tx.IsCoinBase())
+                    {
+                        std::vector<CScriptCheck> vChecks;
+                        TxValidationState tx_state;
+                        // cacheSigStore and cacheFullScriptStore are set to true
+                        // because the cache needs to be retained for when this
+                        // block is eventually submitted.
+                        if (!CheckInputScripts(tx, tx_state, view, flags, /*cacheSigStore=*/true, /*cacheFullScriptStore=*/true, txsdata[i], ActiveChainstate().m_chainman.m_validation_cache, parallel_script_checks ? &vChecks : nullptr)) {
+                            // Any transaction validation failure in ConnectBlock is a block consensus failure
+                            state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
+                                        tx_state.GetRejectReason(), tx_state.GetDebugMessage());
+                            break;
+                        }
+                        control.Add(std::move(vChecks));
+                    }
+
+                    CTxUndo undoDummy;
+                    UpdateCoins(tx, view, undoDummy, index.nHeight);
+
+                }
+
+                CAmount blockReward = nFees + GetBlockSubsidy(index.nHeight, params.GetConsensus());
+                if (block->vtx[0]->GetValueOut() > blockReward && state.IsValid()) {
+                    state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-cb-amount",
+                                strprintf("coinbase pays too much (actual=%d vs limit=%d)", block->vtx[0]->GetValueOut(), blockReward));
+                }
+
+                auto parallel_result = control.Complete();
+                if (parallel_result.has_value() && state.IsValid()) {
+                    state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, strprintf("mandatory-script-verify-flag-failed (%s)", ScriptErrorString(parallel_result->first)), parallel_result->second);
+                }
+
+                if (!state.IsValid()) {
+                    ret = false;
+                }
+
+                // TODO: (optionally) loop through the block again and add useful transactions to the mempool?
+
+            }
+
+        }
+        if (!ret) {
+            if (m_options.signals) {
+                m_options.signals->BlockChecked(*block, state);
+            }
+            return;
+        }
+    }
+
+    return;
+}
+
 bool ChainstateManager::ProcessNewBlock(const std::shared_ptr<const CBlock>& block, bool force_processing, bool min_pow_checked, bool* new_block)
 {
     AssertLockNotHeld(cs_main);

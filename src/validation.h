@@ -1183,6 +1183,35 @@ public:
         std::multimap<uint256, FlatFilePos>* blocks_with_unknown_parent = nullptr);
 
     /**
+     * Verify a block. Optionally skips proof-of-work check or use nBits multiplier.
+     *
+     * TODO: avoid this convoluted mess?
+     * 
+     * If you want to *possibly* get feedback on whether block is valid, you must
+     * install a CValidationInterface (see validationinterface.h) - this will have
+     * its BlockChecked method called whenever *any* block completes validation.
+     *
+     * Note that we guarantee that either the proof-of-work is valid on block, or
+     * (and possibly also) BlockChecked will have been called.
+     *
+     * May not be called in a validationinterface callback.
+     * 
+     * TODO:
+     * - option to add good transactions to the mempool
+     * - option to jail non-standard transactions:
+     *   https://delvingbitcoin.org/t/second-look-at-weak-blocks/805
+     * - optionally skip PoW check
+     * - optionally provide higher target
+     *
+     * @param[in]   block The block we want to process.
+     * @param[in]   check_pow Perform proof-of-work check, nbits in the header
+     *                       is always checked.
+     * @param[in]   multiplier nBits multiplier, does not apply to the nbits
+     *                         header value check.
+     */
+    void CheckNewBlock(const std::shared_ptr<const CBlock>& block, const bool check_pow = true, const unsigned int multiplier = 1) LOCKS_EXCLUDED(cs_main);
+
+    /**
      * Process an incoming block. This only returns after the best known valid
      * block is made active. Note that it does not, however, guarantee that the
      * specific block passed to it has been checked for validity!
