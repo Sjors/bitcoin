@@ -444,11 +444,14 @@ class BlockchainTest(BitcoinTestFramework):
         # 1 hash in 2 should be valid, so difficulty should be 1/2**31
         # binary => decimal => binary math is why we do this check
         assert abs(difficulty * 2**31 - 1) < 0.0001
+        self.log.info("Next difficulty should be the same as the current (no difficulty adjustment)")
+        assert_equal(self.nodes[0].getdifficulty(next=True), difficulty)
 
     def _test_gettarget(self):
         self.log.info("Test gettarget")
         target = self.nodes[0].gettarget()
         assert_equal(target, target_str(REGTEST_TARGET))
+        assert_equal(self.nodes[0].gettarget(next=True), target_str(REGTEST_TARGET))
 
     def _test_getnetworkhashps(self):
         self.log.info("Test getnetworkhashps")
