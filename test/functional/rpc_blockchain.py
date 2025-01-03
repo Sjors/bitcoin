@@ -419,6 +419,7 @@ class BlockchainTest(BitcoinTestFramework):
         assert_is_hash_string(header['previousblockhash'])
         assert_is_hash_string(header['merkleroot'])
         assert_equal(header['bits'], nbits_str(REGTEST_N_BITS))
+        assert_equal(header['target'], target_str(REGTEST_TARGET))
         assert isinstance(header['time'], int)
         assert_equal(header['mediantime'], TIME_RANGE_MTP)
         assert isinstance(header['nonce'], int)
