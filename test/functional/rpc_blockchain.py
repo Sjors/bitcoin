@@ -11,6 +11,7 @@ Test the following RPCs:
     - gettxoutsetinfo
     - getblockheader
     - getdifficulty
+    - gettarget
     - getnetworkhashps
     - waitforblockheight
     - getblock
@@ -31,10 +32,12 @@ from test_framework.blocktools import (
     MAX_FUTURE_BLOCK_TIME,
     TIME_GENESIS_BLOCK,
     REGTEST_N_BITS,
+    REGTEST_TARGET,
     create_block,
     create_coinbase,
     create_tx_with_script,
     nbits_str,
+    target_str,
 )
 from test_framework.messages import (
     CBlockHeader,
@@ -90,6 +93,7 @@ class BlockchainTest(BitcoinTestFramework):
         self._test_gettxoutsetinfo()
         self._test_getblockheader()
         self._test_getdifficulty()
+        self._test_gettarget()
         self._test_getnetworkhashps()
         self._test_stopatheight()
         self._test_waitforblock() # also tests waitfornewblock
@@ -439,6 +443,11 @@ class BlockchainTest(BitcoinTestFramework):
         # 1 hash in 2 should be valid, so difficulty should be 1/2**31
         # binary => decimal => binary math is why we do this check
         assert abs(difficulty * 2**31 - 1) < 0.0001
+
+    def _test_gettarget(self):
+        self.log.info("Test gettarget")
+        target = self.nodes[0].gettarget()
+        assert_equal(target, target_str(REGTEST_TARGET))
 
     def _test_getnetworkhashps(self):
         self.log.info("Test getnetworkhashps")
