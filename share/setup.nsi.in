@@ -79,6 +79,7 @@ Section -Main SEC0000
     SetOutPath $INSTDIR\share\rpcauth
     File @abs_top_srcdir@/share/rpcauth/*.*
     SetOutPath $INSTDIR\daemon
+    File @abs_top_builddir@/release/@BITCOIN_WRAPPER_NAME@@EXEEXT@
     File @abs_top_builddir@/release/@BITCOIN_DAEMON_NAME@@EXEEXT@
     File @abs_top_builddir@/release/@BITCOIN_CLI_NAME@@EXEEXT@
     File @abs_top_builddir@/release/@BITCOIN_TX_NAME@@EXEEXT@

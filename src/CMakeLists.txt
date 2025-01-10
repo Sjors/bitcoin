@@ -309,6 +309,7 @@ target_link_libraries(bitcoin_node
 if(BUILD_BITCOIN_BIN)
   add_executable(bitcoin bitcoin.cpp)
   target_link_libraries(bitcoin core_interface bitcoin_util)
+  list(APPEND installable_targets bitcoin)
 endif()
 
 # Bitcoin Core bitcoind.
