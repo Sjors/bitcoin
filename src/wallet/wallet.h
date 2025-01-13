@@ -29,6 +29,7 @@
 #include <util/ui_change_type.h>
 #include <wallet/crypter.h>
 #include <wallet/db.h>
+#include <wallet/migrate_legacy.h>
 #include <wallet/scriptpubkeyman.h>
 #include <wallet/transaction.h>
 #include <wallet/types.h>
