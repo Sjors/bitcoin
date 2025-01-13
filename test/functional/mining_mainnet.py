@@ -11,8 +11,6 @@ For easier testing the difficulty is maximally increased in the first (and only)
 regarget period, by producing blocks approximately 2 minutes apart.
 
 The alternate mainnet chain was generated as follows:
-- coinbase address derived from first BIP32 test vector master key:
-  tr(xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi/86h/0h/0h/0/0)#d6vpenmd
 - use faketime to set node clock to 2 minutes after genesis block
 - mine a block using a CPU miner such as https://github.com/pooler/cpuminer
 - restart node with a faketime 2 minutes later
@@ -53,10 +51,15 @@ from test_framework.blocktools import (
 
 from test_framework.messages import (
     CBlock,
+    tx_from_hex,
 )
 
 import json
 import os
+
+# Derived from first BIP32 test vector master key:
+# Use pkh() because tr() outputs at low heights are not spendable (unexpected-witness)
+COINBASE_OUTPUT_DESCRIPTOR="pkh(xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi/44h/0h/0h/<0;1>/*)#fkjtr0yn"
 
 class MiningMainnetTest(BitcoinTestFramework):
 
@@ -72,6 +75,8 @@ class MiningMainnetTest(BitcoinTestFramework):
             help='Block data file (default: %(default)s)',
         )
 
+        self.add_wallet_options(parser)
+
     def run_test(self):
         node = self.nodes[0]
         # Clear disk space warning
@@ -80,6 +85,8 @@ class MiningMainnetTest(BitcoinTestFramework):
         self.log.info("Load alternative mainnet blocks")
         path = os.path.join(os.path.dirname(os.path.realpath(__file__)), self.options.datafile)
         prev_hash = node.getbestblockhash()
+        # 1NQpH6Nf8QtR2HphLRcvuVqfhXBXsiWn8r (see descriptor above)
+        coinbase_script = bytes.fromhex("76a914eadbac7f36c37e39361168b7aaee3cb24a25312d88ac")
         with open(path, encoding='utf-8') as f:
             blocks = json.load(f)
             n_blocks = len(blocks['timestamps'])
@@ -92,8 +99,7 @@ class MiningMainnetTest(BitcoinTestFramework):
                 block.nTime = blocks['timestamps'][i]
                 block.nBits = DIFF_1_N_BITS
                 block.nNonce = blocks['nonces'][i]
-                # bc1pqqeyhah6g75dwr942xv40h255q4nshqw4k8ylyhe7plej2eg3mnqz9w4np (see descriptor above)
-                block.vtx = [create_coinbase(height=i + 1, script_pubkey=bytes.fromhex("512000324bf6fa47a8d70cb5519957dd54a02b385c0ead8e4f92f9f07f992b288ee6"), retarget_period=2016)]
+                block.vtx = [create_coinbase(height=i + 1, script_pubkey=coinbase_script, retarget_period=2016)]
                 block.hashMerkleRoot = block.calc_merkle_root()
                 block.rehash()
                 block_hex = block.serialize(with_witness=True).hex()
@@ -116,6 +122,47 @@ class MiningMainnetTest(BitcoinTestFramework):
 
         assert_equal(node.getdifficulty(next=True), 4)
         assert_equal(node.gettarget(next=True), target_str(DIFF_4_TARGET))
+
+        # Check that generated coins are spendable
+        if self.is_wallet_compiled():
+            node.createwallet(wallet_name="wallet", blank=True)
+            wallet = node.get_wallet_rpc("wallet")
+            res = wallet.importdescriptors([{
+                "desc": COINBASE_OUTPUT_DESCRIPTOR,
+                "timestamp": 0,
+                "active": True
+            }])
+            assert(res[0]['success'])
+            address = "1NQpH6Nf8QtR2HphLRcvuVqfhXBXsiWn8r"
+            info = wallet.getaddressinfo(address)
+            print(info)
+            assert(info['ismine'])
+            address_2 = wallet.getnewaddress(address_type="legacy")
+            res = wallet.send(outputs={address_2: 1}, inputs=[{"txid": "bb33a069b1892a63a863cb56bbf2ad839581e961d69038a77b5cfeee4ee48416", "vout": 0}], change_position=1)
+            assert(res['complete'])
+            assert_equal(node.getrawmempool(), [res['txid']])
+            tx_hex = node.getrawtransaction(res['txid'], 0)
+            assert_equal(res['txid'], "dda7ed7c2912b3db1d5a67fc728a4dfeedeb5b8fce6578ace9a80f0817051cb7")
+
+            # Mine transaction
+            block = CBlock()
+            block.nVersion = 0x20000000
+            block.hashPrevBlock = int(prev_hash, 16)
+            # block.nTime = blocks['timestamps'][2016]
+            block.nBits = DIFF_1_N_BITS
+            # block.nNonce = blocks['nonces'][2016]
+            block.vtx = [
+                create_coinbase(height=i + 1, script_pubkey=coinbase_script, retarget_period=2016),
+                tx_from_hex(tx_hex)
+            ]
+            block.hashMerkleRoot = block.calc_merkle_root()
+            block.rehash()
+            block_hex = block.serialize(with_witness=True).hex()
+            self.log.debug(block_hex)
+            assert_equal(node.submitblock(block_hex), None)
+            prev_hash = node.getbestblockhash()
+            assert_equal(prev_hash, block.hash)
+
 
 if __name__ == '__main__':
     MiningMainnetTest(__file__).main()
