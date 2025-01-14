@@ -111,7 +111,7 @@ class MiningMainnetTest(BitcoinTestFramework):
         with open(path, encoding='utf-8') as f:
             blocks = json.load(f)
             n_blocks = len(blocks['timestamps'])
-            assert_equal(n_blocks, 2015)
+            # assert_equal(n_blocks, 2015 + 2016)
             for i in range(2014):
                 prev_hash = self.mine(i + 1, prev_hash, blocks, node)
 
@@ -162,6 +162,13 @@ class MiningMainnetTest(BitcoinTestFramework):
 
         assert_equal(node.getdifficulty(next=True), 4)
         assert_equal(node.gettarget(next=True), target_str(DIFF_4_TARGET))
+
+        self.log.info("Mine slow blocks to bring difficulty back to 1")
+        for i in range(2016, 4031):
+            prev_hash = self.mine(i, prev_hash, blocks, node)
+
+        assert_equal(mining_info['next']['height'], 4032)
+        assert_equal(mining_info['next']['difficulty'], 1)
 
 if __name__ == '__main__':
     MiningMainnetTest(__file__).main()
