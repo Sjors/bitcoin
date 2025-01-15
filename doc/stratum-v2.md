@@ -14,12 +14,12 @@ local network or remote. A third possible use case is where a miner relies on a
 node run by someone else to provide the templates. Trust may not go both ways in
 that scenario, see the section on DoS.
 
-We send them a new block template whenenver out tip is updated, or when mempool
+We send them a new block template whenever our tip is updated, or when mempool
 fees have increased sufficiently. If the pool finds a block, we attempt to
 broadcast it based on a cached template.
 
 Communication with other roles uses the Noise Protocol, which has been implemented
-to the extend necessary. Its cryptographic primitives were chosen so that they
+to the extent necessary. Its cryptographic primitives were chosen so that they
 were already present in the  Bitcoin Core project at the time of writing the spec.
 
 ### Advantage over getblocktemplate RPC
@@ -126,7 +126,7 @@ The Cluster Mempool project might enable that.
 ### DoS and privacy
 
 The current Template Provider should not be run on the public internet with
-unlimited access. It is not harneded against DoS attacks, nor against mempool probing.
+unlimited access. It is not hardened against DoS attacks, nor against mempool probing.
 
 There's currently no limit to the number of Job Declarator clients that can connect,
 which could exhaust memory. There's also no limit to the amount of raw transaction
@@ -198,7 +198,7 @@ TODO
 This is also needed for functional test suite coverage. It's also the only test
 network doesn't need a standalone CPU miner or ASIC.
 
-Perhaps a mock Job Declator client can be added. We also need a way mine a given
+Perhaps a mock Job Declarator client can be added. We also need a way mine a given
 block template, akin to `generate`.
 
 To make testing easier it should be possible to use a connection without Noise Protocol.
@@ -223,7 +223,7 @@ First start the node:
 build/src/bitcoind -testnet4 -sv2 -debug=sv2
 ```
 
-Build and run a Job Declator client: [stratum-mining/stratum/tree/main/roles/jd-client](https://github.com/stratum-mining/stratum/tree/main/roles/jd-client
+Build and run a Job Declarator client: [stratum-mining/stratum/tree/main/roles/jd-client](https://github.com/stratum-mining/stratum/tree/main/roles/jd-client
 
 This client connects to your node to receive new block templates and then "declares"
 them to a Job Declarator server. Additionally it connects to the pool itself.
@@ -237,7 +237,7 @@ of any type and then use the `getaddressinfo` RPC to find its public key.
 Finally you most likely need to use the v1 to v2 translator: [stratum-mining/stratum/tree/main/roles/translator](https://github.com/stratum-mining/stratum/tree/main/roles/translator),
 even when you have a stratum v2 capable miner (see notes on ASIC's and Firmware below).
 
-You need to point the translator to your job declator client, which in turn takes
+You need to point the translator to your job declarator client, which in turn takes
 care of connecting to the pool. Try [tproxy-config-local-jdc-example.toml](https://github.com/stratum-mining/stratum/blob/main/roles/translator/tproxy-config-local-jdc-example.toml).
 
 As soon as you turn on the translator, the Bitcoin Core log should show a `SetupConnection` [message](https://github.com/stratum-mining/sv2-spec/blob/main/08-Message-Types.md).
@@ -280,7 +280,7 @@ signetchallenge=51
 This challenge represents "the special case where an empty solution is valid
 (i.e. scriptSig and scriptWitness are both empty)", see [BIP 325](https://github.com/bitcoin/bips/blob/master/bip-0325.mediawiki). For mining software things will look just like testnet.
 
-The new chain needs to have at least 16 blocks, or the SRI software will panick.
+The new chain needs to have at least 16 blocks, or the SRI software will panic.
 So we'll mine those using `bitcoin-util grind`:
 
 ```sh
