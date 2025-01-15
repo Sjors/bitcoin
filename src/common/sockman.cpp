@@ -132,8 +132,8 @@ void SockMan::JoinSocketsThreads()
     }
 }
 
-std::optional<NodeId>
-SockMan::ConnectAndMakeNodeId(const std::variant<CService, StringHostIntPort>& to,
+std::optional<ConnectionId>
+SockMan::Connect(const std::variant<CService, StringHostIntPort>& to,
                               bool is_important,
                               const Proxy& proxy,
                               bool& proxy_failed,
@@ -206,24 +206,24 @@ SockMan::ConnectAndMakeNodeId(const std::variant<CService, StringHostIntPort>& t
         me = GetBindAddress(*sock);
     }
 
-    const NodeId node_id{GetNewNodeId()};
+    const ConnectionId connection_id{GetNewId()};
 
     {
         LOCK(m_connected_mutex);
-        m_connected.emplace(node_id, std::make_shared<NodeSockets>(std::move(sock),
+        m_connected.emplace(connection_id, std::make_shared<Sockets>(std::move(sock),
                                                                    std::move(i2p_transient_session)));
     }
 
-    return node_id;
+    return connection_id;
 }
 
-bool SockMan::CloseConnection(NodeId node_id)
+bool SockMan::CloseConnection(ConnectionId connection_id)
 {
     LOCK(m_connected_mutex);
-    return m_connected.erase(node_id) > 0;
+    return m_connected.erase(connection_id) > 0;
 }
 
-ssize_t SockMan::SendBytes(NodeId node_id,
+ssize_t SockMan::SendBytes(ConnectionId connection_id,
                            std::span<const unsigned char> data,
                            bool will_send_more,
                            std::string& errmsg) const
@@ -234,8 +234,8 @@ ssize_t SockMan::SendBytes(NodeId node_id,
         return 0;
     }
 
-    auto node_sockets{GetNodeSockets(node_id)};
-    if (!node_sockets) {
+    auto connection_sockets{GetconnectionSockets(connection_id)};
+    if (!connection_sockets) {
         // Bail out immediately and just leave things in the caller's send queue.
         return 0;
     }
@@ -248,8 +248,8 @@ ssize_t SockMan::SendBytes(NodeId node_id,
 #endif
 
     const ssize_t sent{WITH_LOCK(
-        node_sockets->mutex,
-        return node_sockets->sock->Send(reinterpret_cast<const char*>(data.data()), data.size(), flags);)};
+        connection_sockets->mutex,
+        return connection_sockets->sock->Send(reinterpret_cast<const char*>(data.data()), data.size(), flags);)};
 
     if (sent >= 0) {
         return sent;
@@ -268,20 +268,20 @@ void SockMan::CloseSockets()
     m_listen.clear();
 }
 
-bool SockMan::ShouldTryToSend(NodeId node_id) const { return true; }
+bool SockMan::ShouldTryToSend(ConnectionId connection_id) const { return true; }
 
-bool SockMan::ShouldTryToRecv(NodeId node_id) const { return true; }
+bool SockMan::ShouldTryToRecv(ConnectionId connection_id) const { return true; }
 
-void SockMan::EventIOLoopCompletedForNode(NodeId node_id) {}
+void SockMan::EventIOLoopCompletedFor(ConnectionId connection_id) {}
 
 void SockMan::EventIOLoopCompletedForAllPeers() {}
 
 void SockMan::EventI2PListen(const CService&, bool) {}
 
-void SockMan::TestOnlyAddExistentNode(NodeId node_id, std::unique_ptr<Sock>&& sock)
+void SockMan::TestOnlyAddExistentNode(ConnectionId connection_id, std::unique_ptr<Sock>&& sock)
 {
     LOCK(m_connected_mutex);
-    const auto result{m_connected.emplace(node_id, std::make_shared<NodeSockets>(std::move(sock)))};
+    const auto result{m_connected.emplace(connection_id, std::make_shared<Sockets>(std::move(sock)))};
     assert(result.second);
 }
 
@@ -392,21 +392,21 @@ void SockMan::NewSockAccepted(std::unique_ptr<Sock>&& sock, const CService& me, 
                  them.ToStringAddrPort());
     }
 
-    const NodeId node_id{GetNewNodeId()};
+    const ConnectionId connection_id{GetNewId()};
 
     {
         LOCK(m_connected_mutex);
-        m_connected.emplace(node_id, std::make_shared<NodeSockets>(std::move(sock)));
+        m_connected.emplace(connection_id, std::make_shared<Sockets>(std::move(sock)));
     }
 
-    if (!EventNewConnectionAccepted(node_id, me, them)) {
-        CloseConnection(node_id);
+    if (!EventNewConnectionAccepted(connection_id, me, them)) {
+        CloseConnection(connection_id);
     }
 }
 
-NodeId SockMan::GetNewNodeId()
+ConnectionId SockMan::GetNewId()
 {
-    return m_next_node_id.fetch_add(1, std::memory_order_relaxed);
+    return m_next_connection_id.fetch_add(1, std::memory_order_relaxed);
 }
 
 SockMan::IOReadiness SockMan::GenerateWaitSockets()
@@ -421,14 +421,14 @@ SockMan::IOReadiness SockMan::GenerateWaitSockets()
 
     auto connected_snapshot{WITH_LOCK(m_connected_mutex, return m_connected;)};
 
-    for (const auto& [node_id, node_sockets] : connected_snapshot) {
-        const bool select_recv{ShouldTryToRecv(node_id)};
-        const bool select_send{ShouldTryToSend(node_id)};
+    for (const auto& [connection_id, connection_sockets] : connected_snapshot) {
+        const bool select_recv{ShouldTryToRecv(connection_id)};
+        const bool select_send{ShouldTryToSend(connection_id)};
         if (!select_recv && !select_send) continue;
 
         Sock::Event event = (select_send ? Sock::SEND : 0) | (select_recv ? Sock::RECV : 0);
-        io_readiness.events_per_sock.emplace(node_sockets->sock, Sock::Events{event});
-        io_readiness.node_ids_per_sock.emplace(node_sockets->sock, node_id);
+        io_readiness.events_per_sock.emplace(connection_sockets->sock, Sock::Events{event});
+        io_readiness.connection_ids_per_sock.emplace(connection_sockets->sock, connection_id);
     }
 
     return io_readiness;
@@ -443,11 +443,11 @@ void SockMan::SocketHandlerConnected(const IOReadiness& io_readiness)
             return;
         }
 
-        auto it{io_readiness.node_ids_per_sock.find(sock)};
-        if (it == io_readiness.node_ids_per_sock.end()) {
+        auto it{io_readiness.connection_ids_per_sock.find(sock)};
+        if (it == io_readiness.connection_ids_per_sock.end()) {
             continue;
         }
-        const NodeId node_id{it->second};
+        const ConnectionId connection_id{it->second};
 
         bool send_ready = events.occurred & Sock::SEND;
         bool recv_ready = events.occurred & Sock::RECV;
@@ -456,7 +456,7 @@ void SockMan::SocketHandlerConnected(const IOReadiness& io_readiness)
         if (send_ready) {
             bool cancel_recv;
 
-            EventReadyToSend(node_id, cancel_recv);
+            EventReadyToSend(connection_id, cancel_recv);
 
             if (cancel_recv) {
                 recv_ready = false;
@@ -466,33 +466,33 @@ void SockMan::SocketHandlerConnected(const IOReadiness& io_readiness)
         if (recv_ready || err_ready) {
             uint8_t buf[0x10000]; // typical socket buffer is 8K-64K
 
-            auto node_sockets{GetNodeSockets(node_id)};
-            if (!node_sockets) {
+            auto connection_sockets{GetconnectionSockets(connection_id)};
+            if (!connection_sockets) {
                 continue;
             }
 
             const ssize_t nrecv{WITH_LOCK(
-                node_sockets->mutex,
-                return node_sockets->sock->Recv(buf, sizeof(buf), MSG_DONTWAIT);)};
+                connection_sockets->mutex,
+                return connection_sockets->sock->Recv(buf, sizeof(buf), MSG_DONTWAIT);)};
 
             switch (nrecv) {
             case -1: {
                 const int err = WSAGetLastError();
                 if (err != WSAEWOULDBLOCK && err != WSAEMSGSIZE && err != WSAEINTR && err != WSAEINPROGRESS) {
-                    EventGotPermanentReadError(node_id, NetworkErrorString(err));
+                    EventGotPermanentReadError(connection_id, NetworkErrorString(err));
                 }
                 break;
             }
             case 0:
-                EventGotEOF(node_id);
+                EventGotEOF(connection_id);
                 break;
             default:
-                EventGotData(node_id, buf, nrecv);
+                EventGotData(connection_id, buf, nrecv);
                 break;
             }
         }
 
-        EventIOLoopCompletedForNode(node_id);
+        EventIOLoopCompletedFor(connection_id);
     }
 }
 
@@ -517,11 +517,11 @@ void SockMan::SocketHandlerListening(const Sock::EventsPerSock& events_per_sock)
     }
 }
 
-std::shared_ptr<SockMan::NodeSockets> SockMan::GetNodeSockets(NodeId node_id) const
+std::shared_ptr<SockMan::Sockets> SockMan::GetconnectionSockets(ConnectionId connection_id) const
 {
     LOCK(m_connected_mutex);
 
-    auto it{m_connected.find(node_id)};
+    auto it{m_connected.find(connection_id)};
     if (it == m_connected.end()) {
         // There is no socket in case we've already disconnected, or in test cases without
         // real connections.

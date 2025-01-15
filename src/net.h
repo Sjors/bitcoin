@@ -95,6 +95,8 @@ static const size_t DEFAULT_MAXSENDBUFFER    = 1 * 1000;
 
 static constexpr bool DEFAULT_V2_TRANSPORT{true};
 
+typedef ConnectionId NodeId;
+
 struct AddedNodeParams {
     std::string m_added_node;
     bool m_use_v2transport;
@@ -1305,7 +1307,7 @@ private:
     virtual bool ShouldTryToRecv(NodeId node_id) const override
         EXCLUSIVE_LOCKS_REQUIRED(!m_nodes_mutex);
 
-    virtual void EventIOLoopCompletedForNode(NodeId node_id) override
+    virtual void EventIOLoopCompletedFor(NodeId node_id) override
         EXCLUSIVE_LOCKS_REQUIRED(!m_nodes_mutex);
 
     virtual void EventIOLoopCompletedForAllPeers() override

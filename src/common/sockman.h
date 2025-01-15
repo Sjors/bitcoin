@@ -20,7 +20,7 @@
 #include <variant>
 #include <vector>
 
-typedef int64_t NodeId;
+typedef int64_t ConnectionId;
 
 /**
  * A socket manager class which handles socket operations.
@@ -89,7 +89,7 @@ public:
     };
 
     /**
-     * Make an outbound connection, save the socket internally and return a newly generated node id.
+     * Make an outbound connection, save the socket internally and return a newly generated connection id.
      * @param[in] to The address to connect to, either as CService or a host as string and port as
      * an integer, if the later is used, then `proxy` must be valid.
      * @param[in] is_important If true, then log failures with higher severity.
@@ -98,9 +98,9 @@ public:
      * proxy, then it will be set to true.
      * @param[out] me If the connection was successful then this is set to the address on the
      * local side of the socket.
-     * @return Newly generated node id, or std::nullopt if the operation fails.
+     * @return Newly generated connection id, or std::nullopt if the operation fails.
      */
-    std::optional<NodeId> ConnectAndMakeNodeId(const std::variant<CService, StringHostIntPort>& to,
+    std::optional<ConnectionId> Connect(const std::variant<CService, StringHostIntPort>& to,
                                                bool is_important,
                                                const Proxy& proxy,
                                                bool& proxy_failed,
@@ -111,12 +111,12 @@ public:
      * Disconnect a given peer by closing its socket and release resources occupied by it.
      * @return Whether the peer existed and its socket was closed by this call.
      */
-    bool CloseConnection(NodeId node_id)
+    bool CloseConnection(ConnectionId connection_id)
         EXCLUSIVE_LOCKS_REQUIRED(!m_connected_mutex);
 
     /**
-     * Try to send some data to the given node.
-     * @param[in] node_id Identifier of the node to send to.
+     * Try to send some data to the given connection.
+     * @param[in] connection_id Identifier of the connection to send to.
      * @param[in] data The data to send, it might happen that only a prefix of this is sent.
      * @param[in] will_send_more Used as an optimization if the caller knows that they will
      * be sending more data soon after this call.
@@ -125,7 +125,7 @@ public:
      * @retval >=0 The number of bytes actually sent.
      * @retval <0 A permanent error has occurred.
      */
-    ssize_t SendBytes(NodeId node_id,
+    ssize_t SendBytes(ConnectionId connection_id,
                       std::span<const unsigned char> data,
                       bool will_send_more,
                       std::string& errmsg) const
@@ -150,7 +150,7 @@ protected:
      * During some tests mocked sockets are created outside of `SockMan`, make it
      * possible to add those so that send/recv can be exercised.
      */
-    void TestOnlyAddExistentNode(NodeId node_id, std::unique_ptr<Sock>&& sock)
+    void TestOnlyAddExistentNode(ConnectionId connection_id, std::unique_ptr<Sock>&& sock)
         EXCLUSIVE_LOCKS_REQUIRED(!m_connected_mutex);
 
 private:
@@ -167,14 +167,14 @@ private:
 
     /**
      * Be notified when a new connection has been accepted.
-     * @param[in] node_id Id of the newly accepted connection.
+     * @param[in] connection_id Id of the newly accepted connection.
      * @param[in] me The address and port at our side of the connection.
      * @param[in] them The address and port at the peer's side of the connection.
      * @retval true The new connection was accepted at the higher level.
      * @retval false The connection was refused at the higher level, so the
-     * associated socket and node_id should be discarded by `SockMan`.
+     * associated socket and connection_id should be discarded by `SockMan`.
      */
-    virtual bool EventNewConnectionAccepted(NodeId node_id,
+    virtual bool EventNewConnectionAccepted(ConnectionId connection_id,
                                             const CService& me,
                                             const CService& them) = 0;
 
@@ -182,34 +182,34 @@ private:
      * Called when the socket is ready to send data and `ShouldTryToSend()` has
      * returned true. This is where the higher level code serializes its messages
      * and calls `SockMan::SendBytes()`.
-     * @param[in] node_id Id of the node whose socket is ready to send.
+     * @param[in] connection_id Id of the connection whose socket is ready to send.
      * @param[out] cancel_recv Should always be set upon return and if it is true,
-     * then the next attempt to receive data from that node will be omitted.
+     * then the next attempt to receive data from that connection will be omitted.
      */
-    virtual void EventReadyToSend(NodeId node_id, bool& cancel_recv) = 0;
+    virtual void EventReadyToSend(ConnectionId connection_id, bool& cancel_recv) = 0;
 
     /**
      * Called when new data has been received.
-     * @param[in] node_id Node for which the data arrived.
+     * @param[in] connection_id connection for which the data arrived.
      * @param[in] data Data buffer.
      * @param[in] n Number of bytes in `data`.
      */
-    virtual void EventGotData(NodeId node_id, const uint8_t* data, size_t n) = 0;
+    virtual void EventGotData(ConnectionId connection_id, const uint8_t* data, size_t n) = 0;
 
     /**
      * Called when the remote peer has sent an EOF on the socket. This is a graceful
      * close of their writing side, we can still send and they will receive, if it
      * makes sense at the application level.
-     * @param[in] node_id Node whose socket got EOF.
+     * @param[in] connection_id connection whose socket got EOF.
      */
-    virtual void EventGotEOF(NodeId node_id) = 0;
+    virtual void EventGotEOF(ConnectionId connection_id) = 0;
 
     /**
      * Called when we get an irrecoverable error trying to read from a socket.
-     * @param[in] node_id Node whose socket got an error.
+     * @param[in] connection_id connection whose socket got an error.
      * @param[in] errmsg Message describing the error.
      */
-    virtual void EventGotPermanentReadError(NodeId node_id, const std::string& errmsg) = 0;
+    virtual void EventGotPermanentReadError(ConnectionId connection_id, const std::string& errmsg) = 0;
 
     //
     // Non-pure virtual functions can be overridden by children classes or left
@@ -218,33 +218,33 @@ private:
 
     /**
      * SockMan would only call EventReadyToSend() if this returns true.
-     * Can be used to temporarily pause sends for a node.
+     * Can be used to temporarily pause sends for a connection.
      * The implementation in SockMan always returns true.
-     * @param[in] node_id Node for which to confirm or cancel a call to EventReadyToSend().
+     * @param[in] connection_id connection for which to confirm or cancel a call to EventReadyToSend().
      */
-    virtual bool ShouldTryToSend(NodeId node_id) const;
+    virtual bool ShouldTryToSend(ConnectionId connection_id) const;
 
     /**
-     * SockMan would only call Recv() on a node's socket if this returns true.
-     * Can be used to temporarily pause receives for a node.
+     * SockMan would only call Recv() on a connection's socket if this returns true.
+     * Can be used to temporarily pause receives for a connection.
      * The implementation in SockMan always returns true.
-     * @param[in] node_id Node for which to confirm or cancel a receive.
+     * @param[in] connection_id connection for which to confirm or cancel a receive.
      */
-    virtual bool ShouldTryToRecv(NodeId node_id) const;
+    virtual bool ShouldTryToRecv(ConnectionId connection_id) const;
 
     /**
-     * SockMan has completed the current send+recv iteration for a node.
-     * It will do another send+recv for this node after processing all other nodes.
-     * Can be used to execute periodic tasks for a given node.
+     * SockMan has completed the current send+recv iteration for a connection.
+     * It will do another send+recv for this connection after processing all other connections.
+     * Can be used to execute periodic tasks for a given connection.
      * The implementation in SockMan does nothing.
-     * @param[in] node_id Node for which send+recv has been done.
+     * @param[in] connection_id connection for which send+recv has been done.
      */
-    virtual void EventIOLoopCompletedForNode(NodeId node_id);
+    virtual void EventIOLoopCompletedFor(ConnectionId connection_id);
 
     /**
-     * SockMan has completed send+recv for all nodes.
-     * Can be used to execute periodic tasks for all nodes, like disconnecting
-     * nodes due to higher level logic.
+     * SockMan has completed send+recv for all connections.
+     * Can be used to execute periodic tasks for all connections, like disconnecting
+     * connections due to higher level logic.
      * The implementation in SockMan does nothing.
      */
     virtual void EventIOLoopCompletedForAllPeers();
@@ -261,15 +261,15 @@ private:
     virtual void EventI2PListen(const CService& addr, bool success);
 
     /**
-     * The sockets used by a connected node - a data socket and an optional I2P session.
+     * The sockets used by a connected connection - a data socket and an optional I2P session.
      */
-    struct NodeSockets {
-        explicit NodeSockets(std::unique_ptr<Sock>&& s)
+    struct Sockets {
+        explicit Sockets(std::unique_ptr<Sock>&& s)
             : sock{std::move(s)}
         {
         }
 
-        explicit NodeSockets(std::shared_ptr<Sock>&& s, std::unique_ptr<i2p::sam::Session>&& sess)
+        explicit Sockets(std::shared_ptr<Sock>&& s, std::unique_ptr<i2p::sam::Session>&& sess)
             : sock{std::move(s)},
               i2p_transient_session{std::move(sess)}
         {
@@ -290,8 +290,8 @@ private:
         std::shared_ptr<Sock> sock;
 
         /**
-         * When transient I2P sessions are used, then each node has its own session, otherwise
-         * all nodes use the session from `m_i2p_sam_session` and share the same I2P address.
+         * When transient I2P sessions are used, then each connection has its own session, otherwise
+         * all connections use the session from `m_i2p_sam_session` and share the same I2P address.
          * I2P sessions involve a data/transport socket (in `sock`) and a control socket
          * (in `i2p_transient_session`). For transient sessions, once the data socket `sock` is
          * closed, the control socket is not going to be used anymore and would be just taking
@@ -301,11 +301,11 @@ private:
     };
 
     /**
-     * Info about which socket has which event ready and its node id.
+     * Info about which socket has which event ready and its connection id.
      */
     struct IOReadiness {
         Sock::EventsPerSock events_per_sock;
-        std::unordered_map<Sock::EventsPerSock::key_type, NodeId> node_ids_per_sock;
+        std::unordered_map<Sock::EventsPerSock::key_type, ConnectionId> connection_ids_per_sock;
     };
 
     /**
@@ -331,7 +331,7 @@ private:
 
     /**
      * After a new socket with a peer has been created, configure its flags,
-     * make a new node id and call `EventNewConnectionAccepted()`.
+     * make a new connection id and call `EventNewConnectionAccepted()`.
      * @param[in] sock The newly created socket.
      * @param[in] me Address at our end of the connection.
      * @param[in] them Address of the new peer.
@@ -340,21 +340,21 @@ private:
         EXCLUSIVE_LOCKS_REQUIRED(!m_connected_mutex);
 
     /**
-     * Generate an id for a newly created node.
+     * Generate an id for a newly created connection.
      */
-    NodeId GetNewNodeId();
+    ConnectionId GetNewId();
 
     /**
      * Generate a collection of sockets to check for IO readiness.
      * @return Sockets to check for readiness plus an aux map to find the
-     * corresponding node id given a socket.
+     * corresponding connection id given a socket.
      */
     IOReadiness GenerateWaitSockets()
         EXCLUSIVE_LOCKS_REQUIRED(!m_connected_mutex);
 
     /**
      * Do the read/write for connected sockets that are ready for IO.
-     * @param[in] io_readiness Which sockets are ready and their node ids.
+     * @param[in] io_readiness Which sockets are ready and their connection ids.
      */
     void SocketHandlerConnected(const IOReadiness& io_readiness)
         EXCLUSIVE_LOCKS_REQUIRED(!m_connected_mutex);
@@ -368,16 +368,16 @@ private:
 
     /**
      * Retrieve an entry from m_connected.
-     * @param[in] node_id Node id to search for.
-     * @return NodeSockets for the given node id or empty shared_ptr if not found.
+     * @param[in] connection_id connection id to search for.
+     * @return Sockets for the given connection id or empty shared_ptr if not found.
      */
-    std::shared_ptr<NodeSockets> GetNodeSockets(NodeId node_id) const
+    std::shared_ptr<Sockets> GetconnectionSockets(ConnectionId connection_id) const
         EXCLUSIVE_LOCKS_REQUIRED(!m_connected_mutex);
 
     /**
-     * The id to assign to the next created node. Used to generate ids of nodes.
+     * The id to assign to the next created connection. Used to generate ids of connections.
      */
-    std::atomic<NodeId> m_next_node_id{0};
+    std::atomic<ConnectionId> m_next_connection_id{0};
 
     /**
      * Thread that sends to and receives from sockets and accepts connections.
@@ -422,7 +422,7 @@ private:
      * The `shared_ptr` makes it possible to create a snapshot of this by simply copying
      * it (under `m_connected_mutex`).
      */
-    std::unordered_map<NodeId, std::shared_ptr<NodeSockets>> m_connected GUARDED_BY(m_connected_mutex);
+    std::unordered_map<ConnectionId, std::shared_ptr<Sockets>> m_connected GUARDED_BY(m_connected_mutex);
 };
 
 #endif // BITCOIN_COMMON_SOCKMAN_H

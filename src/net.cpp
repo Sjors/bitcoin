@@ -448,7 +448,7 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
                 LogPrintLevel(BCLog::PROXY, BCLog::Level::Debug, "Using proxy: %s to connect to %s\n", proxy.ToString(), target_addr.ToStringAddrPort());
             }
 
-            node_id = ConnectAndMakeNodeId(target_addr,
+            node_id = Connect(target_addr,
                                            /*is_important=*/conn_type == ConnectionType::MANUAL,
                                            proxy,
                                            proxyConnectionFailed,
@@ -465,7 +465,7 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
             SplitHostPort(pszDest, port, host);
 
             bool dummy;
-            node_id = ConnectAndMakeNodeId(StringHostIntPort{host, port},
+            node_id = Connect(StringHostIntPort{host, port},
                                            /*is_important=*/conn_type == ConnectionType::MANUAL,
                                            proxy,
                                            dummy,
@@ -2052,7 +2052,7 @@ bool CConnman::ShouldTryToRecv(NodeId node_id) const
     return !node->fPauseRecv;
 }
 
-void CConnman::EventIOLoopCompletedForNode(NodeId node_id)
+void CConnman::EventIOLoopCompletedFor(NodeId node_id)
 {
     AssertLockNotHeld(m_nodes_mutex);
 
