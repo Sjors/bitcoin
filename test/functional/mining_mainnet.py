@@ -30,6 +30,7 @@ from test_framework.blocktools import (
 
 from test_framework.messages import (
     CBlock,
+    tx_from_hex,
 )
 
 import json
@@ -56,7 +57,7 @@ class MiningMainnetTest(BitcoinTestFramework):
 
         self.add_wallet_options(parser)
 
-    def mine(self, height, prev_hash, blocks, node, fees=0):
+    def mine(self, height, prev_hash, blocks, node, txs=None, fees=0):
         self.log.debug(f"height={height}")
         block = CBlock()
         block.nVersion = 0x20000000
@@ -64,7 +65,10 @@ class MiningMainnetTest(BitcoinTestFramework):
         block.nTime = blocks['timestamps'][height - 1]
         block.nBits = DIFF_1_N_BITS
         block.nNonce = blocks['nonces'][height - 1]
-        block.vtx = [create_coinbase(height=height, script_pubkey=bytes.fromhex(COINBASE_SCRIPT_PUBKEY), retarget_period=2016)]
+        block.vtx = [] if txs is None else txs
+        # 1NQpH6Nf8QtR2HphLRcvuVqfhXBXsiWn8r (see descriptor above)
+        coinbase_script = bytes.fromhex(COINBASE_SCRIPT_PUBKEY)
+        block.vtx.insert(0, create_coinbase(height=height, script_pubkey=coinbase_script, retarget_period=2016, fees=fees))
         block.hashMerkleRoot = block.calc_merkle_root()
         block.rehash()
         block_hex = block.serialize(with_witness=False).hex()
@@ -87,10 +91,42 @@ class MiningMainnetTest(BitcoinTestFramework):
             blocks = json.load(f)
             n_blocks = len(blocks['timestamps'])
             assert_equal(n_blocks, 2015)
-            for i in range(2015):
+            for i in range(2014):
                 prev_hash = self.mine(i + 1, prev_hash, blocks, node)
 
-        assert_equal(node.getblockcount(), 2015)
+        assert_equal(node.getblockcount(), 2014)
+
+        # For the last block of the retarget period, check that previously generated
+        # coins are spendable.
+        tx_hex = "02000000010bf26bc93a554005ea8df44e8c7ab40ef2e2b94a44d3d1a2fd9b25606e7ba313000000006a47304402205258439112356e26f3cd1d71ac8da7c2f31421c2f98d98b8b643beeb03ddc8b9022009b9a1c0d1bface153ad10caf8860d5bd8c27fb46759720edcd21d78f91d7a8d01210239b4b3a27cd1dd8993038d5eb6449220b350c32ae62fec0833b93db8a49031c5fdffffff0200e1f505000000001976a9144002d20168718acbc3b05de8504b138c7a13436d88ac6cff0f24010000001976a914922c2841f27c4778f97ba6c71e0a79685a6f2c4088ac00000000"
+
+        if self.is_wallet_compiled():
+            self.log.info("Verify hardcoded coinbase spending transaction by generating it")
+            node.createwallet(wallet_name="wallet", blank=True)
+            wallet = node.get_wallet_rpc("wallet")
+            res = wallet.importdescriptors([{
+                "desc": COINBASE_OUTPUT_DESCRIPTOR,
+                "timestamp": 0,
+                "active": True
+            }])
+            assert(res[0]['success'])
+            address = "1NQpH6Nf8QtR2HphLRcvuVqfhXBXsiWn8r"
+            info = wallet.getaddressinfo(address)
+            assert(info['ismine'])
+            assert_equal(info['scriptPubKey'], COINBASE_SCRIPT_PUBKEY)
+            address_2 = wallet.getnewaddress(address_type="legacy")
+            res = wallet.send(
+                outputs={address_2: 1},
+                inputs=[{"txid": "13a37b6e60259bfda2d1d3444ab9e2f20eb47a8c4ef48dea0540553ac96bf20b", "vout": 0}],
+                change_position=1,
+                add_to_wallet=False
+            )
+            assert(res['complete'])
+            assert_equal(res['hex'], tx_hex)
+
+        self.log.info("Spend early coinbase transaction")
+        # Mine block with this transaction
+        prev_hash = self.mine(2015, prev_hash, blocks, node, [tx_from_hex(tx_hex)], 4500)
 
         self.log.info("Check difficulty adjustment with getmininginfo")
         mining_info = node.getmininginfo()
