@@ -948,6 +948,7 @@ public:
         auto now{NodeClock::now()};
         const auto deadline = now + options.timeout;
         const MillisecondsDouble tick{1000};
+        const bool allow_min_difficulty{chainman().GetParams().GetConsensus().fPowAllowMinDifficultyBlocks};
 
         while (now <= deadline) {
             bool tip_changed{false};
@@ -964,6 +965,15 @@ public:
 
             // Must release m_tip_block_mutex before locking cs_main, to avoid deadlocks.
             LOCK(::cs_main);
+
+            // On test networks return a minimum difficulty block after 20 minutes
+            if (!tip_changed && allow_min_difficulty) {
+                const NodeClock::time_point tip_time{std::chrono::seconds{chainman().ActiveChain().Tip()->GetBlockTime()}};
+                if (now > tip_time + std::chrono::seconds(20 * 60)) {
+                    tip_changed = true;
+                }
+            }
+
             /**
              * The only way to determine if fees increased compared to the previous template,
              * is to generate a fresh template. Cluster Mempool may allow for a more efficient
@@ -1003,7 +1013,8 @@ public:
              * can call setmocktime to move the clock and exit this loop, a
              * unit tests would need to spawn a thread to achieve this.
              * Making the while loop use now < deadline won't work either, because
-             * then there's no wait to test its internals.
+             * then there's no wait to test its internals, e.g. the  20 minute
+             * testnet exception.
              */
             if (now == deadline) break;
             now = NodeClock::now();
