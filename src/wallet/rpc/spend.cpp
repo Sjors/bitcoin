@@ -95,10 +95,10 @@ std::set<int> InterpretSubtractFeeFromOutputInstructions(const UniValue& sffo_in
     return sffo_set;
 }
 
-static UniValue FinishTransaction(const std::shared_ptr<CWallet> pwallet, const UniValue& options, const CMutableTransaction& rawTx)
+static UniValue FinishTransaction(const std::shared_ptr<CWallet> pwallet, const UniValue& options, const CMutableTransaction& rawTx, const uint32_t psbt_version)
 {
     // Make a blank psbt
-    PartiallySignedTransaction psbtx(rawTx, /*version=*/2);
+    PartiallySignedTransaction psbtx(rawTx, psbt_version);
 
     // First fill transaction with our data without signing,
     // so external signers are not asked to sign more than once.
@@ -1251,6 +1251,7 @@ RPCHelpMan send()
                     },
                     {"max_tx_weight", RPCArg::Type::NUM, RPCArg::Default{MAX_STANDARD_TX_WEIGHT}, "The maximum acceptable transaction weight.\n"
                                                   "Transaction building will fail if this can not be satisfied."},
+                    {"psbt_version", RPCArg::Type::NUM, RPCArg::Default(2), "The PSBT version number to use."},
                 },
                 FundTxDoc()),
                 RPCArgOptions{.oneline_description="options"}},
@@ -1302,12 +1303,21 @@ RPCHelpMan send()
                 coin_control.m_max_tx_weight = options["max_tx_weight"].getInt<int>();
             }
             SetOptionsInputWeights(options["inputs"], options);
+
+            uint32_t psbt_version = 2;
+            if (!options["psbt_version"].isNull()) {
+                psbt_version = options["psbt_version"].getInt<int>();
+            }
+            if (psbt_version != 2 && psbt_version != 0) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "The PSBT version can only be 2 or 0");
+            }
+
             // Clear tx.vout since it is not meant to be used now that we are passing outputs directly.
             // This sets us up for a future PR to completely remove tx from the function signature in favor of passing inputs directly
             rawTx.vout.clear();
             auto txr = FundTransaction(*pwallet, rawTx, recipients, options, coin_control, /*override_min_fee=*/false);
 
-            return FinishTransaction(pwallet, options, CMutableTransaction(*txr.tx));
+            return FinishTransaction(pwallet, options, CMutableTransaction(*txr.tx), psbt_version);
         }
     };
 }
@@ -1361,6 +1371,7 @@ RPCHelpMan sendall()
                         {"send_max", RPCArg::Type::BOOL, RPCArg::Default{false}, "When true, only use UTXOs that can pay for their own fees to maximize the output amount. When 'false' (default), no UTXO is left behind. send_max is incompatible with providing specific inputs."},
                         {"minconf", RPCArg::Type::NUM, RPCArg::Default{0}, "Require inputs with at least this many confirmations."},
                         {"maxconf", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "Require inputs with at most this many confirmations."},
+                        {"psbt_version", RPCArg::Type::NUM, RPCArg::Default(2), "The PSBT version number to use."},
                     },
                     FundTxDoc()
                 ),
@@ -1567,7 +1578,15 @@ RPCHelpMan sendall()
                 }
             }
 
-            return FinishTransaction(pwallet, options, rawTx);
+            uint32_t psbt_version = 2;
+            if (!options["psbt_version"].isNull()) {
+                psbt_version = options["psbt_version"].getInt<int>();
+            }
+            if (psbt_version != 2 && psbt_version != 0) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "The PSBT version can only be 2 or 0");
+            }
+
+            return FinishTransaction(pwallet, options, rawTx, psbt_version);
         }
     };
 }
