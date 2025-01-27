@@ -533,7 +533,7 @@ bool WalletModel::bumpFee(uint256 hash, uint256& new_hash)
     // Short-circuit if we are returning a bumped transaction PSBT to clipboard
     if (retval == QMessageBox::Save) {
         // "Create Unsigned" clicked
-        PartiallySignedTransaction psbtx(mtx);
+        PartiallySignedTransaction psbtx(mtx, /*=version=*/0);
         bool complete = false;
         const auto err{wallet().fillPSBT(SIGHASH_ALL, /*sign=*/false, /*bip32derivs=*/true, nullptr, psbtx, complete)};
         if (err || complete) {
