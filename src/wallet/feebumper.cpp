@@ -333,12 +333,12 @@ Result CreateRateBumpTransaction(CWallet& wallet, const uint256& txid, const CCo
     return Result::OK;
 }
 
-bool SignTransaction(CWallet& wallet, CMutableTransaction& mtx) {
+bool SignTransaction(CWallet& wallet, CMutableTransaction& mtx, const uint32_t psbt_version) {
     LOCK(wallet.cs_wallet);
 
     if (wallet.IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER)) {
         // Make a blank psbt
-        PartiallySignedTransaction psbtx(mtx);
+        PartiallySignedTransaction psbtx(mtx, psbt_version);
 
         // First fill transaction with our data without signing,
         // so external signers are not asked to sign more than once.

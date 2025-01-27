@@ -556,7 +556,7 @@ bool WalletModel::bumpFee(uint256 hash, uint256& new_hash)
     assert(!m_wallet->privateKeysDisabled() || wallet().hasExternalSigner());
 
     // sign bumped transaction
-    if (!m_wallet->signBumpTransaction(mtx)) {
+    if (!m_wallet->signBumpTransaction(mtx, /*psbt_version=*/0)) {
         QMessageBox::critical(nullptr, tr("Fee bump error"), tr("Can't sign transaction."));
         return false;
     }

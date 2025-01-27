@@ -1032,6 +1032,7 @@ static RPCHelpMan bumpfee_helper(std::string method_name)
                                                                                                                             "The remainder after paying the recipients and fees will be sent to the output script of the "
                                                                                                                             "original change output. The change output’s amount can increase if bumping the transaction "
                                                                                                                             "adds new inputs, otherwise it will decrease. Cannot be used in combination with the 'outputs' option."},
+                    {"psbt_version", RPCArg::Type::NUM, RPCArg::Default(2), "The PSBT version number to use."},
                 },
                 RPCArgOptions{.oneline_description="options"}},
         },
@@ -1071,6 +1072,7 @@ static RPCHelpMan bumpfee_helper(std::string method_name)
     std::vector<CTxOut> outputs;
 
     std::optional<uint32_t> original_change_index;
+    uint32_t psbt_version = 2;
 
     if (!request.params[1].isNull()) {
         UniValue options = request.params[1];
@@ -1083,6 +1085,8 @@ static RPCHelpMan bumpfee_helper(std::string method_name)
                 {"estimate_mode", UniValueType(UniValue::VSTR)},
                 {"outputs", UniValueType()}, // will be checked by AddOutputs()
                 {"original_change_index", UniValueType(UniValue::VNUM)},
+                {"psbt_version", UniValueType(UniValue::VNUM)},
+
             },
             true, true);
 
@@ -1109,6 +1113,13 @@ static RPCHelpMan bumpfee_helper(std::string method_name)
 
         if (options.exists("original_change_index")) {
             original_change_index = options["original_change_index"].getInt<uint32_t>();
+        }
+
+        if (!options["psbt_version"].isNull()) {
+            psbt_version = options["psbt_version"].getInt<int>();
+        }
+        if (psbt_version != 2 && psbt_version != 0) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "The PSBT version can only be 2 or 0");
         }
     }
 
@@ -1153,7 +1164,7 @@ static RPCHelpMan bumpfee_helper(std::string method_name)
     // For bumpfee, return the new transaction id.
     // For psbtbumpfee, return the base64-encoded unsigned PSBT of the new transaction.
     if (!want_psbt) {
-        if (!feebumper::SignTransaction(*pwallet, mtx)) {
+        if (!feebumper::SignTransaction(*pwallet, mtx, psbt_version)) {
             if (pwallet->IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER)) {
                 throw JSONRPCError(RPC_WALLET_ERROR, "Transaction incomplete. Try psbtbumpfee instead.");
             }
@@ -1167,7 +1178,7 @@ static RPCHelpMan bumpfee_helper(std::string method_name)
 
         result.pushKV("txid", txid.GetHex());
     } else {
-        PartiallySignedTransaction psbtx(mtx, /*version=*/2);
+        PartiallySignedTransaction psbtx(mtx, psbt_version);
         bool complete = false;
         const auto err{pwallet->FillPSBT(psbtx, complete, SIGHASH_DEFAULT, /*sign=*/false, /*bip32derivs=*/true)};
         CHECK_NONFATAL(!err);

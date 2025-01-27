@@ -176,7 +176,7 @@ public:
         CMutableTransaction& mtx) = 0;
 
     //! Sign bump transaction.
-    virtual bool signBumpTransaction(CMutableTransaction& mtx) = 0;
+    virtual bool signBumpTransaction(CMutableTransaction& mtx, const uint32_t psbt_version) = 0;
 
     //! Commit bump transaction.
     virtual bool commitBumpTransaction(const uint256& txid,
