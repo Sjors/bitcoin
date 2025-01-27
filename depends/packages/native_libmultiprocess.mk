@@ -3,7 +3,7 @@ $(package)_local_dir=../src/ipc/libmultiprocess
 $(package)_dependencies=native_capnp
 
 define $(package)_config_cmds
-  $($(package)_cmake) .
+  $($(package)_cmake) . $(LIBMULTIPROCESS_CMAKE_OPTIONS)
 endef
 
 define $(package)_build_cmds
