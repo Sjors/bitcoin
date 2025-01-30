@@ -9,6 +9,8 @@ if (NOT WITH_LIBMULTIPROCESS)
   # build rules can find the libmultiprocess include directory and avoid
   # "error: Import failed: /mp/proxy.capnp" errors from capnp.
   set(MP_INCLUDE_DIR "${MP_INCLUDE_DIR}" PARENT_SCOPE)
+  # Add mptest unit tests to "all" target so ctest can run them
+  set_target_properties(mptest PROPERTIES EXCLUDE_FROM_ALL OFF)
 endif()
 
 add_library(bitcoin_ipc STATIC EXCLUDE_FROM_ALL
