@@ -166,6 +166,7 @@ if(ENABLE_IPC)
     PRIVATE
       core_interface
       univalue
+      Boost::headers
   )
 
   target_sources(test_bitcoin
