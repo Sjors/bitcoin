@@ -45,7 +45,7 @@ define fetch_local_dir_sha256
         $(build_TAR) -c -f $($(1)_source) -C $($(1)_local_dir) . && \
         rm -f $($(1)_fetched); \
     fi && \
-    if ! [ -f $($(1)_fetched) ]; then \
+    if ! [ -f $($(1)_fetched) ] || [ $($(1)_fetched) -ot $($(1)_source) ]; then \
         mkdir -p $(dir $($(1)_fetched)) && \
         $(build_SHA256SUM) $($(1)_source) > $($(1)_fetched); \
     fi && \
