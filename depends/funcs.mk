@@ -40,7 +40,7 @@ define fetch_file
 endef
 
 define fetch_local_dir_sha256
-    if ! [ -f $($(1)_source) ] || [ $($(1)_source) -ot $($(1)_local_dir) ]; then \
+    set -x; if ! [ -f $($(1)_source) ] || [ $($(1)_source) -ot $($(1)_local_dir) ]; then \
         mkdir -p $(dir $($(1)_source)) && \
         $(build_TAR) -c -f $($(1)_source) -C $($(1)_local_dir) . && \
         rm -f $($(1)_fetched); \
