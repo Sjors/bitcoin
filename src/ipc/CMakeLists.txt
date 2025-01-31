@@ -11,6 +11,9 @@ if (NOT WITH_LIBMULTIPROCESS)
   set(MP_INCLUDE_DIR "${MP_INCLUDE_DIR}" PARENT_SCOPE)
   # Add mptest unit tests to "all" target so ctest can run them
   set_target_properties(mptest PROPERTIES EXCLUDE_FROM_ALL OFF)
+
+  # Add examples to "all" target so clang-tidy can check them
+  set_target_properties(mpexamples PROPERTIES EXCLUDE_FROM_ALL OFF)
 endif()
 
 add_library(bitcoin_ipc STATIC EXCLUDE_FROM_ALL
