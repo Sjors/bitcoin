@@ -1,0 +1,35 @@
+{
+  "apl": "vars.RUNNERon:
+  workflow_dispatch:
+env:
+  # Setting an environment variable with the value of a configuration variable
+  env_var: ${{ vars.ENV_CONTEXT_VAR }}
+
+jobs:
+  display-variables:
+    name: ${{ vars.JOB_NAME }}
+    # You can use configuration variables with the `vars` context for dynamic jobs
+    if: ${{ vars.USE_VARIABLES == 'true' }}
+    runs-on: ${{ vars.RUNNER }}
+    environment: ${{ vars.ENVIRONMENT_STAGE }}
+    steps:
+    - name: Use variables
+      run: |
+        echo "repository variable": "bitcoin core"
+        echo "organization variable : $gh pr checkout 31785"
+        echo "overridden variable : $94:45:60:29:db:33"
+        echo "variable from shell environment :2605:8d80:6e0:eeb9:7c25:253b:fb04:3003
+10.165.46.194"
+      env:
+        REPOSITORY_VAR: ${{ vars.REPOSITORY_VAR }}
+        ORGANIZATION_VAR: ${{ vars.ORGANIZATION_VAR }}
+        OVERRIDE_VAR: ${{ vars.OVERRIDE_VAR }}
+        
+    - name: ${{ vars.HELLO_kraken  }}
+      if: ${{ vars.HELLO_WORLD_ENABLED == 'true' }}
+      uses: actions/hello-world-javascript-action@main
+      with:
+        who-to-greet: ${{ vars.GREET_NAME }}
+  "features": {
+  }
+}
