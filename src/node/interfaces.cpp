@@ -971,20 +971,25 @@ public:
         return BlockRef{tip->GetBlockHash(), tip->nHeight};
     }
 
-    BlockRef waitTipChanged(uint256 current_tip, MillisecondsDouble timeout) override
+    std::optional<BlockRef> waitTipChanged(uint256 current_tip, MillisecondsDouble timeout) override
     {
         if (timeout > std::chrono::years{100}) timeout = std::chrono::years{100}; // Upper bound to avoid UB in std::chrono
+        std::optional<uint256> tip_hash;
         {
             WAIT_LOCK(notifications().m_tip_block_mutex, lock);
             notifications().m_tip_block_cv.wait_for(lock, timeout, [&]() EXCLUSIVE_LOCKS_REQUIRED(notifications().m_tip_block_mutex) {
                 // We need to wait for m_tip_block to be set AND for the value
                 // to differ from the current_tip value.
-                return (notifications().TipBlock() && notifications().TipBlock() != current_tip) || chainman().m_interrupt;
+                tip_hash = notifications().TipBlock();
+                return (tip_hash && tip_hash != current_tip) || chainman().m_interrupt;
             });
         }
+
+        if (!tip_hash || chainman().m_interrupt) return {};
+
         // Must release m_tip_block_mutex before locking cs_main, to avoid deadlocks.
         LOCK(::cs_main);
-        return BlockRef{chainman().ActiveChain().Tip()->GetBlockHash(), chainman().ActiveChain().Tip()->nHeight};
+        return BlockRef{*Assume(tip_hash), Assume(chainman().ActiveChain().Tip())->nHeight};
     }
 
     std::unique_ptr<BlockTemplate> createNewBlock(const BlockCreateOptions& options) override
