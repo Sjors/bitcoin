@@ -5,12 +5,11 @@
 """Test bitcoind shutdown."""
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal, get_rpc_proxy
+from test_framework.util import assert_raises_rpc_error, get_rpc_proxy
 from threading import Thread
 
 def test_long_call(node):
-    block = node.waitfornewblock()
-    assert_equal(block['height'], 0)
+    assert_raises_rpc_error(-37, "Node is shutting down", node.waitfornewblock)
 
 class ShutdownTest(BitcoinTestFramework):
 

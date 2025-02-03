@@ -64,6 +64,7 @@
 using kernel::CCoinsStats;
 using kernel::CoinStatsHashType;
 
+using interfaces::BlockRef;
 using interfaces::Mining;
 using node::BlockManager;
 using node::NodeContext;
@@ -286,14 +287,18 @@ static RPCHelpMan waitfornewblock()
     NodeContext& node = EnsureAnyNodeContext(request.context);
     Mining& miner = EnsureMining(node);
 
-    auto block{CHECK_NONFATAL(miner.getTip()).value()};
-    if (IsRPCRunning()) {
-        block = timeout ? miner.waitTipChanged(block.hash, std::chrono::milliseconds(timeout)) : miner.waitTipChanged(block.hash);
-    }
+    std::optional<BlockRef> block{miner.getTip()};
+    // If getTip() returns null, which can happen during startup, pass 0 to
+    // waitTipChanged() so it will wait for any tip hash to be set.
+    uint256 tip_hash{block ? block->hash : uint256{}};
+    block = timeout ? miner.waitTipChanged(tip_hash, std::chrono::milliseconds(timeout)) :
+                      miner.waitTipChanged(tip_hash);
+
+    if (!block) throw JSONRPCError(RPC_SHUTDOWN_ERROR, "Node is shutting down");
 
     UniValue ret(UniValue::VOBJ);
-    ret.pushKV("hash", block.hash.GetHex());
-    ret.pushKV("height", block.height);
+    ret.pushKV("hash", block->hash.GetHex());
+    ret.pushKV("height", block->height);
     return ret;
 },
     };
@@ -332,22 +337,28 @@ static RPCHelpMan waitforblock()
     NodeContext& node = EnsureAnyNodeContext(request.context);
     Mining& miner = EnsureMining(node);
 
-    auto block{CHECK_NONFATAL(miner.getTip()).value()};
+    std::optional<BlockRef> block{miner.getTip()};
+    // If getTip() returns null, which can happen during startup, pass 0 to
+    // waitTipChanged() so it will wait for any tip hash to be set.
+    uint256 tip_hash{block ? block->hash : uint256{}};
+
     const auto deadline{std::chrono::steady_clock::now() + 1ms * timeout};
-    while (IsRPCRunning() && block.hash != hash) {
+    while (tip_hash != hash) {
         if (timeout) {
             auto now{std::chrono::steady_clock::now()};
             if (now >= deadline) break;
             const MillisecondsDouble remaining{deadline - now};
-            block = miner.waitTipChanged(block.hash, remaining);
+            block = miner.waitTipChanged(tip_hash, remaining);
         } else {
-            block = miner.waitTipChanged(block.hash);
+            block = miner.waitTipChanged(tip_hash);
         }
+        if (!block) throw JSONRPCError(RPC_SHUTDOWN_ERROR, "Node is shutting down");
+        tip_hash = block->hash;
     }
 
     UniValue ret(UniValue::VOBJ);
-    ret.pushKV("hash", block.hash.GetHex());
-    ret.pushKV("height", block.height);
+    ret.pushKV("hash", block->hash.GetHex());
+    ret.pushKV("height", block->height);
     return ret;
 },
     };
@@ -387,23 +398,31 @@ static RPCHelpMan waitforblockheight()
     NodeContext& node = EnsureAnyNodeContext(request.context);
     Mining& miner = EnsureMining(node);
 
-    auto block{CHECK_NONFATAL(miner.getTip()).value()};
     const auto deadline{std::chrono::steady_clock::now() + 1ms * timeout};
 
-    while (IsRPCRunning() && block.height < height) {
+    std::optional<BlockRef> block{miner.getTip()};
+    // If getTip() returns null, which can happen during startup, pass 0 to
+    // waitTipChanged() so it will wait for any tip hash to be set.
+    uint256 tip_hash{block ? block->hash : uint256{}};
+    int block_height{block ? block->height : 0};
+
+    while (block_height < height) {
         if (timeout) {
             auto now{std::chrono::steady_clock::now()};
             if (now >= deadline) break;
             const MillisecondsDouble remaining{deadline - now};
-            block = miner.waitTipChanged(block.hash, remaining);
+            block = miner.waitTipChanged(tip_hash, remaining);
         } else {
-            block = miner.waitTipChanged(block.hash);
+            block = miner.waitTipChanged(tip_hash);
         }
+        if (!block) throw JSONRPCError(RPC_SHUTDOWN_ERROR, "Node is shutting down");
+        tip_hash = block->hash;
+        block_height = block->height;
     }
 
     UniValue ret(UniValue::VOBJ);
-    ret.pushKV("hash", block.hash.GetHex());
-    ret.pushKV("height", block.height);
+    ret.pushKV("hash", block->hash.GetHex());
+    ret.pushKV("height", block->height);
     return ret;
 },
     };
