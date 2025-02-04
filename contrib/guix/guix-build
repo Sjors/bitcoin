@@ -296,7 +296,7 @@ mkdir -p "$OUTDIR_BASE"
 # Download the depends sources now as we won't have internet access in the build
 # container
 for host in $HOSTS; do
-    make -C "${PWD}/depends" -j"$JOBS" download-"$(host_to_commonname "$host")" ${V:+V=1} ${SOURCES_PATH:+SOURCES_PATH="$SOURCES_PATH"}
+    make -C "${PWD}/depends" -j"$JOBS" download-"$(host_to_commonname "$host")" MULTIPROCESS=1 ${V:+V=1} ${SOURCES_PATH:+SOURCES_PATH="$SOURCES_PATH"}
 done
 
 # Usage: outdir_for_host HOST SUFFIX
