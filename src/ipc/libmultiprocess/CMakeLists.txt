@@ -52,13 +52,6 @@ configure_file(include/mp/config.h.in "${CMAKE_CURRENT_BINARY_DIR}/include/mp/co
 # Generated C++ Capn'Proto schema files
 capnp_generate_cpp(MP_PROXY_SRCS MP_PROXY_HDRS include/mp/proxy.capnp)
 
-# util library
-add_library(mputil OBJECT src/mp/util.cpp)
-target_include_directories(mputil PRIVATE
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>)
-target_link_libraries(mputil PUBLIC CapnProto::kj)
-
 # libmultiprocess.a runtime library
 set(MP_PUBLIC_HEADERS
   ${MP_PROXY_HDRS}
@@ -91,7 +84,7 @@ add_library(multiprocess STATIC
   ${MP_PROXY_SRCS}
   ${MP_PUBLIC_HEADERS}
   src/mp/proxy.cpp
-  $<TARGET_OBJECTS:mputil>)
+  src/mp/util.cpp)
 add_library(Libmultiprocess::multiprocess ALIAS multiprocess)
 target_include_directories(multiprocess PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
@@ -108,7 +101,7 @@ install(TARGETS multiprocess EXPORT LibTargets
   PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/mp COMPONENT lib)
 
 # mpgen code generator
-add_executable(mpgen src/mp/gen.cpp $<TARGET_OBJECTS:mputil>)
+add_executable(mpgen src/mp/gen.cpp src/mp/util.cpp)
 add_executable(Libmultiprocess::mpgen ALIAS mpgen)
 target_include_directories(mpgen PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>)
 target_include_directories(mpgen PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)

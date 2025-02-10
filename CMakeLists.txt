@@ -151,6 +151,7 @@ if(ENABLE_IPC AND WITH_EXTERNAL_LIBMULTIPROCESS)
 endif()
 
 cmake_dependent_option(WITH_SV2 "Enable Stratum v2 functionality." ON "NOT WIN32" OFF)
+cmake_dependent_option(BUILD_IPC_TESTS "Build IPC test executables." ON "ENABLE_IPC;BUILD_TESTS" OFF)
 
 cmake_dependent_option(BUILD_GUI_TESTS "Build test_bitcoin-qt executable." ON "BUILD_GUI;BUILD_TESTS" OFF)
 if(BUILD_GUI)
@@ -225,6 +226,7 @@ if(BUILD_FOR_FUZZING)
   set(WITH_ZMQ OFF)
   set(BUILD_TESTS OFF)
   set(BUILD_GUI_TESTS OFF)
+  set(BUILD_IPC_TESTS OFF)
   set(BUILD_BENCH OFF)
   set(BUILD_FUZZ_BINARY ON)
 

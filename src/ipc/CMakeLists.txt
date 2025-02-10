@@ -14,8 +14,6 @@ if (NOT WITH_EXTERNAL_LIBMULTIPROCESS)
   add_subdirectory(libmultiprocess EXCLUDE_FROM_ALL)
   # Apply core_interface compile options to libmultiprocess runtime library.
   target_link_libraries(multiprocess PUBLIC $<BUILD_INTERFACE:core_interface>)
-  target_link_libraries(mputil PUBLIC $<BUILD_INTERFACE:core_interface>)
-  target_link_libraries(mpgen PUBLIC $<BUILD_INTERFACE:core_interface>)
   # Mark capproto options as advanced to hide by default from cmake UI
   mark_as_advanced(CapnProto_DIR)
   mark_as_advanced(CapnProto_capnpc_IMPORTED_LOCATION)
@@ -36,7 +34,9 @@ if (NOT WITH_EXTERNAL_LIBMULTIPROCESS)
   # "error: Import failed: /mp/proxy.capnp" errors from capnp.
   set(MP_INCLUDE_DIR "${MP_INCLUDE_DIR}" PARENT_SCOPE)
   # Add tests to "all" target so ctest can run them
-  set_target_properties(mptests PROPERTIES EXCLUDE_FROM_ALL OFF)
+  if (BUILD_IPC_TESTS)
+    set_target_properties(mptests PROPERTIES EXCLUDE_FROM_ALL OFF)
+  endif()
   # Exclude examples from compilation database, because the examples are not
   # built by default, and they contain generated c++ code. Without this
   # exclusion, tools like clang-tidy and IWYU that make use of compilation
