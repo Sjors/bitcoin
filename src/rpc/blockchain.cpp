@@ -64,6 +64,7 @@
 using kernel::CCoinsStats;
 using kernel::CoinStatsHashType;
 
+using interfaces::BlockRef;
 using interfaces::Mining;
 using node::BlockManager;
 using node::NodeContext;
@@ -286,9 +287,13 @@ static RPCHelpMan waitfornewblock()
     NodeContext& node = EnsureAnyNodeContext(request.context);
     Mining& miner = EnsureMining(node);
 
-    auto block{CHECK_NONFATAL(miner.getTip()).value()};
+    BlockRef block{CHECK_NONFATAL(miner.getTip()).value()};
     if (IsRPCRunning()) {
-        block = timeout ? miner.waitTipChanged(block.hash, std::chrono::milliseconds(timeout)) : miner.waitTipChanged(block.hash);
+        std::optional<BlockRef> maybe_block{timeout ? miner.waitTipChanged(block.hash, std::chrono::milliseconds(timeout)) : miner.waitTipChanged(block.hash)};
+        // Return new block unless the node is shutting down
+        if (maybe_block) {
+            block = *CHECK_NONFATAL(maybe_block);
+        }
     }
 
     UniValue ret(UniValue::VOBJ);
@@ -335,13 +340,18 @@ static RPCHelpMan waitforblock()
     auto block{CHECK_NONFATAL(miner.getTip()).value()};
     const auto deadline{std::chrono::steady_clock::now() + 1ms * timeout};
     while (IsRPCRunning() && block.hash != hash) {
+        std::optional<BlockRef> maybe_block;
         if (timeout) {
             auto now{std::chrono::steady_clock::now()};
             if (now >= deadline) break;
             const MillisecondsDouble remaining{deadline - now};
-            block = miner.waitTipChanged(block.hash, remaining);
+            maybe_block = miner.waitTipChanged(block.hash, remaining);
         } else {
-            block = miner.waitTipChanged(block.hash);
+            maybe_block = miner.waitTipChanged(block.hash);
+        }
+        // Return new block unless the node is shutting down
+        if (maybe_block) {
+            block = *CHECK_NONFATAL(maybe_block);
         }
     }
 
@@ -391,13 +401,18 @@ static RPCHelpMan waitforblockheight()
     const auto deadline{std::chrono::steady_clock::now() + 1ms * timeout};
 
     while (IsRPCRunning() && block.height < height) {
+        std::optional<BlockRef> maybe_block;
         if (timeout) {
             auto now{std::chrono::steady_clock::now()};
             if (now >= deadline) break;
             const MillisecondsDouble remaining{deadline - now};
-            block = miner.waitTipChanged(block.hash, remaining);
+            maybe_block = miner.waitTipChanged(block.hash, remaining);
         } else {
-            block = miner.waitTipChanged(block.hash);
+            maybe_block = miner.waitTipChanged(block.hash);
+        }
+        // Return new block unless the node is shutting down
+        if (maybe_block) {
+            block = *CHECK_NONFATAL(maybe_block);
         }
     }
 

@@ -82,6 +82,7 @@ using interfaces::Mining;
 using interfaces::Node;
 using interfaces::WalletLoader;
 using node::BlockAssembler;
+using node::BlockWaitOptions;
 using util::Join;
 
 namespace node {
@@ -877,7 +878,7 @@ public:
 class BlockTemplateImpl : public BlockTemplate
 {
 public:
-    explicit BlockTemplateImpl(std::unique_ptr<CBlockTemplate> block_template, NodeContext& node) : m_block_template(std::move(block_template)), m_node(node)
+    explicit BlockTemplateImpl(BlockAssembler::Options assemble_options, std::unique_ptr<CBlockTemplate> block_template, NodeContext& node) : m_assemble_options(std::move(assemble_options)), m_block_template(std::move(block_template)), m_node(node)
     {
         assert(m_block_template);
     }
@@ -942,9 +943,103 @@ public:
         return chainman().ProcessNewBlock(block_ptr, /*force_processing=*/true, /*min_pow_checked=*/true, /*new_block=*/nullptr);
     }
 
+    std::unique_ptr<BlockTemplate> waitNext(BlockWaitOptions options) override
+    {
+        // Delay calculating the current template fees, just in case a new block
+        // comes in before the next tick.
+        CAmount current_fees = -1;
+
+        // Alternate waiting for a new tip and checking if fees have risen.
+        // The latter check is expensive so we only run it once per second.
+        auto now{NodeClock::now()};
+        const auto deadline = now + options.timeout;
+        const MillisecondsDouble tick{1000};
+        const bool allow_min_difficulty{chainman().GetParams().GetConsensus().fPowAllowMinDifficultyBlocks};
+
+        bool tip_changed{false};
+        // Helper to check if the tip has changed, and also update tip_changed.
+        auto check_tip_changed = [this, &tip_changed]() EXCLUSIVE_LOCKS_REQUIRED(notifications().m_tip_block_mutex) {
+            AssertLockHeld(notifications().m_tip_block_mutex);
+            if (tip_changed) return true;
+            const auto tip_block{notifications().TipBlock()};
+            // This is an instance method on BlockTemplate and no template
+            // could have been generated before a tip exists.
+            Assume(tip_block);
+            tip_changed = tip_block != m_block_template->block.hashPrevBlock;
+            return tip_changed;
+        };
+
+        do {
+            {
+                WAIT_LOCK(notifications().m_tip_block_mutex, lock);
+                // Note that wait_until() checks the predicate before waiting
+                notifications().m_tip_block_cv.wait_until(lock, std::min(now + tick, deadline), [&]() EXCLUSIVE_LOCKS_REQUIRED(notifications().m_tip_block_mutex) {
+                    return check_tip_changed() || chainman().m_interrupt;
+                });
+            }
+
+            if (chainman().m_interrupt) return nullptr;
+
+            // Must release m_tip_block_mutex before locking cs_main, to avoid deadlocks.
+            LOCK(::cs_main);
+
+            // On test networks return a minimum difficulty block after 20 minutes
+            if (!tip_changed && allow_min_difficulty) {
+                const NodeClock::time_point tip_time{std::chrono::seconds{chainman().ActiveChain().Tip()->GetBlockTime()}};
+                if (now > tip_time + 20min) {
+                    tip_changed = true;
+                }
+            }
+
+            /**
+             * We determine if fees increased compared to the previous template by generating
+             * a fresh template. There may be more efficient ways to determine how much
+             * (approximate) fees for the next block increased, perhaps more so after
+             * Cluster Mempool.
+             *
+             * We'll also create a new template if the tip changed during the last tick.
+             */
+            if (options.fee_threshold != MAX_MONEY || tip_changed) {
+                auto block_template{std::make_unique<BlockTemplateImpl>(m_assemble_options, BlockAssembler{chainman().ActiveChainstate(), context()->mempool.get(), m_assemble_options}.CreateNewBlock(), m_node)};
+
+                // If the tip changed, return the new template regardless of its fees.
+                if (tip_changed) {
+                    return block_template;
+                }
+
+                // Calculate the original template total fees if we haven't already
+                if (current_fees == -1) {
+                    current_fees = 0;
+                    for (CAmount fee : m_block_template->vTxFees) {
+                        // Skip coinbase
+                        if (fee < 0) continue;
+                        current_fees += fee;
+                    }
+                }
+
+                CAmount new_fees = 0;
+                for (CAmount fee : block_template->m_block_template->vTxFees) {
+                    // Skip coinbase
+                    if (fee < 0) continue;
+                    new_fees += fee;
+                    Assume(options.fee_threshold != MAX_MONEY);
+                    if (new_fees >= current_fees + options.fee_threshold) return block_template;
+                }
+            }
+
+            now = NodeClock::now();
+        } while (now < deadline);
+
+        return nullptr;
+    }
+
+    const BlockAssembler::Options m_assemble_options;
+
     const std::unique_ptr<CBlockTemplate> m_block_template;
 
+    NodeContext* context() { return &m_node; }
     ChainstateManager& chainman() { return *Assert(m_node.chainman); }
+    KernelNotifications& notifications() { return *Assert(m_node.notifications); }
     NodeContext& m_node;
 };
 
@@ -971,27 +1066,35 @@ public:
         return BlockRef{tip->GetBlockHash(), tip->nHeight};
     }
 
-    BlockRef waitTipChanged(uint256 current_tip, MillisecondsDouble timeout) override
+    std::optional<BlockRef> waitTipChanged(uint256 current_tip, MillisecondsDouble timeout) override
     {
         if (timeout > std::chrono::years{100}) timeout = std::chrono::years{100}; // Upper bound to avoid UB in std::chrono
+        std::optional<uint256> tip_hash;
         {
             WAIT_LOCK(notifications().m_tip_block_mutex, lock);
             notifications().m_tip_block_cv.wait_for(lock, timeout, [&]() EXCLUSIVE_LOCKS_REQUIRED(notifications().m_tip_block_mutex) {
                 // We need to wait for m_tip_block to be set AND for the value
                 // to differ from the current_tip value.
-                return (notifications().TipBlock() && notifications().TipBlock() != current_tip) || chainman().m_interrupt;
+                tip_hash = notifications().TipBlock();
+                return (tip_hash && tip_hash != current_tip) || chainman().m_interrupt;
             });
         }
+
+        if (!tip_hash || chainman().m_interrupt) return {};
+
         // Must release m_tip_block_mutex before locking cs_main, to avoid deadlocks.
         LOCK(::cs_main);
-        return BlockRef{chainman().ActiveChain().Tip()->GetBlockHash(), chainman().ActiveChain().Tip()->nHeight};
+        return BlockRef{*Assume(tip_hash), Assume(chainman().ActiveChain().Tip())->nHeight};
     }
 
     std::unique_ptr<BlockTemplate> createNewBlock(const BlockCreateOptions& options) override
     {
+        // Ensure m_tip_block is set so consumers of BlockTemplate can rely on that.
+        if (!waitTipChanged(uint256::ZERO, MillisecondsDouble::max())) return {};
+
         BlockAssembler::Options assemble_options{options};
         ApplyArgsManOptions(*Assert(m_node.args), assemble_options);
-        return std::make_unique<BlockTemplateImpl>(BlockAssembler{chainman().ActiveChainstate(), context()->mempool.get(), assemble_options}.CreateNewBlock(), m_node);
+        return std::make_unique<BlockTemplateImpl>(assemble_options, BlockAssembler{chainman().ActiveChainstate(), context()->mempool.get(), assemble_options}.CreateNewBlock(), m_node);
     }
 
     NodeContext* context() override { return &m_node; }

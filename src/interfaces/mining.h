@@ -7,7 +7,7 @@
 
 #include <consensus/amount.h>       // for CAmount
 #include <interfaces/types.h>       // for BlockRef
-#include <node/types.h>             // for BlockCreateOptions
+#include <node/types.h>             // for BlockCreateOptions, BlockWaitOptions
 #include <primitives/block.h>       // for CBlock, CBlockHeader
 #include <primitives/transaction.h> // for CTransactionRef
 #include <stdint.h>                 // for int64_t
@@ -56,6 +56,19 @@ public:
      * @returns if the block was processed, independent of block validity
      */
     virtual bool submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CTransactionRef coinbase) = 0;
+
+    /**
+     * Waits for fees in the next block to rise, a new tip or the timeout.
+     *
+     * @param[in] options   Control the timeout (default forever) and by how much total fees
+     *                      for the next block should rise (default infinite).
+     *
+     * @returns a new BlockTemplate or nothing if the timeout occurs.
+     *
+     * On testnet this will additionally return a template with difficulty 1 if
+     * the tip is more than 20 minutes old.
+     */
+    virtual std::unique_ptr<BlockTemplate> waitNext(const node::BlockWaitOptions options = {}) = 0;
 };
 
 //! Interface giving clients (RPC, Stratum v2 Template Provider in the future)
@@ -81,15 +94,21 @@ public:
      * @param[in] current_tip block hash of the current chain tip. Function waits
      *                        for the chain tip to differ from this.
      * @param[in] timeout     how long to wait for a new tip
-     * @returns               Hash and height of the current chain tip after this call.
+     *
+     * @retval BlockRef hash and height of the current chain tip after this call.
+     * @retval empty if node is shutting down
      */
-    virtual BlockRef waitTipChanged(uint256 current_tip, MillisecondsDouble timeout = MillisecondsDouble::max()) = 0;
+    virtual std::optional<BlockRef> waitTipChanged(uint256 current_tip, MillisecondsDouble timeout = MillisecondsDouble::max()) = 0;
 
    /**
-     * Construct a new block template
+     * Construct a new block template.
+     *
+     * During node initialization, this will
+     * wait until the tip is connected.
      *
      * @param[in] options options for creating the block
-     * @returns a block template
+     * @retval BlockTemplate a block template.
+     * @retval empty if node is shutting down
      */
     virtual std::unique_ptr<BlockTemplate> createNewBlock(const node::BlockCreateOptions& options = {}) = 0;
 
