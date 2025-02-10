@@ -155,6 +155,7 @@ endif()
 if(WITH_SV2)
   target_sources(fuzz
   PRIVATE
+    sv2_noise.cpp
   )
   target_link_libraries(fuzz
     bitcoin_sv2
