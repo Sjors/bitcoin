@@ -36,17 +36,19 @@ if(WITH_SV2)
   add_subdirectory(sv2)
 
   # TOOD: move into sv2 directory
-  add_executable(bitcoin-mine
-    bitcoin-mine.cpp
-    init/bitcoin-mine.cpp
-  )
-  target_link_libraries(bitcoin-mine
-    core_interface
-    bitcoin_common
-    bitcoin_sv2
-    bitcoin_ipc
-  )
-list(APPEND installable_targets bitcoin-mine)
+  if(BUILD_MINE)
+    add_executable(bitcoin-mine
+      bitcoin-mine.cpp
+      init/bitcoin-mine.cpp
+    )
+    target_link_libraries(bitcoin-mine
+      core_interface
+      bitcoin_common
+      bitcoin_sv2
+      bitcoin_ipc
+    )
+    list(APPEND installable_targets bitcoin-mine)
+  endif()
 endif()
 
 #=============================
