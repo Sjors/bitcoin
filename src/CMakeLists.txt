@@ -26,11 +26,29 @@ add_dependencies(bitcoin_clientversion generate_build_info)
 add_subdirectory(crypto)
 add_subdirectory(univalue)
 add_subdirectory(util)
-if(WITH_MULTIPROCESS)
+
+set(installable_targets)
+
+if(ENABLE_IPC)
   add_subdirectory(ipc)
 endif()
 if(WITH_SV2)
   add_subdirectory(sv2)
+
+  # TOOD: move into sv2 directory
+  if(BUILD_MINE)
+    add_executable(bitcoin-mine
+      bitcoin-mine.cpp
+      init/bitcoin-mine.cpp
+    )
+    target_link_libraries(bitcoin-mine
+      core_interface
+      bitcoin_common
+      bitcoin_sv2
+      bitcoin_ipc
+    )
+    list(APPEND installable_targets bitcoin-mine)
+  endif()
 endif()
 
 #=============================
@@ -145,6 +163,7 @@ add_library(bitcoin_common STATIC EXCLUDE_FROM_ALL
   net_types.cpp
   netaddress.cpp
   netbase.cpp
+  node/interface_ui.cpp
   outputtype.cpp
   policy/feerate.cpp
   policy/policy.cpp
@@ -176,7 +195,6 @@ target_link_libraries(bitcoin_common
 )
 
 
-set(installable_targets)
 if(ENABLE_WALLET)
   add_subdirectory(wallet)
 
@@ -242,7 +260,6 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/context.cpp
   node/database_args.cpp
   node/eviction.cpp
-  node/interface_ui.cpp
   node/interfaces.cpp
   node/kernel_notifications.cpp
   node/mempool_args.cpp
@@ -324,7 +341,7 @@ if(BUILD_DAEMON)
   )
   list(APPEND installable_targets bitcoind)
 endif()
-if(WITH_MULTIPROCESS)
+if(ENABLE_IPC AND BUILD_DAEMON)
   add_executable(bitcoin-node
     bitcoind.cpp
     init/bitcoin-node.cpp
@@ -336,8 +353,9 @@ if(WITH_MULTIPROCESS)
     $<TARGET_NAME_IF_EXISTS:bitcoin_wallet>
   )
   list(APPEND installable_targets bitcoin-node)
+endif()
 
-  if(BUILD_TESTS)
+if(ENABLE_IPC AND BUILD_TESTS)
     # bitcoin_ipc_test library target is defined here in src/CMakeLists.txt
     # instead of src/test/CMakeLists.txt so capnp files in src/test/ are able to
     # reference capnp files in src/ipc/capnp/ by relative path. The Cap'n Proto
@@ -351,7 +369,6 @@ if(WITH_MULTIPROCESS)
       test/ipc_test.capnp
     )
     add_dependencies(bitcoin_ipc_test bitcoin_ipc_headers)
-  endif()
 endif()
 
 
