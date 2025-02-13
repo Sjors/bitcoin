@@ -49,6 +49,7 @@ enum RPCErrorCode
     RPC_VERIFY_ALREADY_IN_UTXO_SET  = -27, //!< Transaction already in utxo set
     RPC_IN_WARMUP                   = -28, //!< Client still warming up
     RPC_METHOD_DEPRECATED           = -32, //!< RPC method is deprecated
+    RPC_SHUTDOWN_ERROR              = -37, //!< Node is shutting down
 
     //! Aliases for backward compatibility
     RPC_TRANSACTION_ERROR           = RPC_VERIFY_ERROR,
