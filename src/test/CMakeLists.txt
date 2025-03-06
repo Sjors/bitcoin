@@ -99,6 +99,7 @@ add_executable(test_bitcoin
   streams_tests.cpp
   sync_tests.cpp
   system_tests.cpp
+  testnet4_miner_tests.cpp
   timeoffsets_tests.cpp
   torcontrol_tests.cpp
   transaction_tests.cpp
@@ -177,6 +178,7 @@ if(WITH_SV2)
     sv2_noise_tests.cpp
     sv2_transport_tests.cpp
     sv2_messages_tests.cpp
+    sv2_template_provider_tests.cpp
   )
   target_link_libraries(test_bitcoin bitcoin_sv2)
 endif()
