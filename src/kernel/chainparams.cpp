@@ -167,11 +167,6 @@ public:
         fDefaultConsistencyChecks = false;
         m_is_mockable_chain = false;
 
-        checkpointData = {
-            {
-            }
-        };
-
         m_assumeutxo_data = {
             {
                 .height = 840'000,
@@ -273,11 +268,6 @@ public:
         fDefaultConsistencyChecks = false;
         m_is_mockable_chain = false;
 
-        checkpointData = {
-            {
-            }
-        };
-
         m_assumeutxo_data = {
             {
                 .height = 2'500'000,
@@ -375,11 +365,6 @@ public:
 
         fDefaultConsistencyChecks = false;
         m_is_mockable_chain = false;
-
-        checkpointData = {
-            {
-            }
-        };
 
         m_assumeutxo_data = {
             {}
@@ -593,11 +578,6 @@ public:
 
         fDefaultConsistencyChecks = true;
         m_is_mockable_chain = true;
-
-        checkpointData = {
-            {
-            }
-        };
 
         m_assumeutxo_data = {
             {   // For use by unit tests
