@@ -19,7 +19,6 @@ Sv2Connman::~Sv2Connman()
         for (const auto& client : m_sv2_clients) {
             LogTrace(BCLog::SV2, "Disconnecting client id=%zu\n",
                     client.first);
-            CloseConnection(client.second->m_id);
             client.second->m_disconnect_flag = true;
         }
         DisconnectFlagged();
@@ -64,7 +63,8 @@ void Sv2Connman::DisconnectFlagged()
     // Remove clients that are flagged for disconnection.
     auto it = m_sv2_clients.begin();
     while(it != m_sv2_clients.end()) {
-        if (it->second->m_disconnect_flag) {
+        if (it->second->m_send_messages.empty() && it->second->m_disconnect_flag) {
+            CloseConnection(it->second->m_id);
             it = m_sv2_clients.erase(it);
         } else {
             it++;
@@ -203,7 +203,6 @@ void Sv2Connman::EventGotData(Id id, std::span<const uint8_t> data)
                 // Serious transport problem
                 LogPrintLevel(BCLog::SV2, BCLog::Level::Trace, "Transport problem, disconnecting client id=%zu\n",
                                 client->m_id);
-                CloseConnection(id);
                 // TODO: should we even bother with this?
                 client->m_disconnect_flag = true;
                 break;
@@ -217,7 +216,6 @@ void Sv2Connman::EventGotData(Id id, std::span<const uint8_t> data)
         }
     } catch (const std::exception& e) {
         LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received error when processing client id=%zu message: %s\n", client->m_id, e.what());
-        CloseConnection(id);
         client->m_disconnect_flag = true;
     }
 
@@ -227,7 +225,6 @@ void Sv2Connman::EventGotEOF(NodeId node_id)
 {
     auto client{WITH_LOCK(m_clients_mutex, return GetClientById(node_id);)};
     if (client == nullptr) return;
-    CloseConnection(node_id);
     client->m_disconnect_flag = true;
 }
 
@@ -235,7 +232,6 @@ void Sv2Connman::EventGotPermanentReadError(NodeId node_id, const std::string& e
 {
     auto client{WITH_LOCK(m_clients_mutex, return GetClientById(node_id);)};
     if (client == nullptr) return;
-    CloseConnection(node_id);
     client->m_disconnect_flag = true;
 }
 
@@ -249,6 +245,13 @@ void Sv2Connman::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Client& clie
                    node::SV2_MSG_NAMES.at(sv2_net_msg.m_msg_type), client.m_id);
 
     DataStream ss (sv2_net_msg.m_msg);
+
+    if (client.m_disconnect_flag) {
+        // Don't bother processing new messages if we are about to disconnect when the
+        // send queue empties. This also prevents us from appending to the send queue
+        // when m_disconnect_flag is set.
+        return;
+    }
 
     switch (sv2_net_msg.m_msg_type)
     {
@@ -266,7 +269,6 @@ void Sv2Connman::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Client& clie
         } catch (const std::exception& e) {
             LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received invalid SetupConnection message from client id=%zu: %s\n",
                           client.m_id, e.what());
-            CloseConnection(client.m_id);
             client.m_disconnect_flag = true;
             return;
         }
@@ -279,7 +281,6 @@ void Sv2Connman::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Client& clie
                           client.m_id);
             client.m_send_messages.emplace_back(setup_conn_err);
 
-            CloseConnection(client.m_id);
             client.m_disconnect_flag = true;
             return;
         }
@@ -293,7 +294,6 @@ void Sv2Connman::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Client& clie
 
             LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received a connection from client id=%zu with incompatible protocol_versions: min_version: %d, max_version: %d\n",
                           client.m_id, setup_conn.m_min_version, setup_conn.m_max_version);
-            CloseConnection(client.m_id);
             client.m_disconnect_flag = true;
             return;
         }
@@ -310,7 +310,6 @@ void Sv2Connman::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Client& clie
     case Sv2MsgType::COINBASE_OUTPUT_CONSTRAINTS:
     {
         if (!client.m_setup_connection_confirmed) {
-            CloseConnection(client.m_id);
             client.m_disconnect_flag = true;
             return;
         }
@@ -322,7 +321,6 @@ void Sv2Connman::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Client& clie
         } catch (const std::exception& e) {
             LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received invalid CoinbaseOutputConstraints message from client id=%zu: %s\n",
                           client.m_id, e.what());
-            CloseConnection(client.m_id);
             client.m_disconnect_flag = true;
             return;
         }
@@ -333,7 +331,6 @@ void Sv2Connman::ProcessSv2Message(const Sv2NetMsg& sv2_net_msg, Sv2Client& clie
         if (max_additional_size > MAX_BLOCK_WEIGHT) {
             LogPrintLevel(BCLog::SV2, BCLog::Level::Error, "Received impossible CoinbaseOutputConstraints from client id=%zu: %d\n",
                           client.m_id, max_additional_size);
-            CloseConnection(client.m_id);
             client.m_disconnect_flag = true;
             return;
         }

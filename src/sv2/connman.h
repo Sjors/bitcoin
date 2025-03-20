@@ -37,7 +37,8 @@ struct Sv2Client
     bool m_setup_connection_confirmed = false;
 
     /**
-     * Whether the client is a candidate for disconnection.
+     * Whether the client is a candidate for disconnection. The client's socket will be
+     * closed after all queued messages have been sent.
      */
     bool m_disconnect_flag = false;
 
