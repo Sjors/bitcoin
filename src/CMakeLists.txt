@@ -99,6 +99,9 @@ add_subdirectory(util)
 if(WITH_MULTIPROCESS)
   add_subdirectory(ipc)
 endif()
+if(WITH_SV2)
+  add_subdirectory(sv2)
+endif()
 
 add_library(bitcoin_consensus STATIC EXCLUDE_FROM_ALL
   arith_uint256.cpp
