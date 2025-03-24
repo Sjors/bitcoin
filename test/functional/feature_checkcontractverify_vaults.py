@@ -29,37 +29,34 @@ from feature_checkcontractverify import (
 )
 
 
-unvault_privkey = key.ECKey()
-unvault_privkey.set(
+hot_privkey = key.ECKey()
+hot_privkey.set(
     b'y\x88\xe19\x11_\xf6\x19L#\xb7t\x9c\xce\x1c\x08\xf6\xdf\x1a\x01W\xc8\xc1\x07\x8d\xb9\x14\xf1\x91\x89c\x8b', True)
-unvault_pubkey_xonly = unvault_privkey.get_pubkey().get_bytes()[1:]
+hot_pubkey_xonly = hot_privkey.get_pubkey().get_bytes()[1:]
 
-recover_privkey = key.ECKey()
-recover_privkey.set(
+cold_privkey = key.ECKey()
+cold_privkey.set(
     b'\xdcg\xd3\x9f\xc5\x0c/\x82\x06\x01\\T\x8f\xd2\xb6\x90\xddJ\xe5:\xbc\xddJ\rV\x1c\xe2\x07\xb0\xdd7\x89', True)
-recover_pubkey_xonly = recover_privkey.get_pubkey().get_bytes()[1:]
+cold_pubkey_xonly = cold_privkey.get_pubkey().get_bytes()[1:]
 
 
 class Vault(P2TR):
     """
     A UTXO that can be spent either:
-    - with the "recover" clause, sending it to a PT2R output that has recover_pk as the taproot key
+    - with the "recover" clause, sending it to a PT2R output that has cold_pk as the taproot key
     - with the "trigger" clause, sending the entire amount to an Unvaulting output, after providing a 'withdrawal_pk'
     - with the "trigger_and_revault" clause, sending part of the amount to an output with the same script as this Vault, and the rest
       to an Unvaulting output, after providing a 'withdrawal_pk'
-    - with the alternate_pk using the keypath spend (if provided; the key is NUMS_KEY otherwise)
     """
 
-    def __init__(self, alternate_pk: Optional[bytes], spend_delay: int, recover_pk: bytes, unvault_pk: bytes, *, has_partial_revault=True, has_early_recover=True):
-        assert (alternate_pk is None or len(alternate_pk) == 32) and len(
-            recover_pk) == 32 and len(unvault_pk) == 32
+    def __init__(self, spend_delay: int, cold_pk: bytes, hot_pk: bytes, *, has_partial_revault=True, has_early_recover=True):
+        assert len(cold_pk) == 32 and len(hot_pk) == 32
 
-        self.alternate_pk = alternate_pk
         self.spend_delay = spend_delay
-        self.recover_pk = recover_pk
-        self.unvault_pk = unvault_pk
+        self.cold_pk = cold_pk
+        self.hot_pk = hot_pk
 
-        unvaulting = Unvaulting(alternate_pk, spend_delay, recover_pk)
+        unvaulting = Unvaulting(spend_delay, cold_pk)
 
         self.has_partial_revault = has_partial_revault
         self.has_early_recover = has_early_recover
@@ -68,12 +65,12 @@ class Vault(P2TR):
         trigger = ("trigger",
                    CScript([
                        # data and index already on the stack
-                       0 if alternate_pk is None else alternate_pk,  # pk
+                       cold_pk,  # pk
                        unvaulting.get_taptree(),  # taptree
                        0,  # standard flags
                        OP_CHECKCONTRACTVERIFY,
 
-                       unvault_pk,
+                       hot_pk,
                        OP_CHECKSIG
                    ])
                    )
@@ -89,12 +86,12 @@ class Vault(P2TR):
                 OP_CHECKCONTRACTVERIFY,
 
                 # data and index already on the stack
-                0 if alternate_pk is None else alternate_pk,  # pk
+                cold_pk,  # pk
                 unvaulting.get_taptree(),  # taptree
                 0,  # standard flags
                 OP_CHECKCONTRACTVERIFY,
 
-                unvault_pk,
+                hot_pk,
                 OP_CHECKSIG
             ])
         )
@@ -105,7 +102,7 @@ class Vault(P2TR):
             CScript([
                 0,  # data
                 OP_SWAP,  # <out_i> (from witness)
-                recover_pk,  # pk
+                cold_pk,  # pk
                 0,  # taptree
                 0,  # flags
                 OP_CHECKCONTRACTVERIFY,
@@ -113,28 +110,25 @@ class Vault(P2TR):
             ])
         )
 
-        super().__init__(NUMS_KEY if alternate_pk is None else alternate_pk, [
+        super().__init__(cold_pk, [
             trigger, [trigger_and_revault, recover]])
 
 
 class Unvaulting(AugmentedP2TR):
     """
     A UTXO that can be spent either:
-    - with the "recover" clause, sending it to a PT2R output that has recover_pk as the taproot key
+    - with the "recover" clause, sending it to a PT2R output that has cold_pk as the taproot key
     - with the "withdraw" clause, after a relative timelock of spend_delay blocks, sending the entire amount to a P2TR output that has
       the taproot key 'withdrawal_pk'
-    - with the alternate_pk using the keypath spend (if provided; the key is NUMS_KEY otherwise)
     """
 
-    def __init__(self, alternate_pk: Optional[bytes], spend_delay: int, recover_pk: bytes):
-        assert (alternate_pk is None or len(alternate_pk)
-                == 32) and len(recover_pk) == 32
+    def __init__(self, spend_delay: int, cold_pk: bytes):
+        assert len(cold_pk) == 32
 
-        self.alternate_pk = alternate_pk
         self.spend_delay = spend_delay
-        self.recover_pk = recover_pk
+        self.cold_pk = cold_pk
 
-        super().__init__(NUMS_KEY if alternate_pk is None else alternate_pk)
+        super().__init__(cold_pk)
 
     def get_scripts(self) -> TapTree:
         # witness: <withdrawal_pk>
@@ -144,7 +138,7 @@ class Unvaulting(AugmentedP2TR):
                 OP_DUP,
 
                 -1,
-                0 if self.alternate_pk is None else self.alternate_pk,
+                self.cold_pk,
                 -1,
                 CCV_FLAG_CHECK_INPUT,
                 OP_CHECKCONTRACTVERIFY,
@@ -170,7 +164,7 @@ class Unvaulting(AugmentedP2TR):
             CScript([
                 0,  # data
                 OP_SWAP,  # <out_i> (from witness)
-                self.recover_pk,  # pk
+                self.cold_pk,  # pk
                 0,  # taptree
                 0,  # flags
                 OP_CHECKCONTRACTVERIFY,
@@ -183,15 +177,13 @@ class Unvaulting(AugmentedP2TR):
 
 # We reuse these specs for all the tests
 vault_contract = Vault(
-    alternate_pk=None,
     spend_delay=10,
-    recover_pk=recover_pubkey_xonly,
-    unvault_pk=unvault_pubkey_xonly
+    cold_pk=cold_pubkey_xonly,
+    hot_pk=hot_pubkey_xonly
 )
 unvault_contract = Unvaulting(
-    alternate_pk=None,
     spend_delay=10,
-    recover_pk=recover_pubkey_xonly
+    cold_pk=cold_pubkey_xonly
 )
 
 
@@ -259,6 +251,8 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
         ######################################
 
         withdrawal_pk = b'\x01' * 32
+        withdrawal_hijacker_pk = b'\x02' * 32
+
 
         tx_trigger = create_tx(
             inputs=[CcvInput(
@@ -266,8 +260,8 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
                 vault_contract,
                 None,
                 "trigger",
-                # [unvault_signature, unvault_pk, out_i]
-                [PrivkeyPlaceholder(unvault_privkey),
+                # [unvault_signature, withdrawal_pk, out_i]
+                [PrivkeyPlaceholder(hot_privkey),
                  withdrawal_pk, script.bn2vch(0)]
             )],
             outputs=[
@@ -278,10 +272,12 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
         trigger_txid = self.assert_broadcast_tx(tx_trigger, mine_all=True)
 
         ######################################
-        # Step 3: Attempt early withdrawal (fail)
+        # Step 3a: Prepare withdrawal
         ######################################
 
         withdraw_amount = vault_amount
+
+        # No signature is required for this step
         withdrawal_inputs = [CcvInput(
             trigger_txid, 0, withdraw_amount,
             unvault_contract,
@@ -298,6 +294,10 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
             ],
         )
 
+        ######################################
+        # Step 3b: Attempt early withdrawal (fail)
+        ######################################
+
         # This should fail, as the timelock is not satisfied yet
         self.assert_broadcast_tx(tx_withdraw, err_msg="non-BIP68-final")
 
@@ -312,7 +312,7 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
         tx_withdraw_wrong = create_tx(
             inputs=withdrawal_inputs,
             outputs=[
-                CTxOut(withdraw_amount, CScript([OP_1, b'\x02' * 32]))
+                CTxOut(withdraw_amount, CScript([OP_1, withdrawal_hijacker_pk]))
             ],
         )
         self.assert_broadcast_tx(
@@ -364,7 +364,7 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
                     vault_contract,
                     None,
                     "trigger",
-                    [PrivkeyPlaceholder(unvault_privkey),
+                    [PrivkeyPlaceholder(hot_privkey),
                      withdrawal_pk, script.bn2vch(0)]
                 ),
                 CcvInput(
@@ -372,7 +372,8 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
                     vault_contract,
                     None,
                     "trigger_and_revault",
-                    [PrivkeyPlaceholder(unvault_privkey),
+                    [PrivkeyPlaceholder(hot_privkey),
+                     # Sjors: why do you need withdrawal_pk at all here?
                      withdrawal_pk, script.bn2vch(0), script.bn2vch(1)]
                 )
             ],
@@ -390,7 +391,7 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
         spending the Unvaulting output using the 'recover' clause.
         """
 
-        withdrawal_pk = b'\x01' * 32
+        attacker_withdrawal_pk = b'\x01' * 32
         vault_amount = 50_000
 
         # Create the Vault output.
@@ -404,26 +405,28 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
         vault_txid, vault_vout = res["txid"], res["sent_vout"]
         self.generate(node, 1)
 
-        # Spend the Vault output using the 'trigger' clause to produce an Unvaulting output.
+        # Attacker compromised hot key and spend the Vault output using the
+        # 'trigger' clause to produce an Unvaulting output.
         tx_trigger = create_tx(
             inputs=[CcvInput(
                 vault_txid, vault_vout, vault_amount,
                 vault_contract,
                 None,
                 "trigger",
-                [PrivkeyPlaceholder(unvault_privkey),
-                 withdrawal_pk, script.bn2vch(0)]
+                [PrivkeyPlaceholder(hot_privkey),
+                 attacker_withdrawal_pk, script.bn2vch(0)]
             )],
             outputs=[
-                unvault_contract.get_tx_out(vault_amount, withdrawal_pk)
+                unvault_contract.get_tx_out(vault_amount, attacker_withdrawal_pk)
             ],
         )
         unvault_txid = self.assert_broadcast_tx(tx_trigger, mine_all=True)
 
+        # No signature is required for recovery
         inputs = [CcvInput(
             unvault_txid, 0, vault_amount,
             unvault_contract,
-            withdrawal_pk,
+            attacker_withdrawal_pk,
             "recover",
             [script.bn2vch(0)]
         )]
@@ -442,7 +445,7 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
         tx_recover = create_tx(
             inputs=inputs,
             outputs=[
-                CTxOut(vault_amount, CScript([OP_1, recover_pubkey_xonly]))
+                CTxOut(vault_amount, CScript([OP_1, cold_pubkey_xonly]))
             ],
         )
         self.assert_broadcast_tx(tx_recover, mine_all=True)
