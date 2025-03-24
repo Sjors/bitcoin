@@ -45,7 +45,7 @@ class Vault(P2TR):
     A UTXO that can be spent either:
     - with the "recover" clause, sending it to a PT2R output that has cold_pk as the taproot key
     - with the "trigger" clause, sending the entire amount to an Unvaulting output, after providing a 'withdrawal_pk'
-    - with the "trigger_and_revault" clause, sending part of the amount to an output with the same script as this Vault, and the rest
+    - with the "trigger_and_partially_revault" clause, sending part of the amount to an output with the same script as this Vault, and the rest
       to an Unvaulting output, after providing a 'withdrawal_pk'
     """
 
@@ -76,8 +76,8 @@ class Vault(P2TR):
                    )
 
         # witness: <sig> <withdrawal_pk> <trigger_out_i> <revault_out_i>
-        trigger_and_revault_leaf = (
-            "trigger_and_revault",
+        trigger_and_partially_revault_leaf = (
+            "trigger_and_partially_revault",
             CScript([
                 0, OP_SWAP,   # no data tweak
                 -1,  # current input's internal key
@@ -111,7 +111,7 @@ class Vault(P2TR):
         )
 
         super().__init__(cold_pk, [
-            trigger_leaf, [trigger_and_revault_leaf, recover_leaf]])
+            trigger_leaf, [trigger_and_partially_revault_leaf, recover_leaf]])
 
 
 class Unvaulting(AugmentedP2TR):
@@ -206,7 +206,7 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
         # Run the original end-to-end Vault flow.
         self.test_vault_e2e(node, wallet)
         # Test spending two Vault outputs in one transaction.
-        self.test_trigger_and_revault(node, wallet)
+        self.test_trigger_and_partially_revault(node, wallet)
         # Test spending the Unvaulting output using the 'recover' clause.
         self.test_unvault_recover(node, wallet)
 
@@ -315,10 +315,10 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
         ######################################
         self.assert_broadcast_tx(tx_withdraw, mine_all=True)
 
-    def test_trigger_and_revault(self, node: TestNode, wallet: MiniWallet):
+    def test_trigger_and_partially_revault(self, node: TestNode, wallet: MiniWallet):
         """
         Test creating two different Vault outputs and spending them together into one Unvaulting output.
-        One input uses the 'trigger' clause and the other uses the 'trigger_and_revault' clause.
+        One input uses the 'trigger' clause and the other uses the 'trigger_and_partially_revault' clause.
         """
 
         withdrawal_pk = b'\x01' * 32
@@ -348,7 +348,7 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
 
         # Create a transaction that spends both vault outputs into a single Unvaulting output.
         # For the first input, use the 'trigger' clause.
-        # For the second input, use the 'trigger_and_revault' clause.
+        # For the second input, use the 'trigger_and_partially_revault' clause.
         tx_trigger = create_tx(
             inputs=[
                 CcvInput(
@@ -363,9 +363,8 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
                     vault2_txid, vault2_vout, vault_amount2,
                     vault_contract,
                     None,
-                    "trigger_and_revault",
+                    "trigger_and_partially_revault",
                     [PrivkeyPlaceholder(hot_privkey),
-                     # Sjors: why do you need withdrawal_pk at all here?
                      withdrawal_pk, script.bn2vch(0), script.bn2vch(1)]
                 )
             ],
