@@ -135,6 +135,13 @@ class Unvaulting(AugmentedP2TR):
         withdraw_leaf = (
             "withdraw",
             CScript([
+                # Check withdrawal_pk commitment
+                OP_DUP, # data is withdrawal_pk
+                -1, # current input
+                0, # NUMS (ignored)
+                CCV_FLAG_CHECK_INPUT,
+                OP_CHECKCONTRACTVERIFY,
+
                 # Check timelock
                 self.spend_delay, OP_CHECKSEQUENCEVERIFY, OP_DROP,
 
@@ -275,14 +282,14 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
             unvault_contract,
             withdrawal_pk,
             "withdraw",
-            [withdrawal_hijacker_pk],
+            [withdrawal_pk],
             nSequence=vault_contract.spend_delay
         )]
 
         tx_withdraw = create_tx(
             inputs=withdrawal_inputs,
             outputs=[
-                CTxOut(withdraw_amount, CScript([OP_1, withdrawal_hijacker_pk]))
+                CTxOut(withdraw_amount, CScript([OP_1, withdrawal_pk]))
             ],
         )
 
@@ -301,7 +308,27 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
         ######################################
         # Step 5: Attempt withdrawal to a wrong pubkey
         ######################################
-        self.assert_broadcast_tx(tx_withdraw, mine_all=True)
+        hijack_withdrawal_inputs = [CcvInput(
+            trigger_txid, 0, withdraw_amount,
+            unvault_contract,
+            withdrawal_hijacker_pk,
+            "withdraw",
+            [withdrawal_hijacker_pk],
+            nSequence=vault_contract.spend_delay
+        )]
+
+        tx_hijack_withdraw = create_tx(
+            inputs=hijack_withdrawal_inputs,
+            outputs=[
+                CTxOut(withdraw_amount, CScript([OP_1, withdrawal_hijacker_pk]))
+            ],
+        )
+        self.assert_broadcast_tx(
+        tx_hijack_withdraw, err_msg="mandatory-script-verify-flag-failed")
+
+        ######################################
+        # Step 6: Complete the withdrawal
+        ######################################
 
     def test_trigger_and_partially_revault(self, node: TestNode, wallet: MiniWallet):
         """
