@@ -65,7 +65,7 @@ class Vault(P2TR):
         trigger_leaf = ("trigger",
                    CScript([
                        # data and index already on the stack
-                       cold_pk,  # pk
+                       -1, # current input's internal key, i.e. cold_pk
                        unvaulting.get_taptree(),  # taptree
                        0,  # standard flags
                        OP_CHECKCONTRACTVERIFY,
@@ -80,13 +80,13 @@ class Vault(P2TR):
             "trigger_and_partially_revault",
             CScript([
                 0, OP_SWAP,   # no data tweak
-                -1,  # current input's internal key
+                -1,  # current input's internal key, i.e. cold_pk
                 -1,  # current input's taptweak
                 CCV_FLAG_DEDUCT_OUTPUT_AMOUNT,  # revault output
                 OP_CHECKCONTRACTVERIFY,
 
                 # data and index already on the stack
-                cold_pk,  # pk
+                -1,  # pk
                 unvaulting.get_taptree(),  # taptree
                 0,  # standard flags
                 OP_CHECKCONTRACTVERIFY,
