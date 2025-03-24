@@ -135,14 +135,6 @@ class Unvaulting(AugmentedP2TR):
         withdraw_leaf = (
             "withdraw",
             CScript([
-                OP_DUP,
-
-                -1,
-                self.cold_pk,
-                -1,
-                CCV_FLAG_CHECK_INPUT,
-                OP_CHECKCONTRACTVERIFY,
-
                 # Check timelock
                 self.spend_delay, OP_CHECKSEQUENCEVERIFY, OP_DROP,
 
