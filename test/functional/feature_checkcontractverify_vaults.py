@@ -62,7 +62,7 @@ class Vault(P2TR):
         self.has_early_recover = has_early_recover
 
         # witness: <sig> <withdrawal_pk> <out_i>
-        trigger = ("trigger",
+        trigger_leaf = ("trigger",
                    CScript([
                        # data and index already on the stack
                        cold_pk,  # pk
@@ -76,7 +76,7 @@ class Vault(P2TR):
                    )
 
         # witness: <sig> <withdrawal_pk> <trigger_out_i> <revault_out_i>
-        trigger_and_revault = (
+        trigger_and_revault_leaf = (
             "trigger_and_revault",
             CScript([
                 0, OP_SWAP,   # no data tweak
@@ -97,7 +97,7 @@ class Vault(P2TR):
         )
 
         # witness: <out_i>
-        recover = (
+        recover_leaf = (
             "recover",
             CScript([
                 0,  # data
@@ -111,14 +111,14 @@ class Vault(P2TR):
         )
 
         super().__init__(cold_pk, [
-            trigger, [trigger_and_revault, recover]])
+            trigger_leaf, [trigger_and_revault_leaf, recover_leaf]])
 
 
 class Unvaulting(AugmentedP2TR):
     """
     A UTXO that can be spent either:
     - with the "recover" clause, sending it to a PT2R output that has cold_pk as the taproot key
-    - with the "withdraw" clause, after a relative timelock of spend_delay blocks, sending the entire amount to a P2TR output that has
+    - with the "withdrawal" clause, after a relative timelock of spend_delay blocks, sending the entire amount to a P2TR output that has
       the taproot key 'withdrawal_pk'
     """
 
@@ -132,7 +132,7 @@ class Unvaulting(AugmentedP2TR):
 
     def get_scripts(self) -> TapTree:
         # witness: <withdrawal_pk>
-        withdrawal = (
+        withdraw_leaf = (
             "withdraw",
             CScript([
                 OP_DUP,
@@ -159,7 +159,7 @@ class Unvaulting(AugmentedP2TR):
         )
 
         # witness: <out_i>
-        recover = (
+        recover_leaf = (
             "recover",
             CScript([
                 0,  # data
@@ -172,7 +172,7 @@ class Unvaulting(AugmentedP2TR):
             ])
         )
 
-        return [withdrawal, recover]
+        return [withdraw_leaf, recover_leaf]
 
 
 # We reuse these specs for all the tests
