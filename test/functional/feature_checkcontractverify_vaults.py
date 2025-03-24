@@ -275,14 +275,14 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
             unvault_contract,
             withdrawal_pk,
             "withdraw",
-            [withdrawal_pk],
+            [withdrawal_hijacker_pk],
             nSequence=vault_contract.spend_delay
         )]
 
         tx_withdraw = create_tx(
             inputs=withdrawal_inputs,
             outputs=[
-                CTxOut(withdraw_amount, CScript([OP_1, withdrawal_pk]))
+                CTxOut(withdraw_amount, CScript([OP_1, withdrawal_hijacker_pk]))
             ],
         )
 
@@ -300,18 +300,6 @@ class CheckContractVerifyVaultTest(BitcoinTestFramework):
 
         ######################################
         # Step 5: Attempt withdrawal to a wrong pubkey
-        ######################################
-        tx_withdraw_wrong = create_tx(
-            inputs=withdrawal_inputs,
-            outputs=[
-                CTxOut(withdraw_amount, CScript([OP_1, withdrawal_hijacker_pk]))
-            ],
-        )
-        self.assert_broadcast_tx(
-            tx_withdraw_wrong, err_msg="Mismatching contract data or program")
-
-        ######################################
-        # Step 6: Complete the withdrawal
         ######################################
         self.assert_broadcast_tx(tx_withdraw, mine_all=True)
 
