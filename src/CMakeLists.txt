@@ -373,7 +373,7 @@ if(ENABLE_IPC AND BUILD_DAEMON)
   )
   install_binary_component(bitcoin-node)
 
-  if(WITH_SV2)
+  if(BUILD_MINE)
     add_executable(bitcoin-mine
       bitcoin-mine.cpp
       init/basic.cpp
