@@ -373,18 +373,21 @@ if(ENABLE_IPC AND BUILD_DAEMON)
   )
   install_binary_component(bitcoin-node)
 
-  add_executable(bitcoin-mine
-    bitcoin-mine.cpp
-    init/basic.cpp
-  )
-  add_windows_resources(bitcoin-mine bitcoin-mine-res.rc)
-  add_windows_application_manifest(bitcoin-mine)
-  target_link_libraries(bitcoin-mine
-    core_interface
-    bitcoin_common
-    bitcoin_ipc
-  )
-  install_binary_component(bitcoin-mine)
+  if(WITH_SV2)
+    add_executable(bitcoin-mine
+      bitcoin-mine.cpp
+      init/basic.cpp
+    )
+    add_windows_resources(bitcoin-mine bitcoin-mine-res.rc)
+    add_windows_application_manifest(bitcoin-mine)
+    target_link_libraries(bitcoin-mine
+      core_interface
+      bitcoin_common
+      bitcoin_ipc
+      bitcoin_sv2
+    )
+    install_binary_component(bitcoin-mine)
+  endif()
 endif()
 
 if(ENABLE_IPC AND BUILD_TESTS)
