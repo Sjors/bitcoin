@@ -6,6 +6,7 @@
 #ifndef BITCOIN_NODE_MINER_H
 #define BITCOIN_NODE_MINER_H
 
+#include <interfaces/types.h>
 #include <node/types.h>
 #include <policy/policy.h>
 #include <primitives/block.h>
@@ -30,6 +31,8 @@ class Chainstate;
 class ChainstateManager;
 
 namespace Consensus { struct Params; };
+
+using interfaces::BlockRef;
 
 namespace node {
 class KernelNotifications;
@@ -245,6 +248,8 @@ std::unique_ptr<CBlockTemplate> WaitAndCreateNewBlock(ChainstateManager& chainma
                                                       const std::unique_ptr<CBlockTemplate>& block_template,
                                                       const BlockWaitOptions& options,
                                                       const BlockAssembler::Options& assemble_options);
+
+std::optional<BlockRef> GetTip(ChainstateManager& chainman);
 
 /* Waits for the connected tip to change until timeout has elapsed. During node initialization, this will wait until the tip is connected (regardless of `timeout`).
  * Returns the current tip hash, or nullopt if the node is shutting down. */

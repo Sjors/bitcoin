@@ -541,6 +541,13 @@ std::unique_ptr<CBlockTemplate> WaitAndCreateNewBlock(ChainstateManager& chainma
 }
 
 std::optional<uint256> WaitTipChanged(ChainstateManager& chainman, KernelNotifications& kernel_notifications, const uint256& current_tip, MillisecondsDouble& timeout)
+std::optional<BlockRef> GetTip(ChainstateManager& chainman) {
+    LOCK(::cs_main);
+    CBlockIndex* tip{chainman.ActiveChain().Tip()};
+    if (!tip) return {};
+    return BlockRef{tip->GetBlockHash(), tip->nHeight};
+}
+
 {
     Assume(timeout >= 0ms); // No internal callers should use a negative timeout
     if (timeout < 0ms) timeout = 0ms;
