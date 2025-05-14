@@ -253,7 +253,7 @@ std::optional<BlockRef> GetTip(ChainstateManager& chainman);
 
 /* Waits for the connected tip to change until timeout has elapsed. During node initialization, this will wait until the tip is connected (regardless of `timeout`).
  * Returns the current tip hash, or nullopt if the node is shutting down. */
-std::optional<uint256> WaitTipChanged(ChainstateManager& chainman, KernelNotifications& kernel_notifications, const uint256& current_tip, MillisecondsDouble& timeout);
+std::optional<BlockRef> WaitTipChanged(ChainstateManager& chainman, KernelNotifications& kernel_notifications, const uint256& current_tip, MillisecondsDouble& timeout);
 } // namespace node
 
 #endif // BITCOIN_NODE_MINER_H

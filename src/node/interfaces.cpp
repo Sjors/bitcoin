@@ -971,11 +971,7 @@ public:
 
     std::optional<BlockRef> waitTipChanged(uint256 current_tip, MillisecondsDouble timeout) override
     {
-        // We only care if the tip changes or the timeout elapses.
-        // If WaitTipChanged returns a value, return the full tip by calling getTip().
-        // else, return empty as well.
-        if (WaitTipChanged(chainman(), notifications(), current_tip, timeout)) return getTip();
-        return {};
+        return WaitTipChanged(chainman(), notifications(), current_tip, timeout);
     }
 
     std::unique_ptr<BlockTemplate> createNewBlock(const BlockCreateOptions& options) override

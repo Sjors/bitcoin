@@ -540,7 +540,6 @@ std::unique_ptr<CBlockTemplate> WaitAndCreateNewBlock(ChainstateManager& chainma
     return nullptr;
 }
 
-std::optional<uint256> WaitTipChanged(ChainstateManager& chainman, KernelNotifications& kernel_notifications, const uint256& current_tip, MillisecondsDouble& timeout)
 std::optional<BlockRef> GetTip(ChainstateManager& chainman) {
     LOCK(::cs_main);
     CBlockIndex* tip{chainman.ActiveChain().Tip()};
@@ -548,6 +547,7 @@ std::optional<BlockRef> GetTip(ChainstateManager& chainman) {
     return BlockRef{tip->GetBlockHash(), tip->nHeight};
 }
 
+std::optional<BlockRef> WaitTipChanged(ChainstateManager& chainman, KernelNotifications& kernel_notifications, const uint256& current_tip, MillisecondsDouble& timeout)
 {
     Assume(timeout >= 0ms); // No internal callers should use a negative timeout
     if (timeout < 0ms) timeout = 0ms;
@@ -568,8 +568,11 @@ std::optional<BlockRef> GetTip(ChainstateManager& chainman) {
         kernel_notifications.m_tip_block_cv.wait_until(lock, deadline, [&]() EXCLUSIVE_LOCKS_REQUIRED(kernel_notifications.m_tip_block_mutex) {
             return Assume(kernel_notifications.TipBlock()) != current_tip || chainman.m_interrupt;
         });
-        if (chainman.m_interrupt) return {};
-        return Assume(kernel_notifications.TipBlock());
     }
+    if (chainman.m_interrupt) return {};
+
+    // Must release m_tip_block_mutex before getTip() locks cs_main, to
+    // avoid deadlocks.
+    return GetTip(chainman);
 }
 } // namespace node
