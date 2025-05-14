@@ -6,6 +6,7 @@
 #ifndef BITCOIN_NODE_MINER_H
 #define BITCOIN_NODE_MINER_H
 
+#include <interfaces/types.h>
 #include <node/types.h>
 #include <policy/policy.h>
 #include <primitives/block.h>
@@ -30,6 +31,8 @@ class Chainstate;
 class ChainstateManager;
 
 namespace Consensus { struct Params; };
+
+using interfaces::BlockRef;
 
 namespace node {
 class KernelNotifications;
@@ -245,6 +248,9 @@ std::unique_ptr<CBlockTemplate> WaitAndCreateNewBlock(ChainstateManager& chainma
                                                       const std::unique_ptr<CBlockTemplate>& block_template,
                                                       const BlockWaitOptions& options,
                                                       const BlockAssembler::Options& assemble_options);
+
+std::optional<BlockRef> GetTip(ChainstateManager& chainman);
+
 } // namespace node
 
 #endif // BITCOIN_NODE_MINER_H
