@@ -5,17 +5,18 @@
 #ifndef BITCOIN_SV2_MESSAGES_H
 #define BITCOIN_SV2_MESSAGES_H
 
-#include <net.h> // for CSerializedNetMsg and CNetMessage
 #include <consensus/validation.h>
 #include <cstdint>
+#include <net.h> // for CSerializedNetMsg and CNetMessage
 #include <primitives/transaction.h>
 #include <script/script.h>
 #include <span.h>
 #include <streams.h>
 #include <string>
-#include <vector>
+#include <tuple>
 #include <uint256.h>
 #include <util/check.h>
+#include <vector>
 
 class CBlock;
 struct CMutableTransaction;
@@ -57,8 +58,7 @@ static const std::map<Sv2MsgType, std::string> SV2_MSG_NAMES{
     {Sv2MsgType::COINBASE_OUTPUT_CONSTRAINTS, "CoinbaseOutputConstraints"},
 };
 
-struct Sv2SetupConnectionMsg
-{
+struct Sv2SetupConnectionMsg {
     /**
      * The default message type value for this Stratum V2 message.
      */
@@ -119,16 +119,7 @@ struct Sv2SetupConnectionMsg
     template <typename Stream>
     void Unserialize(Stream& s)
     {
-        s >> m_protocol
-          >> m_min_version
-          >> m_max_version
-          >> m_flags
-          >> m_endpoint_host
-          >> m_endpoint_port
-          >> m_vendor
-          >> m_hardware_version
-          >> m_firmware
-          >> m_device_id;
+        s >> m_protocol >> m_min_version >> m_max_version >> m_flags >> m_endpoint_host >> m_endpoint_port >> m_vendor >> m_hardware_version >> m_firmware >> m_device_id;
     }
 };
 
@@ -137,8 +128,7 @@ struct Sv2SetupConnectionMsg
  * The template provider MUST NOT provide NewWork messages which would represent consensus-invalid blocks once this
  * additional size — along with a maximally-sized (100 byte) coinbase field — is added.
  */
-struct Sv2CoinbaseOutputConstraintsMsg
-{
+struct Sv2CoinbaseOutputConstraintsMsg {
     /**
      * The default message type value for this Stratum V2 message.
      */
@@ -166,7 +156,7 @@ struct Sv2CoinbaseOutputConstraintsMsg
     void Unserialize(Stream& s)
     {
         s >> m_coinbase_output_max_additional_size;
-       try {
+        try {
             // This field was added to the spec on ...,
             // SRI roles before ... do not provide it.
             s >> m_coinbase_output_max_additional_sigops;
@@ -182,8 +172,7 @@ struct Sv2CoinbaseOutputConstraintsMsg
  * The client is required to verify the set of feature flags that the server
  * supports and act accordingly.
  */
-struct Sv2SetupConnectionSuccessMsg
-{
+struct Sv2SetupConnectionSuccessMsg {
     /**
      * The default message type value for this Stratum V2 message.
      */
@@ -214,8 +203,7 @@ struct Sv2SetupConnectionSuccessMsg
 /**
  * Response to the SetupConnection message if the server rejects the connection.
  */
-struct Sv2SetupConnectionErrorMsg
-{
+struct Sv2SetupConnectionErrorMsg {
     static constexpr auto m_msg_type = Sv2MsgType::SETUP_CONNECTION_ERROR;
 
     /**
@@ -243,8 +231,7 @@ struct Sv2SetupConnectionErrorMsg
  * The work template for downstream devices. Can be used for future work or immediate work.
  * The NewTemplate will be matched to a cached block using the template id.
  */
-struct Sv2NewTemplateMsg
-{
+struct Sv2NewTemplateMsg {
     /**
      * The default message type value for this Stratum V2 message.
      */
@@ -352,8 +339,7 @@ struct Sv2NewTemplateMsg
  * for a future template, indicating the client can begin work on a previously
  * received and cached NewTemplate which contains the same template id.
  */
-struct Sv2SetNewPrevHashMsg
-{
+struct Sv2SetNewPrevHashMsg {
     /**
      * The default message type value for this Stratum V2 message.
      */
@@ -407,8 +393,7 @@ struct Sv2SetNewPrevHashMsg
  * the coinbase) in the block and any additional data relevant for validation
  * associated with the template_id.
  */
-struct Sv2RequestTransactionDataMsg
-{
+struct Sv2RequestTransactionDataMsg {
     /**
      * The default message type value for this Stratum V2 message.
      */
@@ -432,8 +417,7 @@ struct Sv2RequestTransactionDataMsg
  * A message for a successful request for transaction data. It contains the full
  * serialized transaction data from a NewTemplate according to the id.
  */
-struct Sv2RequestTransactionDataSuccessMsg
-{
+struct Sv2RequestTransactionDataSuccessMsg {
     /**
      * The default message type value for this Stratum V2 message.
      */
@@ -453,11 +437,11 @@ struct Sv2RequestTransactionDataSuccessMsg
      * List of full transactions requested by client found in the
      * corresponding template.
      */
-    std::vector<CTransactionRef> m_transactions_list;
+    std::vector<std::pair<CTransactionRef, CAmount>> m_transactions_list;
 
     Sv2RequestTransactionDataSuccessMsg() = default;
 
-    explicit Sv2RequestTransactionDataSuccessMsg(uint64_t template_id, std::vector<uint8_t>&& excess_data, std::vector<CTransactionRef>&& transactions_list) : m_template_id{template_id}, m_excess_data{excess_data}, m_transactions_list{transactions_list} {};
+    explicit Sv2RequestTransactionDataSuccessMsg(uint64_t template_id, std::vector<uint8_t>&& excess_data, std::vector<std::pair<CTransactionRef, CAmount>>&& tx_fee_pairs) : m_template_id{template_id}, m_excess_data{excess_data}, m_transactions_list{tx_fee_pairs} {};
 
     template <typename Stream>
     void Serialize(Stream& s) const
@@ -474,9 +458,9 @@ struct Sv2RequestTransactionDataSuccessMsg
 
         // transactions list is expected to be serialized as a SEQ0_64K[B0_16M].
         s << static_cast<uint16_t>(m_transactions_list.size());
-        for (const auto& tx : m_transactions_list) {
+        for (const auto& tx_fee_pairs : m_transactions_list) {
             DataStream ss_tx{};
-            ss_tx << TX_WITH_WITNESS(*tx);
+            ss_tx << TX_WITH_WITNESS(*std::get<0>(tx_fee_pairs));
             auto tx_size = static_cast<uint32_t>(ss_tx.size());
 
             u24_t tx_byte_len;
@@ -486,6 +470,7 @@ struct Sv2RequestTransactionDataSuccessMsg
 
             s << tx_byte_len;
             s.write(MakeByteSpan(ss_tx));
+            s << std::get<1>(tx_fee_pairs); // Serialize the fee amount
         }
     };
 };
@@ -494,8 +479,7 @@ struct Sv2RequestTransactionDataSuccessMsg
  * The error message for the client if the template provider is unable to send
  * the full serialized transaction data.
  */
-struct Sv2RequestTransactionDataErrorMsg
-{
+struct Sv2RequestTransactionDataErrorMsg {
     /**
      * The default message type value for this Stratum V2 message.
      */
@@ -528,8 +512,7 @@ struct Sv2RequestTransactionDataErrorMsg
  * values from SubmitSolution. The template provider must then propagate the block to the
  * Bitcoin Network.
  */
-struct Sv2SubmitSolutionMsg
-{
+struct Sv2SubmitSolutionMsg {
     /**
      * The default message type value for this Stratum V2 message.
      */
@@ -673,7 +656,7 @@ public:
         Serialize(ser);
         net_msg.data.resize(ser.size());
         std::transform(ser.begin(), ser.end(), net_msg.data.begin(),
-                           [](std::byte b) { return static_cast<uint8_t>(b); });
+                       [](std::byte b) { return static_cast<uint8_t>(b); });
         return net_msg;
     }
 
@@ -725,9 +708,8 @@ public:
         s << static_cast<uint8_t>(m_msg_type);
         s.write(MakeByteSpan(m_msg));
     }
-
 };
 
-}
+} // namespace node
 
 #endif // BITCOIN_SV2_MESSAGES_H
