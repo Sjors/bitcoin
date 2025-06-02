@@ -19,11 +19,12 @@
 BOOST_FIXTURE_TEST_SUITE(sv2_template_provider_tests, TestChain100Setup)
 
 /**
-  * A class for testing the Template Provider. Each TPTester encapsulates a
-  * Sv2TemplateProvider (the one being tested) as well as a Sv2Cipher
-  * to act as the other side.
-  */
-class TPTester {
+ * A class for testing the Template Provider. Each TPTester encapsulates a
+ * Sv2TemplateProvider (the one being tested) as well as a Sv2Cipher
+ * to act as the other side.
+ */
+class TPTester
+{
 private:
     std::unique_ptr<Sv2Transport> m_peer_transport; //!< Transport for peer
     // Sockets that will be returned by the TP listening socket Accept() method.
@@ -31,7 +32,7 @@ private:
     std::shared_ptr<DynSock::Pipes> m_current_client_pipes;
 
 public:
-    std::unique_ptr<Sv2TemplateProvider> m_tp; //!< Sv2TemplateProvider being tested
+    std::unique_ptr<Sv2TemplateProvider> m_tp;                //!< Sv2TemplateProvider being tested
     Sv2TemplateProviderOptions m_tp_options{.is_test = true}; //! Options passed to the TP
 
     TPTester(interfaces::Mining& mining)
@@ -187,9 +188,9 @@ BOOST_AUTO_TEST_CASE(client_tests)
         BOOST_REQUIRE_EQUAL(m_node.mempool->size(), 0);
 
         auto mtx = CreateValidMempoolTransaction(/*input_transaction=*/m_coinbase_txns[0], /*input_vout=*/0,
-                                                        /*input_height=*/0, /*input_signing_key=*/coinbaseKey,
-                                                        /*output_destination=*/locking_script,
-                                                        /*output_amount=*/CAmount(49 * COIN), /*submit=*/true);
+                                                 /*input_height=*/0, /*input_signing_key=*/coinbaseKey,
+                                                 /*output_destination=*/locking_script,
+                                                 /*output_amount=*/CAmount(49 * COIN), /*submit=*/true);
         CTransactionRef tx = MakeTransactionRef(mtx);
 
         // Get serialized transaction size
@@ -240,7 +241,7 @@ BOOST_AUTO_TEST_CASE(client_tests)
     tester.receiveMessage(msg);
     const size_t template_id_size = 8;
     const size_t excess_data_size = 2 + 32;
-    size_t tx_list_size = 2 + 3 + tx_size;
+    size_t tx_list_size = 2 + 3 + tx_size + 8; // added size of fees
     BOOST_TEST_MESSAGE("Receive RequestTransactionData.Success");
     BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), SV2_HEADER_ENCRYPTED_SIZE + template_id_size + excess_data_size + tx_list_size + Poly1305::TAGLEN);
     {
@@ -248,9 +249,9 @@ BOOST_AUTO_TEST_CASE(client_tests)
 
         // RBF the transaction with with > DEFAULT_SV2_FEE_DELTA
         CreateValidMempoolTransaction(/*input_transaction=*/m_coinbase_txns[0], /*input_vout=*/0,
-                                                    /*input_height=*/0, /*input_signing_key=*/coinbaseKey,
-                                                    /*output_destination=*/locking_script,
-                                                    /*output_amount=*/CAmount(48 * COIN), /*submit=*/true);
+                                      /*input_height=*/0, /*input_signing_key=*/coinbaseKey,
+                                      /*output_destination=*/locking_script,
+                                      /*output_amount=*/CAmount(48 * COIN), /*submit=*/true);
 
         BOOST_REQUIRE_EQUAL(m_node.mempool->size(), 1);
     }
@@ -274,7 +275,7 @@ BOOST_AUTO_TEST_CASE(client_tests)
     // We should reply with RequestTransactionData.Success, and the original
     // (replaced) transaction
     tester.receiveMessage(msg);
-    tx_list_size = 2 + 3 + tx_size;
+    tx_list_size = 2 + 3 + tx_size + 8; // added size of fees
     BOOST_REQUIRE_EQUAL(tester.PeerReceiveBytes(), SV2_HEADER_ENCRYPTED_SIZE + template_id_size + excess_data_size + tx_list_size + Poly1305::TAGLEN);
 
     BOOST_TEST_MESSAGE("Create a new block");
