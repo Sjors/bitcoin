@@ -22,7 +22,7 @@ BOOST_AUTO_TEST_CASE(test_sockman)
     // Init state
     BOOST_REQUIRE_EQUAL(sockman.m_listen.size(), 0);
     // Bind to mock Listening Socket
-    BOOST_REQUIRE(sockman.BindListenPort(addr.value(), strError));
+    BOOST_REQUIRE(sockman.BindAndStartListening(addr.value(), strError));
     // We are bound and listening
     BOOST_REQUIRE_EQUAL(sockman.m_listen.size(), 1);
 }
