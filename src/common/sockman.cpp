@@ -200,6 +200,9 @@ void SockMan::ThreadSocketHandler()
             interruptNet.sleep_for(SELECT_TIMEOUT);
         }
 
+        // Service (send/receive) each of the already connected sockets.
+        SocketHandlerConnected(io_readiness);
+
         // Accept new connections from listening sockets.
         SocketHandlerListening(io_readiness.events_per_sock);
     }
@@ -230,6 +233,55 @@ SockMan::IOReadiness SockMan::GenerateWaitSockets()
     return io_readiness;
 }
 
+void SockMan::SocketHandlerConnected(const IOReadiness& io_readiness)
+{
+    AssertLockNotHeld(m_connected_mutex);
+
+    for (const auto& [sock, events] : io_readiness.events_per_sock) {
+        if (interruptNet) {
+            return;
+        }
+
+        auto it{io_readiness.ids_per_sock.find(sock)};
+        if (it == io_readiness.ids_per_sock.end()) {
+            continue;
+        }
+        const Id id{it->second};
+
+        bool send_ready = events.occurred & Sock::SEND; // Sock::SEND could only be set if ShouldTryToSend() has returned true in GenerateWaitSockets().
+        bool recv_ready = events.occurred & Sock::RECV; // Sock::RECV could only be set if ShouldTryToRecv() has returned true in GenerateWaitSockets().
+        bool err_ready = events.occurred & Sock::ERR;
+
+        if (send_ready) {
+            // TODO: send data
+        }
+
+        if (recv_ready || err_ready) {
+            uint8_t buf[0x10000]; // typical socket buffer is 8K-64K
+
+            auto sockets{GetConnectionSockets(id)};
+            if (!sockets) {
+                continue;
+            }
+
+            const ssize_t nrecv{WITH_LOCK(
+                sockets->mutex,
+                return sockets->sock->Recv(buf, sizeof(buf), MSG_DONTWAIT);)};
+
+            if (nrecv < 0) { // In all cases (including -1 and 0) EventIOLoopCompletedForOne() should be executed after this, don't change the code to skip it.
+                const int err = WSAGetLastError();
+                if (err != WSAEWOULDBLOCK && err != WSAEMSGSIZE && err != WSAEINTR && err != WSAEINPROGRESS) {
+                    EventGotPermanentReadError(id, NetworkErrorString(err));
+                }
+            } else if (nrecv == 0) {
+                EventGotEOF(id);
+            } else {
+                EventGotData(id, {buf, static_cast<size_t>(nrecv)});
+            }
+        }
+    }
+}
+
 void SockMan::SocketHandlerListening(const Sock::EventsPerSock& events_per_sock)
 {
     AssertLockNotHeld(m_connected_mutex);
@@ -249,4 +301,18 @@ void SockMan::SocketHandlerListening(const Sock::EventsPerSock& events_per_sock)
             }
         }
     }
+}
+
+std::shared_ptr<SockMan::ConnectionSockets> SockMan::GetConnectionSockets(Id id) const
+{
+    LOCK(m_connected_mutex);
+
+    auto it{m_connected.find(id)};
+    if (it == m_connected.end()) {
+        // There is no socket in case we've already disconnected, or in test cases without
+        // real connections.
+        return {};
+    }
+
+    return it->second;
 }
