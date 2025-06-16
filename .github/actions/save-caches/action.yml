@@ -1,0 +1,29 @@
+name: 'Save Caches'
+description: 'Save ccache, depends sources, and built depends caches'
+inputs:
+  job-name:
+    description: 'job name'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Save Ccache cache
+      uses: cirruslabs/cache/save@v4
+      if: ${{ (github.event_name == 'push') && (github.ref_name == 'master') }}
+      with:
+        path: ${{ env.CCACHE_DIR }}
+        key: ccache-${{ inputs.job-name }}-${{ github.ref_name }}-${{ github.run_id }}
+
+    - name: Save depends sources cache
+      uses: cirruslabs/cache/save@v4
+      if: ${{ (github.event_name == 'push') && (github.ref_name == 'master') }}
+      with:
+        path: ${{ env.SOURCES_PATH }}
+        key: depends-sources-${{ env.DEPENDS_HASH }}-${{ github.run_id }}
+
+    - name: Save built depends cache
+      uses: cirruslabs/cache/save@v4
+      if: ${{ (github.event_name == 'push') && (github.ref_name == 'master') }}
+      with:
+        path: ${{ env.BASE_CACHE }}
+        key: depends-built-${{ inputs.job-name }}-${{ env.DEPENDS_HASH }}-${{ github.run_id }}

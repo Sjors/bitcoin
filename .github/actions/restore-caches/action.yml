@@ -1,0 +1,49 @@
+name: 'Restore Caches'
+description: 'Restore ccache, depends sources, and built depends caches'
+inputs:
+  job-name:
+    description: 'job name'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Set cache paths
+      shell: bash
+      run: |
+        echo "CCACHE_DIR=${{ runner.temp }}/ccache_dir" >> $GITHUB_ENV
+        echo "DEPENDS_DIR=${{ runner.temp }}/depends" >> $GITHUB_ENV
+        echo "SOURCES_PATH=${{ runner.temp }}/depends/sources" >> $GITHUB_ENV
+        echo "BASE_CACHE=${{ runner.temp }}/depends/built" >> $GITHUB_ENV
+        echo "DEPENDS_HASH=${{ hashFiles('depends/packages/*.mk', 'depends/Makefile', 'depends/config.guess', 'depends/config.sub', 'depends/funcs.mk', 'depends/builders/*.mk', 'depends/hosts/*.mk') }}" >> $GITHUB_ENV
+
+    - name: Restore Ccache cache
+      id: ccache-cache
+      uses: cirruslabs/cache/restore@v4
+      with:
+        path: ${{ env.CCACHE_DIR }}
+        # A single ccache per job
+        key: ccache-${{ inputs.job-name }}-${{ github.ref_name }}-${{ github.run_id }}
+        restore-keys: |
+          ccache-${{ inputs.job-name }}-master-
+          ccache-${{ inputs.job-name }}-
+
+    - name: Restore depends sources cache
+      id: depends-sources
+      uses: cirruslabs/cache/restore@v4
+      with:
+        path: ${{ env.SOURCES_PATH }}
+        # A single shared depends sources for all jobs per hash of package definitions and meta_depends
+        key: depends-sources-${{ env.DEPENDS_HASH }}-${{ github.run_id }}
+        restore-keys: |
+          depends-sources-${{ env.DEPENDS_HASH }}-
+
+    - name: Restore built depends cache
+      id: depends-built
+      uses: cirruslabs/cache/restore@v4
+      with:
+        path: ${{ env.BASE_CACHE }}
+        # A built depends per job per hash(package definitions and meta_depends).
+        key: depends-built-${{ inputs.job-name }}-${{ env.DEPENDS_HASH }}-${{ github.run_id }}
+        restore-keys: |
+          depends-built-${{ inputs.job-name }}-${{ env.DEPENDS_HASH }}-
+          depends-built-${{ inputs.job-name }}-
