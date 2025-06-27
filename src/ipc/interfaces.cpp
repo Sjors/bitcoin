@@ -32,7 +32,10 @@ std::string g_ignore_ctrl_c;
 
 void HandleCtrlC(int)
 {
-    (void)write(STDOUT_FILENO, g_ignore_ctrl_c.data(), g_ignore_ctrl_c.size());
+    ssize_t result = write(STDOUT_FILENO, g_ignore_ctrl_c.data(), g_ignore_ctrl_c.size());
+    // Casting unused result to (void) does not work in gcc
+    // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66425
+    if (!result) return;
 }
 #endif
 
