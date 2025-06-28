@@ -18,7 +18,7 @@
 #include <cstring>
 #include <functional>
 #include <memory>
-#include <signal.h>
+#include <csignal>
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
