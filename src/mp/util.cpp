@@ -5,12 +5,12 @@
 #include <mp/config.h>
 #include <mp/util.h>
 
-#include <errno.h>
+#include <cerrno>
+#include <cstdio>
 #include <kj/common.h>
 #include <kj/string-tree.h>
 #include <pthread.h>
 #include <sstream>
-#include <stdio.h>
 #include <string>
 #include <sys/resource.h>
 #include <sys/socket.h>
