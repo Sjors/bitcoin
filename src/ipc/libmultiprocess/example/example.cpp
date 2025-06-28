@@ -2,12 +2,17 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <init.capnp.h>
+#include <init.capnp.proxy.h>
+
+#include <cstring> // IWYU pragma: keep
 #include <filesystem>
 #include <fstream>
 #include <future>
-#include <init.capnp.h>
-#include <init.capnp.proxy.h>
 #include <iostream>
+#include <kj/async.h>
+#include <kj/common.h>
+#include <memory>
 #include <mp/proxy-io.h>
 #include <mp/util.h>
 #include <stdexcept>

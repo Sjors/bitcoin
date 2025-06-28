@@ -3,17 +3,21 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <calculator.h>
-#include <charconv>
-#include <fstream>
 #include <init.capnp.h>
-#include <init.capnp.proxy.h> // NOLINT(misc-include-cleaner)
-#include <init.h>
+#include <init.capnp.proxy.h> // NOLINT(misc-include-cleaner) // IWYU pragma: keep
+
+#include <charconv>
+#include <cstring>
+#include <fstream>
 #include <iostream>
+#include <kj/async.h>
+#include <kj/common.h>
+#include <kj/memory.h>
 #include <memory>
 #include <mp/proxy-io.h>
-#include <printer.h>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 
 class CalculatorImpl : public Calculator

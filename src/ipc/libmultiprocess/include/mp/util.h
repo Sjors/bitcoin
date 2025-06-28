@@ -8,14 +8,10 @@
 #include <capnp/schema.h>
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 #include <functional>
-#include <future>
-#include <kj/common.h>
-#include <kj/exception.h>
 #include <kj/string-tree.h>
-#include <memory>
 #include <mutex>
-#include <string.h>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -174,7 +170,7 @@ public:
 class MP_SCOPED_CAPABILITY Lock {
 public:
     explicit Lock(Mutex& m) MP_ACQUIRE(m) : m_lock(m.m_mutex) {}
-    ~Lock() MP_RELEASE() {}
+    ~Lock() MP_RELEASE() = default;
     void unlock() MP_RELEASE() { m_lock.unlock(); }
     void lock() MP_ACQUIRE() { m_lock.lock(); }
     void assert_locked(Mutex& mutex) MP_ASSERT_CAPABILITY() MP_ASSERT_CAPABILITY(mutex)

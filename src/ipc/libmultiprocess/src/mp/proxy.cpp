@@ -10,24 +10,23 @@
 #include <mp/type-threadmap.h>
 #include <mp/util.h>
 
-#include <assert.h>
 #include <atomic>
-#include <capnp/blob.h>
 #include <capnp/capability.h>
+#include <capnp/rpc.h>
 #include <condition_variable>
 #include <functional>
 #include <future>
-#include <kj/async-io.h>
 #include <kj/async.h>
+#include <kj/async-io.h>
+#include <kj/async-prelude.h>
 #include <kj/common.h>
 #include <kj/debug.h>
-#include <kj/exception.h>
 #include <kj/function.h>
 #include <kj/memory.h>
 #include <map>
 #include <memory>
 #include <mutex>
-#include <stddef.h>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <sys/socket.h>
@@ -37,9 +36,6 @@
 #include <utility>
 
 namespace mp {
-
-template <typename Interface>
-struct ProxyServer;
 
 thread_local ThreadContext g_thread_context;
 
@@ -136,9 +132,11 @@ Connection::~Connection()
     // on clean and unclean shutdowns. In unclean shutdown case when the
     // connection is broken, sync and async cleanup lists will filled with
     // callbacks. In the clean shutdown case both lists will be empty.
+    Lock lock{m_loop->m_mutex};
     while (!m_sync_cleanup_fns.empty()) {
-        m_sync_cleanup_fns.front()();
-        m_sync_cleanup_fns.pop_front();
+        CleanupList fn;
+        fn.splice(fn.begin(), m_sync_cleanup_fns, m_sync_cleanup_fns.begin());
+        Unlock(lock, fn.front());
     }
 }
 
@@ -322,9 +320,9 @@ std::tuple<ConnThread, bool> SetThread(ConnThreads& threads, std::mutex& mutex, 
         // destructor unregisters the cleanup.
 
         // Connection is being destroyed before thread client is, so reset
-        // thread client m_cleanup_it member so thread client destructor does not
+        // thread client m_disconnect_cb member so thread client destructor does not
         // try unregister this callback after connection is destroyed.
-        thread->second.m_cleanup_it.reset();
+        thread->second.m_disconnect_cb.reset();
         // Remove connection pointer about to be destroyed from the map
         const std::unique_lock<std::mutex> lock(mutex);
         threads.erase(thread);
@@ -337,16 +335,16 @@ ProxyClient<Thread>::~ProxyClient()
     // If thread is being destroyed before connection is destroyed, remove the
     // cleanup callback that was registered to handle the connection being
     // destroyed before the thread being destroyed.
-    if (m_cleanup_it) {
-        m_context.connection->removeSyncCleanup(*m_cleanup_it);
+    if (m_disconnect_cb) {
+        m_context.connection->removeSyncCleanup(*m_disconnect_cb);
     }
 }
 
 void ProxyClient<Thread>::setCleanup(const std::function<void()>& fn)
 {
     assert(fn);
-    assert(!m_cleanup_it);
-    m_cleanup_it = m_context.connection->addSyncCleanup(fn);
+    assert(!m_disconnect_cb);
+    m_disconnect_cb = m_context.connection->addSyncCleanup(fn);
 }
 
 ProxyServer<Thread>::ProxyServer(ThreadContext& thread_context, std::thread&& thread)
