@@ -332,6 +332,7 @@ struct Sv2NewTemplateMsg
         // as [B0_64K](https://github.com/stratum-mining/sv2-spec/blob/main/03-Protocol-Overview.md#31-data-types-mapping)
         if (m_coinbase_tx_outputs_count > 0) {
             std::vector<uint8_t> outputs_bytes;
+            // TODO: support more than 1 output
             VectorWriter{outputs_bytes, 0, m_coinbase_tx_outputs.at(0)};
 
             s << static_cast<uint16_t>(outputs_bytes.size());
@@ -342,6 +343,9 @@ struct Sv2NewTemplateMsg
         }
 
         s << m_coinbase_tx_locktime
+          // Technically using VARINT is a problem for a merkle path longer
+          // than 127 elements, but a block can't have enough transactions to
+          // run into that.
           << m_merkle_path;
     }
 };

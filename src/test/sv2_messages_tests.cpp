@@ -1,3 +1,4 @@
+#include <consensus/amount.h>
 #include <boost/test/unit_test.hpp>
 #include <sv2/messages.h>
 #include <util/strencodings.h>
@@ -100,19 +101,25 @@ BOOST_AUTO_TEST_CASE(Sv2SetupConnectionError_test)
 
 BOOST_AUTO_TEST_CASE(Sv2NewTemplate_test)
 {
-    // 0100000000000000 - template_id
-    // 00 - future_template
-    // 00000030 - version
-    // 02000000 - coinbase tx version
-    // 04 - coinbase_prefix len
-    // 03012100 - coinbase prefix
-    // ffffffff - coinbase tx input sequence
-    // 0000000000000000 - coinbase tx value remaining
-    // 00000000 - coinbase tx outputs count
-    // 0000 - coinbase t outputs
-    // 01 - merkle path length
-    // 1a6240823de4c8d6aaf826851bdf2b0e8d5acf7c31e8578cff4c394b5a32bd4e - merkle path
-    std::string expected{"01000000000000000000000030020000000403012100ffffffff000000000000000000000000000000000000011a6240823de4c8d6aaf826851bdf2b0e8d5acf7c31e8578cff4c394b5a32bd4e"};
+    // NewTemplate
+    // https://github.com/stratum-mining/sv2-spec/blob/main/07-Template-Distribution-Protocol.md#72-newtemplate-server---client
+    //
+    // U64              0100000000000000    template_id
+    // BOOL             00                  future_template
+    // U32              00000030            version
+    // U32              02000000            coinbase tx version
+    // B0_255           04                  coinbase_prefix len
+    //                  03012100            coinbase prefix
+    // U32              ffffffff            coinbase tx input sequence
+    // U64              0040075af0750700    coinbase tx value remaining
+    // U32              01000000            coinbase tx outputs count
+    // B0_64K           0c                  coinbase_tx_outputs (concatenated, total bytes)
+    //                  000100000000000000  amount
+    //                  036a012a            len(script) + script
+    // U32              dbc80d00            coinbase lock time (height 903,387)
+    // SEQ0_255[U256]   01                  merkle path length
+    //                  1a6240823de4c8d6aaf826851bdf2b0e8d5acf7c31e8578cff4c394b5a32bd4e - merkle path
+    std::string expected{"01000000000000000000000030020000000403012100ffffffff0040075af0750700010000000c000100000000000000036a012adbc80d00011a6240823de4c8d6aaf826851bdf2b0e8d5acf7c31e8578cff4c394b5a32bd4e"};
 
     node::Sv2NewTemplateMsg new_template;
     new_template.m_template_id = 1;
@@ -125,13 +132,14 @@ BOOST_AUTO_TEST_CASE(Sv2NewTemplate_test)
     new_template.m_coinbase_prefix = prefix;
 
     new_template.m_coinbase_tx_input_sequence = 4294967295;
-    new_template.m_coinbase_tx_value_remaining = 0;
-    new_template.m_coinbase_tx_outputs_count = 0;
+    new_template.m_coinbase_tx_value_remaining = MAX_MONEY;
 
-    std::vector<CTxOut> coinbase_tx_ouputs;
+    // Create fake witness commitment
+    new_template.m_coinbase_tx_outputs_count = 1;
+    std::vector<CTxOut> coinbase_tx_ouputs{CTxOut(1, CScript() << OP_RETURN << 42)};
     new_template.m_coinbase_tx_outputs = coinbase_tx_ouputs;
 
-    new_template.m_coinbase_tx_locktime = 0;
+    new_template.m_coinbase_tx_locktime = 903387;
 
     std::vector<uint256> merkle_path;
     CMutableTransaction mtx_tx;
