@@ -380,7 +380,7 @@ void DoCheck(std::string prv, std::string pub, const std::string& norm_pub, int 
                     sigdata.hash256_preimages = preimages;
                     sigdata.ripemd160_preimages = preimages;
                     sigdata.hash160_preimages = preimages;
-                    const auto prod_sig_res = ProduceSignature(FlatSigningProvider{keys_priv}.Merge(FlatSigningProvider{script_provider}), creator, spks[n], sigdata);
+                    const auto prod_sig_res = ProduceSignature(FlatSigningProvider{keys_priv}.Merge(FlatSigningProvider{script_provider}), creator, spks[n], /*avoid_script_path=*/false, sigdata);
                     BOOST_CHECK_MESSAGE(prod_sig_res == !(flags & SIGNABLE_FAILS), prv);
                 }
 

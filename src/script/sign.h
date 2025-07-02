@@ -95,7 +95,7 @@ struct SignatureData {
 };
 
 /** Produce a script signature using a generic signature creator. */
-bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreator& creator, const CScript& scriptPubKey, SignatureData& sigdata);
+bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreator& creator, const CScript& scriptPubKey, bool avoid_script_path, SignatureData& sigdata);
 
 /** Extract signature data from a transaction input, and insert it. */
 SignatureData DataFromTransaction(const CMutableTransaction& tx, unsigned int nIn, const CTxOut& txout);
@@ -105,6 +105,6 @@ void UpdateInput(CTxIn& input, const SignatureData& data);
 bool IsSegWitOutput(const SigningProvider& provider, const CScript& script);
 
 /** Sign the CMutableTransaction */
-bool SignTransaction(CMutableTransaction& mtx, const SigningProvider* provider, const std::map<COutPoint, Coin>& coins, int sighash, std::map<int, bilingual_str>& input_errors);
+bool SignTransaction(CMutableTransaction& mtx, const SigningProvider* provider, const std::map<COutPoint, Coin>& coins, int sighash, bool avoid_script_path, std::map<int, bilingual_str>& input_errors);
 
 #endif // BITCOIN_SCRIPT_SIGN_H

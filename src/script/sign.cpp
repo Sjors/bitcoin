@@ -330,7 +330,7 @@ static bool SignTaprootScript(const SigningProvider& provider, const BaseSignatu
     return ms && ms->Satisfy(ms_satisfier, result) == miniscript::Availability::YES;
 }
 
-static bool SignTaproot(const SigningProvider& provider, const BaseSignatureCreator& creator, const WitnessV1Taproot& output, SignatureData& sigdata, std::vector<valtype>& result)
+static bool SignTaproot(const SigningProvider& provider, const BaseSignatureCreator& creator, const WitnessV1Taproot& output, bool avoid_script_path, SignatureData& sigdata, std::vector<valtype>& result)
 {
     TaprootSpendData spenddata;
     TaprootBuilder builder;
@@ -370,6 +370,8 @@ static bool SignTaproot(const SigningProvider& provider, const BaseSignatureCrea
         }
     }
 
+    if (avoid_script_path) return false;
+
     // Try script path spending.
     std::vector<std::vector<unsigned char>> smallest_result_stack;
     for (const auto& [key, control_blocks] : sigdata.tr_spenddata.scripts) {
@@ -399,7 +401,7 @@ static bool SignTaproot(const SigningProvider& provider, const BaseSignatureCrea
  * Returns false if scriptPubKey could not be completely satisfied.
  */
 static bool SignStep(const SigningProvider& provider, const BaseSignatureCreator& creator, const CScript& scriptPubKey,
-                     std::vector<valtype>& ret, TxoutType& whichTypeRet, SigVersion sigversion, SignatureData& sigdata)
+                     std::vector<valtype>& ret, TxoutType& whichTypeRet, SigVersion sigversion, bool avoid_script_path, SignatureData& sigdata)
 {
     CScript scriptRet;
     ret.clear();
@@ -474,7 +476,7 @@ static bool SignStep(const SigningProvider& provider, const BaseSignatureCreator
         return false;
 
     case TxoutType::WITNESS_V1_TAPROOT:
-        return SignTaproot(provider, creator, WitnessV1Taproot(XOnlyPubKey{vSolutions[0]}), sigdata, ret);
+        return SignTaproot(provider, creator, WitnessV1Taproot(XOnlyPubKey{vSolutions[0]}), avoid_script_path, sigdata, ret);
 
     case TxoutType::ANCHOR:
         return true;
@@ -499,13 +501,13 @@ static CScript PushAll(const std::vector<valtype>& values)
     return result;
 }
 
-bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreator& creator, const CScript& fromPubKey, SignatureData& sigdata)
+bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreator& creator, const CScript& fromPubKey, bool avoid_script_path, SignatureData& sigdata)
 {
     if (sigdata.complete) return true;
 
     std::vector<valtype> result;
     TxoutType whichType;
-    bool solved = SignStep(provider, creator, fromPubKey, result, whichType, SigVersion::BASE, sigdata);
+    bool solved = SignStep(provider, creator, fromPubKey, result, whichType, SigVersion::BASE, avoid_script_path, sigdata);
     bool P2SH = false;
     CScript subscript;
 
@@ -516,7 +518,7 @@ bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreato
         // and then the serialized subscript:
         subscript = CScript(result[0].begin(), result[0].end());
         sigdata.redeem_script = subscript;
-        solved = solved && SignStep(provider, creator, subscript, result, whichType, SigVersion::BASE, sigdata) && whichType != TxoutType::SCRIPTHASH;
+        solved = solved && SignStep(provider, creator, subscript, result, whichType, SigVersion::BASE, avoid_script_path, sigdata) && whichType != TxoutType::SCRIPTHASH;
         P2SH = true;
     }
 
@@ -525,7 +527,7 @@ bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreato
         CScript witnessscript;
         witnessscript << OP_DUP << OP_HASH160 << ToByteVector(result[0]) << OP_EQUALVERIFY << OP_CHECKSIG;
         TxoutType subType;
-        solved = solved && SignStep(provider, creator, witnessscript, result, subType, SigVersion::WITNESS_V0, sigdata);
+        solved = solved && SignStep(provider, creator, witnessscript, result, subType, SigVersion::WITNESS_V0, avoid_script_path, sigdata);
         sigdata.scriptWitness.stack = result;
         sigdata.witness = true;
         result.clear();
@@ -536,7 +538,7 @@ bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreato
         sigdata.witness_script = witnessscript;
 
         TxoutType subType{TxoutType::NONSTANDARD};
-        solved = solved && SignStep(provider, creator, witnessscript, result, subType, SigVersion::WITNESS_V0, sigdata) && subType != TxoutType::SCRIPTHASH && subType != TxoutType::WITNESS_V0_SCRIPTHASH && subType != TxoutType::WITNESS_V0_KEYHASH;
+        solved = solved && SignStep(provider, creator, witnessscript, result, subType, SigVersion::WITNESS_V0, avoid_script_path, sigdata) && subType != TxoutType::SCRIPTHASH && subType != TxoutType::WITNESS_V0_SCRIPTHASH && subType != TxoutType::WITNESS_V0_KEYHASH;
 
         // If we couldn't find a solution with the legacy satisfier, try satisfying the script using Miniscript.
         // Note we need to check if the result stack is empty before, because it might be used even if the Script
@@ -763,7 +765,7 @@ bool IsSegWitOutput(const SigningProvider& provider, const CScript& script)
     return false;
 }
 
-bool SignTransaction(CMutableTransaction& mtx, const SigningProvider* keystore, const std::map<COutPoint, Coin>& coins, int nHashType, std::map<int, bilingual_str>& input_errors)
+bool SignTransaction(CMutableTransaction& mtx, const SigningProvider* keystore, const std::map<COutPoint, Coin>& coins, int nHashType, bool avoid_script_path, std::map<int, bilingual_str>& input_errors)
 {
     bool fHashSingle = ((nHashType & ~SIGHASH_ANYONECANPAY) == SIGHASH_SINGLE);
 
@@ -801,7 +803,7 @@ bool SignTransaction(CMutableTransaction& mtx, const SigningProvider* keystore, 
         SignatureData sigdata = DataFromTransaction(mtx, i, coin->second.out);
         // Only sign SIGHASH_SINGLE if there's a corresponding output:
         if (!fHashSingle || (i < mtx.vout.size())) {
-            ProduceSignature(*keystore, MutableTransactionSignatureCreator(mtx, i, amount, &txdata, nHashType), prevPubKey, sigdata);
+            ProduceSignature(*keystore, MutableTransactionSignatureCreator(mtx, i, amount, &txdata, nHashType), prevPubKey, avoid_script_path, sigdata);
         }
 
         UpdateInput(txin, sigdata);

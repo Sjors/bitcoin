@@ -686,6 +686,7 @@ public:
                   std::optional<int> sighash_type = std::nullopt,
                   bool sign = true,
                   bool bip32derivs = true,
+                  bool avoid_script_path = false,
                   size_t* n_signed = nullptr,
                   bool finalize = true) const;
 

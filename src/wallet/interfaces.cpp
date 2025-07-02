@@ -386,11 +386,12 @@ public:
     std::optional<PSBTError> fillPSBT(std::optional<int> sighash_type,
         bool sign,
         bool bip32derivs,
+        bool avoid_script_path,
         size_t* n_signed,
         PartiallySignedTransaction& psbtx,
         bool& complete) override
     {
-        return m_wallet->FillPSBT(psbtx, complete, sighash_type, sign, bip32derivs, n_signed);
+        return m_wallet->FillPSBT(psbtx, complete, sighash_type, sign, bip32derivs, avoid_script_path, n_signed);
     }
     WalletBalances getBalances() override
     {

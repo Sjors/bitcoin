@@ -97,7 +97,7 @@ bool SignSignature(const SigningProvider &provider, const CScript& fromPubKey, C
 
     MutableTransactionSignatureCreator creator(txTo, nIn, amount, nHashType);
 
-    bool ret = ProduceSignature(provider, creator, fromPubKey, sig_data);
+    bool ret = ProduceSignature(provider, creator, fromPubKey, /*avoid_script_path=*/false, sig_data);
     UpdateInput(txTo.vin.at(nIn), sig_data);
     return ret;
 }

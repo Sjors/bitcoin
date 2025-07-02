@@ -132,14 +132,14 @@ FUZZ_TARGET(script_sign, .init = initialize_script_sign)
             }
             std::map<COutPoint, Coin> coins{ConsumeCoins(fuzzed_data_provider)};
             std::map<int, bilingual_str> input_errors;
-            (void)SignTransaction(sign_transaction_tx_to, &provider, coins, fuzzed_data_provider.ConsumeIntegral<int>(), input_errors);
+            (void)SignTransaction(sign_transaction_tx_to, &provider, coins, fuzzed_data_provider.ConsumeIntegral<int>(), fuzzed_data_provider.ConsumeIntegral<bool>(), input_errors);
         }
     }
 
     {
         SignatureData signature_data_1;
-        (void)ProduceSignature(provider, DUMMY_SIGNATURE_CREATOR, ConsumeScript(fuzzed_data_provider), signature_data_1);
+        (void)ProduceSignature(provider, DUMMY_SIGNATURE_CREATOR, ConsumeScript(fuzzed_data_provider), fuzzed_data_provider.ConsumeIntegral<bool>(), signature_data_1);
         SignatureData signature_data_2;
-        (void)ProduceSignature(provider, DUMMY_MAXIMUM_SIGNATURE_CREATOR, ConsumeScript(fuzzed_data_provider), signature_data_2);
+        (void)ProduceSignature(provider, DUMMY_MAXIMUM_SIGNATURE_CREATOR, ConsumeScript(fuzzed_data_provider), fuzzed_data_provider.ConsumeIntegral<bool>(), signature_data_2);
     }
 }
