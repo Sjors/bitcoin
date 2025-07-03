@@ -173,7 +173,7 @@ public:
     ~Lock() MP_RELEASE() = default;
     void unlock() MP_RELEASE() { m_lock.unlock(); }
     void lock() MP_ACQUIRE() { m_lock.lock(); }
-    void assert_locked(Mutex& mutex) MP_ASSERT_CAPABILITY() MP_ASSERT_CAPABILITY(mutex)
+    void assert_locked(Mutex& mutex) const MP_ASSERT_CAPABILITY() MP_ASSERT_CAPABILITY(mutex)
     {
         assert(m_lock.mutex() == &mutex.m_mutex);
         assert(m_lock);

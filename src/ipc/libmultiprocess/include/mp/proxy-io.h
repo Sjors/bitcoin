@@ -78,6 +78,10 @@ struct ProxyClient<Thread> : public ProxyClientBase<Thread, ::capnp::Void>
     //! Since this variable is accessed from multiple threads, accesses should
     //! be guarded with the associated Waiter::m_mutex.
     std::optional<CleanupIt> m_disconnect_cb;
+    //! State shared with disconnect callback telling it if this ProxyClient is
+    //! already destroyed and no longer should be accessed. This is also
+    //! accessed from multiple threads and guarded with Waiter::m_mutex.
+    std::shared_ptr<bool> m_destroyed{std::make_shared<bool>(false)};
 };
 
 template <>
@@ -343,6 +347,7 @@ public:
     //! any new i/o.
     CleanupIt addSyncCleanup(std::function<void()> fn);
     void removeSyncCleanup(CleanupIt it);
+    void removeSyncCleanup(CleanupIt it, const Lock& lock);
 
     //! Add disconnect handler.
     template <typename F>

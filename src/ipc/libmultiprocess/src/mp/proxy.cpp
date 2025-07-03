@@ -134,9 +134,14 @@ Connection::~Connection()
     // callbacks. In the clean shutdown case both lists will be empty.
     Lock lock{m_loop->m_mutex};
     while (!m_sync_cleanup_fns.empty()) {
-        CleanupList fn;
-        fn.splice(fn.begin(), m_sync_cleanup_fns, m_sync_cleanup_fns.begin());
-        Unlock(lock, fn.front());
+        // Call the first function in the connection cleanup list. Before
+        // calling it, move it into a temporary variable so outside classes
+        // which registered for disconnect callbacks can check if the
+        // disconnection function is null and know if it's about to be called.
+        auto it{m_sync_cleanup_fns.begin()};
+        std::function<void()> fn = std::move(*it);
+        Unlock(lock, fn);
+        m_sync_cleanup_fns.erase(it);
     }
 }
 
@@ -157,6 +162,12 @@ CleanupIt Connection::addSyncCleanup(std::function<void()> fn)
 void Connection::removeSyncCleanup(CleanupIt it)
 {
     const Lock lock(m_loop->m_mutex);
+    removeSyncCleanup(it, lock);
+}
+
+void Connection::removeSyncCleanup(CleanupIt it, const Lock& lock)
+{
+    lock.assert_locked(m_loop->m_mutex);
     m_sync_cleanup_fns.erase(it);
 }
 
@@ -313,7 +324,7 @@ std::tuple<ConnThread, bool> SetThread(ConnThreads& threads, std::mutex& mutex, 
     thread = threads.emplace(
         std::piecewise_construct, std::forward_as_tuple(connection),
         std::forward_as_tuple(make_thread(), connection, /* destroy_connection= */ false)).first;
-    thread->second.setDisconnectCallback([&threads, &mutex, thread] {
+    thread->second.setDisconnectCallback([&threads, &mutex, thread, destroyed = thread->second.m_destroyed] {
         // Note: it is safe to use the `thread` iterator in this cleanup
         // function, because the iterator would only be invalid if the map entry
         // was removed, and if the map entry is removed the ProxyClient<Thread>
@@ -324,6 +335,7 @@ std::tuple<ConnThread, bool> SetThread(ConnThreads& threads, std::mutex& mutex, 
         // try to unregister this callback after connection is destroyed.
         // Remove connection pointer about to be destroyed from the map
         const std::unique_lock<std::mutex> lock(mutex);
+        if (*destroyed) return;
         thread->second.m_disconnect_cb.reset();
         threads.erase(thread);
     });
@@ -332,12 +344,18 @@ std::tuple<ConnThread, bool> SetThread(ConnThreads& threads, std::mutex& mutex, 
 
 ProxyClient<Thread>::~ProxyClient()
 {
+    // Waiter::m_mutex is already held here so it is safe to access
+    // m_disconnect_cb EventLoop::mutex needs to be locked to access
+    // **m_disconnect_cb, which Connection destructor will set to null before it
+    // invokes the callback.
+    const Lock lock(m_context.loop->m_mutex);
     // If thread is being destroyed before connection is destroyed, remove the
     // cleanup callback that was registered to handle the connection being
     // destroyed before the thread being destroyed.
-    if (m_disconnect_cb) {
-        m_context.connection->removeSyncCleanup(*m_disconnect_cb);
+    if (m_disconnect_cb && **m_disconnect_cb) {
+        m_context.connection->removeSyncCleanup(*m_disconnect_cb, lock);
     }
+    *m_destroyed = true;
 }
 
 void ProxyClient<Thread>::setDisconnectCallback(const std::function<void()>& fn)
