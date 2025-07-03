@@ -318,8 +318,8 @@ static const CRPCConvertParam vRPCConvertParams[] =
 /**
  * Specify a (method, idx, name) here if the argument is a string RPC
  * parameter that should be recognized as a known parameter name but NOT
- * converted from JSON. This is primarily used for Base64-encoded parameters
- * that might contain '=' padding characters which could interfere with
+ * converted from JSON. This is used for string parameters that might
+ * contain '=' character which could interfere with
  * named parameter parsing.
  *
  * @note Parameter indexes start from 0.
@@ -333,6 +333,7 @@ static const CRPCConvertParam vRPCStringParams[] =
     { "descriptorprocesspsbt", 0, "psbt"},
     { "utxoupdatepsbt", 0, "psbt"},
     { "verifymessage", 1, "signature"},
+    { "getnewaddress", 0, "label"},
 };
 // clang-format on
 
@@ -373,7 +374,7 @@ public:
     }
 
     /** Return true if the RPC method has any entries in the vRPCStringParams table */
-    bool HasBase64Method(const std::string& method) const
+    bool HasKnownStringParams(const std::string& method) const
     {
         for (const auto& entry : stringParams) {
             if (entry.first == method) {
@@ -425,8 +426,8 @@ UniValue RPCConvertNamedValues(const std::string &strMethod, const std::vector<s
         std::string name{s.substr(0, pos)};
         std::string_view value{s.substr(pos+1)};
 
-        if (rpcCvtTable.HasBase64Method(strMethod)) {
-            // If this method has Base64 parameters, check if this specific parameter is known
+        if (rpcCvtTable.HasKnownStringParams(strMethod)) {
+            // If this method has known string parameters, check if this specific parameter is one of them
             if (rpcCvtTable.IsStringParam(strMethod, name)) {
                 // Pass only the value as positional
                 positional_args.push_back(rpcCvtTable.ArgToUniValue(value, strMethod, positional_args.size()));
