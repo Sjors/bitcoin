@@ -7,8 +7,10 @@
 
 #include <consensus/amount.h>
 #include <key.h>
+#include <musig.h>
 #include <policy/policy.h>
 #include <primitives/transaction.h>
+#include <random.h>
 #include <script/keyorigin.h>
 #include <script/miniscript.h>
 #include <script/script.h>
@@ -59,17 +61,14 @@ bool MutableTransactionSignatureCreator::CreateSig(const SigningProvider& provid
     return true;
 }
 
-bool MutableTransactionSignatureCreator::CreateSchnorrSig(const SigningProvider& provider, std::vector<unsigned char>& sig, const XOnlyPubKey& pubkey, const uint256* leaf_hash, const uint256* merkle_root, SigVersion sigversion) const
+std::optional<uint256> MutableTransactionSignatureCreator::ComputeSchnorrSignatureHash(const uint256* leaf_hash, SigVersion sigversion) const
 {
     assert(sigversion == SigVersion::TAPROOT || sigversion == SigVersion::TAPSCRIPT);
-
-    CKey key;
-    if (!provider.GetKeyByXOnly(pubkey, key)) return false;
 
     // BIP341/BIP342 signing needs lots of precomputed transaction data. While some
     // (non-SIGHASH_DEFAULT) sighash modes exist that can work with just some subset
     // of data present, for now, only support signing when everything is provided.
-    if (!m_txdata || !m_txdata->m_bip341_taproot_ready || !m_txdata->m_spent_outputs_ready) return false;
+    if (!m_txdata || !m_txdata->m_bip341_taproot_ready || !m_txdata->m_spent_outputs_ready) return std::nullopt;
 
     ScriptExecutionData execdata;
     execdata.m_annex_init = true;
@@ -77,17 +76,132 @@ bool MutableTransactionSignatureCreator::CreateSchnorrSig(const SigningProvider&
     if (sigversion == SigVersion::TAPSCRIPT) {
         execdata.m_codeseparator_pos_init = true;
         execdata.m_codeseparator_pos = 0xFFFFFFFF; // Only support non-OP_CODESEPARATOR BIP342 signing for now.
-        if (!leaf_hash) return false; // BIP342 signing needs leaf hash.
+        if (!leaf_hash) return std::nullopt; // BIP342 signing needs leaf hash.
         execdata.m_tapleaf_hash_init = true;
         execdata.m_tapleaf_hash = *leaf_hash;
     }
     uint256 hash;
-    if (!SignatureHashSchnorr(hash, execdata, m_txto, nIn, nHashType, sigversion, *m_txdata, MissingDataBehavior::FAIL)) return false;
+    if (!SignatureHashSchnorr(hash, execdata, m_txto, nIn, nHashType, sigversion, *m_txdata, MissingDataBehavior::FAIL)) return std::nullopt;
+    return hash;
+}
+
+bool MutableTransactionSignatureCreator::CreateSchnorrSig(const SigningProvider& provider, std::vector<unsigned char>& sig, const XOnlyPubKey& pubkey, const uint256* leaf_hash, const uint256* merkle_root, SigVersion sigversion) const
+{
+    assert(sigversion == SigVersion::TAPROOT || sigversion == SigVersion::TAPSCRIPT);
+
+    CKey key;
+    if (!provider.GetKeyByXOnly(pubkey, key)) return false;
+
+    std::optional<uint256> hash = ComputeSchnorrSignatureHash(leaf_hash, sigversion);
+    if (!hash.has_value()) return false;
+
     sig.resize(64);
     // Use uint256{} as aux_rnd for now.
-    if (!key.SignSchnorr(hash, sig, merkle_root, {})) return false;
+    if (!key.SignSchnorr(*hash, sig, merkle_root, {})) return false;
     if (nHashType) sig.push_back(nHashType);
     return true;
+}
+
+bool MutableTransactionSignatureCreator::CreateMuSig2AggregateSig(const std::vector<CPubKey>& participants, std::vector<uint8_t>& sig, const CPubKey& aggregate_pubkey, const CPubKey& script_pubkey, const uint256* leaf_hash, const std::vector<std::pair<uint256, bool>>& tweaks, SigVersion sigversion, const SignatureData& sigdata) const
+{
+    assert(sigversion == SigVersion::TAPROOT || sigversion == SigVersion::TAPSCRIPT);
+    if (!participants.size()) return false;
+
+    // Retrieve pubnonces and partial sigs
+    auto this_leaf_aggkey = std::make_pair(script_pubkey, leaf_hash ? *leaf_hash : uint256());
+    auto pubnonce_it = sigdata.musig2_pubnonces.find(this_leaf_aggkey);
+    if (pubnonce_it == sigdata.musig2_pubnonces.end()) return false;
+    const std::map<CPubKey, std::vector<uint8_t>>& pubnonces = pubnonce_it->second;
+    auto partial_sigs_it = sigdata.musig2_partial_sigs.find(this_leaf_aggkey);
+    if (partial_sigs_it == sigdata.musig2_partial_sigs.end()) return false;
+    const std::map<CPubKey, uint256>& partial_sigs = partial_sigs_it->second;
+
+    // Check if enough pubnonces and partial sigs
+    if (pubnonces.size() != participants.size()) return false;
+    if (partial_sigs.size() != participants.size()) return false;
+
+    // Compute sighash
+    std::optional<uint256> sighash = ComputeSchnorrSignatureHash(leaf_hash, sigversion);
+    if (!sighash.has_value()) return false;
+
+    std::optional<std::vector<uint8_t>> res = ::CreateMuSig2AggregateSig(participants, aggregate_pubkey, tweaks, *sighash, pubnonces, partial_sigs);
+    if (!res) return false;
+    sig = res.value();
+    if (nHashType) sig.push_back(nHashType);
+
+    return true;
+}
+
+bool MutableTransactionSignatureCreator::CreateMuSig2PartialSig(const SigningProvider& provider, uint256& partial_sig, const CPubKey& aggregate_pubkey, const CPubKey& script_pubkey, const CPubKey& part_pubkey, const uint256* leaf_hash, const std::vector<std::pair<uint256, bool>>& tweaks, SigVersion sigversion, const SignatureData& sigdata) const
+{
+    assert(sigversion == SigVersion::TAPROOT || sigversion == SigVersion::TAPSCRIPT);
+
+    // Retrieve private key
+    CKey key;
+    if (!provider.GetKey(part_pubkey.GetID(), key)) return false;
+
+    // Retrieve participant pubkeys
+    std::vector<CPubKey> pubkeys = provider.GetMuSig2ParticipantPubkeys(aggregate_pubkey);
+    if (!pubkeys.size()) return false;
+
+    // Retrieve pubnonces
+    auto this_leaf_aggkey = std::make_pair(script_pubkey, leaf_hash ? *leaf_hash : uint256());
+    auto pubnonce_it = sigdata.musig2_pubnonces.find(this_leaf_aggkey);
+    if (pubnonce_it == sigdata.musig2_pubnonces.end()) return false;
+    const std::map<CPubKey, std::vector<uint8_t>>& pubnonces = pubnonce_it->second;
+
+    // Check if enough pubnonces
+    if (pubnonces.size() != pubkeys.size()) return false;
+
+    // Compute sighash
+    std::optional<uint256> sighash = ComputeSchnorrSignatureHash(leaf_hash, sigversion);
+    if (!sighash.has_value()) return false;
+
+    // Retrieve the secnonce
+    HashWriter hasher;
+    hasher << script_pubkey << part_pubkey << *sighash;
+    uint256 session_id = hasher.GetSHA256();
+    std::optional<std::reference_wrapper<MuSig2SecNonce>> secnonce = provider.GetMuSig2SecNonce(session_id);
+    if (!secnonce || !secnonce->get().IsValid()) return false;
+
+    // Compute the sig
+    std::optional<uint256> sig = key.CreateMuSig2PartialSig(*sighash, aggregate_pubkey, pubkeys, pubnonces, *secnonce, tweaks);
+    if (!sig) return false;
+    partial_sig = std::move(*sig);
+
+    // Delete the secnonce now that we're done with it
+    provider.DeleteMuSig2Session(session_id);
+
+    return true;
+}
+
+std::vector<uint8_t> MutableTransactionSignatureCreator::CreateMuSig2Nonce(const SigningProvider& provider, const CPubKey& aggregate_pubkey, const CPubKey& script_pubkey, const CPubKey& part_pubkey, const uint256* leaf_hash, const uint256* merkle_root, SigVersion sigversion, const SignatureData& sigdata) const
+{
+    assert(sigversion == SigVersion::TAPROOT || sigversion == SigVersion::TAPSCRIPT);
+
+    // Retrieve the private key
+    CKey key;
+    if (!provider.GetKey(part_pubkey.GetID(), key)) return {};
+
+    // Retrieve participant pubkeys
+    std::vector<CPubKey> pubkeys = provider.GetMuSig2ParticipantPubkeys(aggregate_pubkey);
+    if (!pubkeys.size()) return {};
+
+    // Compute sighash
+    std::optional<uint256> sighash = ComputeSchnorrSignatureHash(leaf_hash, sigversion);
+    if (!sighash.has_value()) return {};
+
+    MuSig2SecNonce secnonce;
+    std::vector<uint8_t> out = key.CreateMuSig2Nonce(secnonce, *sighash, aggregate_pubkey, pubkeys);
+    if (out.empty()) return {};
+
+    // Store the secnonce in the SigningProvider
+    HashWriter hasher;
+    hasher << script_pubkey << part_pubkey << *sighash;
+    uint256 id = hasher.GetSHA256();
+    provider.SetMuSig2SecNonce(id, std::move(secnonce));
+
+    return out;
 }
 
 static bool GetCScript(const SigningProvider& provider, const SignatureData& sigdata, const CScriptID& scriptid, CScript& script)
@@ -169,11 +283,93 @@ static bool CreateTaprootScriptSig(const BaseSignatureCreator& creator, Signatur
         sig_out = it->second;
         return true;
     }
+
     if (creator.CreateSchnorrSig(provider, sig_out, pubkey, &leaf_hash, nullptr, sigversion)) {
         sigdata.taproot_script_sigs[lookup_key] = sig_out;
-        return true;
+    } else {
+        auto misc_pk_it = sigdata.taproot_misc_pubkeys.find(pubkey);
+        if (misc_pk_it != sigdata.taproot_misc_pubkeys.end()) {
+            info = misc_pk_it->second.second;
+        }
+
+        for (const auto& [agg_pub, part_pks] : sigdata.musig2_pubkeys) {
+            if (part_pks.empty()) continue;
+
+            // Fill participant derivation path info
+            for (const auto& part_pk : part_pks) {
+                KeyOriginInfo part_info;
+                if (provider.GetKeyOrigin(part_pk.GetID(), part_info)) {
+                    XOnlyPubKey xonly_part(part_pk);
+                    auto it = sigdata.taproot_misc_pubkeys.find(xonly_part);
+                    if (it == sigdata.taproot_misc_pubkeys.end()) {
+                        sigdata.taproot_misc_pubkeys.emplace(xonly_part, std::make_pair(std::set<uint256>({leaf_hash}), part_info));
+                    } else {
+                        it->second.first.insert(leaf_hash);
+                    }
+                }
+            }
+
+            std::vector<std::pair<uint256, bool>> tweaks;
+            CPubKey plain_pub = agg_pub;
+            if (XOnlyPubKey(agg_pub) != pubkey) {
+                if (info.path.size() > 0) {
+                    // Compute and compare fingerprint
+                    CKeyID keyid = agg_pub.GetID();
+                    if (std::memcmp(keyid.data(), info.fingerprint, sizeof(info.fingerprint)) != 0) {
+                        continue;
+                    }
+                    // Get the BIP32 derivation tweaks
+                    CExtPubKey extpub;
+                    extpub.nDepth = 0;
+                    std::memset(extpub.vchFingerprint, 0, 4);
+                    extpub.nChild = 0;
+                    extpub.chaincode = uint256::FromHex("6589e367712c6200e367717145cb322d76576bc3248959c474f9a602ca878086").value();
+                    extpub.pubkey = agg_pub;
+                    for (const int i : info.path) {
+                        auto& [tweak, xonly] = tweaks.emplace_back();
+                        xonly = false;
+                        if (!extpub.Derive(extpub, i, tweak)) {
+                            return false;
+                        }
+                    }
+                    Assert(XOnlyPubKey(extpub.pubkey) == pubkey);
+                    plain_pub = extpub.pubkey;
+                } else {
+                    continue;
+                }
+            }
+
+            // We know this is musig, try musig signing
+            // First try to aggregate
+            if (creator.CreateMuSig2AggregateSig(part_pks, sig_out, agg_pub, plain_pub, &leaf_hash, tweaks, sigversion, sigdata)) {
+                sigdata.taproot_script_sigs[lookup_key] = sig_out;
+                return true;
+            }
+            // Cannot aggregate, try making partial sigs for every participant
+            auto pub_key_leaf_hash = std::make_pair(plain_pub, leaf_hash);
+            for (const CPubKey& part_pk : part_pks) {
+                uint256 partial_sig;
+                if (creator.CreateMuSig2PartialSig(provider, partial_sig, agg_pub, plain_pub, part_pk, &leaf_hash, tweaks, sigversion, sigdata) && Assume(!partial_sig.IsNull())) {
+                    sigdata.musig2_partial_sigs[pub_key_leaf_hash].emplace(part_pk, partial_sig);
+                }
+            }
+            // If there are any partial signatures, exit early
+            auto partial_sigs_it = sigdata.musig2_partial_sigs.find(pub_key_leaf_hash);
+            if (partial_sigs_it != sigdata.musig2_partial_sigs.end() && !partial_sigs_it->second.empty()) {
+                return false;
+            }
+            // No partial sigs, try to make pubnonces
+            std::map<CPubKey, std::vector<uint8_t>>& pubnonces = sigdata.musig2_pubnonces[pub_key_leaf_hash];
+            for (const CPubKey& part_pk : part_pks) {
+                if (pubnonces.contains(part_pk)) continue;
+                std::vector<uint8_t> pubnonce = creator.CreateMuSig2Nonce(provider, agg_pub, plain_pub, part_pk, &leaf_hash, nullptr, sigversion, sigdata);
+                if (pubnonce.empty()) continue;
+                pubnonces[part_pk] = std::move(pubnonce);
+            }
+        }
     }
-    return false;
+
+    return sigdata.taproot_script_sigs.contains(lookup_key);
 }
 
 template<typename M, typename K, typename V>
@@ -330,7 +526,7 @@ static bool SignTaprootScript(const SigningProvider& provider, const BaseSignatu
     return ms && ms->Satisfy(ms_satisfier, result) == miniscript::Availability::YES;
 }
 
-static bool SignTaproot(const SigningProvider& provider, const BaseSignatureCreator& creator, const WitnessV1Taproot& output, SignatureData& sigdata, std::vector<valtype>& result)
+static bool SignTaproot(const SigningProvider& provider, const BaseSignatureCreator& creator, const WitnessV1Taproot& output, bool avoid_script_path, SignatureData& sigdata, std::vector<valtype>& result)
 {
     TaprootSpendData spenddata;
     TaprootBuilder builder;
@@ -342,33 +538,141 @@ static bool SignTaproot(const SigningProvider& provider, const BaseSignatureCrea
     if (provider.GetTaprootBuilder(output, builder)) {
         sigdata.tr_builder = builder;
     }
+    if (auto agg_keys = provider.GetAllMuSig2ParticipantPubkeys(); !agg_keys.empty()) {
+        sigdata.musig2_pubkeys.merge(agg_keys);
+    }
+
 
     // Try key path spending.
     {
-        KeyOriginInfo info;
-        if (provider.GetKeyOriginByXOnly(sigdata.tr_spenddata.internal_key, info)) {
+        KeyOriginInfo internal_key_info;
+        if (provider.GetKeyOriginByXOnly(sigdata.tr_spenddata.internal_key, internal_key_info)) {
             auto it = sigdata.taproot_misc_pubkeys.find(sigdata.tr_spenddata.internal_key);
             if (it == sigdata.taproot_misc_pubkeys.end()) {
-                sigdata.taproot_misc_pubkeys.emplace(sigdata.tr_spenddata.internal_key, std::make_pair(std::set<uint256>(), info));
+                sigdata.taproot_misc_pubkeys.emplace(sigdata.tr_spenddata.internal_key, std::make_pair(std::set<uint256>(), internal_key_info));
             }
         }
 
-        std::vector<unsigned char> sig;
-        if (sigdata.taproot_key_path_sig.size() == 0) {
-            if (creator.CreateSchnorrSig(provider, sig, sigdata.tr_spenddata.internal_key, nullptr, &sigdata.tr_spenddata.merkle_root, SigVersion::TAPROOT)) {
-                sigdata.taproot_key_path_sig = sig;
+        KeyOriginInfo output_key_info;
+        if (provider.GetKeyOriginByXOnly(output, output_key_info)) {
+            auto it = sigdata.taproot_misc_pubkeys.find(output);
+            if (it == sigdata.taproot_misc_pubkeys.end()) {
+                sigdata.taproot_misc_pubkeys.emplace(output, std::make_pair(std::set<uint256>(), output_key_info));
             }
         }
-        if (sigdata.taproot_key_path_sig.size() == 0) {
-            if (creator.CreateSchnorrSig(provider, sig, output, nullptr, nullptr, SigVersion::TAPROOT)) {
+
+        auto make_keypath_sig = [&](const XOnlyPubKey& pk, const uint256* merkle_root) {
+            std::vector<unsigned char> sig;
+            if (creator.CreateSchnorrSig(provider, sig, pk, nullptr, merkle_root, SigVersion::TAPROOT)) {
                 sigdata.taproot_key_path_sig = sig;
+            } else {
+                // Lookup derivation paths for this key
+                KeyOriginInfo info;
+                auto misc_pk_it = sigdata.taproot_misc_pubkeys.find(pk);
+                if (misc_pk_it != sigdata.taproot_misc_pubkeys.end()) {
+                    info = misc_pk_it->second.second;
+                }
+
+                for (const auto& [agg_pub, part_pks] : sigdata.musig2_pubkeys) {
+                    if (part_pks.empty()) continue;
+
+                    // Fill participant derivation path info
+                    for (const auto& part_pk : part_pks) {
+                        KeyOriginInfo info;
+                        if (provider.GetKeyOrigin(part_pk.GetID(), info)) {
+                            XOnlyPubKey xonly_part(part_pk);
+                            auto it = sigdata.taproot_misc_pubkeys.find(xonly_part);
+                            if (it == sigdata.taproot_misc_pubkeys.end()) {
+                                sigdata.taproot_misc_pubkeys.emplace(xonly_part, std::make_pair(std::set<uint256>(), info));
+                            }
+                        }
+                    }
+
+                    std::vector<std::pair<uint256, bool>> tweaks;
+                    CPubKey plain_pub = agg_pub;
+                    if (XOnlyPubKey(agg_pub) != pk) {
+                        if (info.path.size() > 0) {
+                            // Compute and compare fingerprint
+                            CKeyID keyid = agg_pub.GetID();
+                            if (!std::equal(info.fingerprint, info.fingerprint + sizeof(info.fingerprint), keyid.data())) {
+                                continue;
+                            }
+                            // Get the BIP32 derivation tweaks
+                            CExtPubKey extpub;
+                            extpub.nDepth = 0;
+                            std::memset(extpub.vchFingerprint, 0, 4);
+                            extpub.nChild = 0;
+                            extpub.chaincode = uint256::FromHex("6589e367712c6200e367717145cb322d76576bc3248959c474f9a602ca878086").value();
+                            extpub.pubkey = agg_pub;
+                            for (const int i : info.path) {
+                                auto& [t, xonly] = tweaks.emplace_back();
+                                xonly = false;
+                                if (!extpub.Derive(extpub, i, t)) {
+                                    return;
+                                }
+                            }
+                            Assert(XOnlyPubKey(extpub.pubkey) == pk);
+                            plain_pub = extpub.pubkey;
+                        } else {
+                            continue;
+                        }
+                    }
+
+                    // Add the merkle root tweak
+                    if (merkle_root) {
+                        tweaks.emplace_back(pk.ComputeTapTweakHash(merkle_root->IsNull() ? nullptr : merkle_root), true);
+                        std::optional<std::pair<XOnlyPubKey, bool>> tweaked = pk.CreateTapTweak(merkle_root->IsNull() ? nullptr : merkle_root);
+                        if (!Assume(tweaked)) return;
+                        plain_pub = tweaked->first.GetCPubKeys().at(tweaked->second ? 1 : 0);
+                    }
+
+                    // We know this is musig, try musig signing
+                    // First try to aggregate
+                    if (creator.CreateMuSig2AggregateSig(part_pks, sig, agg_pub, plain_pub, nullptr, tweaks, SigVersion::TAPROOT, sigdata)) {
+                        sigdata.taproot_key_path_sig = sig;
+                        return;
+                    }
+                    // Cannot aggregate, try making partial sigs for every participant
+                    auto pub_key_leaf_hash = std::make_pair(plain_pub, uint256());
+                    for (const CPubKey& part_pk : part_pks) {
+                        uint256 partial_sig;
+                        if (creator.CreateMuSig2PartialSig(provider, partial_sig, agg_pub, plain_pub, part_pk, nullptr, tweaks, SigVersion::TAPROOT, sigdata) && Assume(!partial_sig.IsNull())) {
+                            sigdata.musig2_partial_sigs[pub_key_leaf_hash].emplace(part_pk, partial_sig);
+                        }
+                    }
+                    // If there are any partial signatures, exit early
+                    auto partial_sigs_it = sigdata.musig2_partial_sigs.find(pub_key_leaf_hash);
+                    if (partial_sigs_it != sigdata.musig2_partial_sigs.end() && !partial_sigs_it->second.empty()) {
+                        return;
+                    }
+                    // No partial sigs, try to make pubnonces
+                    std::map<CPubKey, std::vector<uint8_t>>& pubnonces = sigdata.musig2_pubnonces[pub_key_leaf_hash];
+                    for (const CPubKey& part_pk : part_pks) {
+                        if (pubnonces.contains(part_pk)) continue;
+                        std::vector<uint8_t> pubnonce = creator.CreateMuSig2Nonce(provider, agg_pub, plain_pub, part_pk, nullptr, merkle_root, SigVersion::TAPROOT, sigdata);
+                        if (pubnonce.empty()) continue;
+                        pubnonces[part_pk] = std::move(pubnonce);
+                    }
+                    break;
+                }
             }
+        };
+
+        // First try signing with internal key
+        if (sigdata.taproot_key_path_sig.size() == 0) {
+            make_keypath_sig(sigdata.tr_spenddata.internal_key, &sigdata.tr_spenddata.merkle_root);
+        }
+        // Try signing with output key if still no signature
+        if (sigdata.taproot_key_path_sig.size() == 0) {
+            make_keypath_sig(output, nullptr);
         }
         if (sigdata.taproot_key_path_sig.size()) {
             result = Vector(sigdata.taproot_key_path_sig);
             return true;
         }
     }
+
+    if (avoid_script_path) return false;
 
     // Try script path spending.
     std::vector<std::vector<unsigned char>> smallest_result_stack;
@@ -399,7 +703,7 @@ static bool SignTaproot(const SigningProvider& provider, const BaseSignatureCrea
  * Returns false if scriptPubKey could not be completely satisfied.
  */
 static bool SignStep(const SigningProvider& provider, const BaseSignatureCreator& creator, const CScript& scriptPubKey,
-                     std::vector<valtype>& ret, TxoutType& whichTypeRet, SigVersion sigversion, SignatureData& sigdata)
+                     std::vector<valtype>& ret, TxoutType& whichTypeRet, SigVersion sigversion, bool avoid_script_path, SignatureData& sigdata)
 {
     CScript scriptRet;
     ret.clear();
@@ -474,7 +778,7 @@ static bool SignStep(const SigningProvider& provider, const BaseSignatureCreator
         return false;
 
     case TxoutType::WITNESS_V1_TAPROOT:
-        return SignTaproot(provider, creator, WitnessV1Taproot(XOnlyPubKey{vSolutions[0]}), sigdata, ret);
+        return SignTaproot(provider, creator, WitnessV1Taproot(XOnlyPubKey{vSolutions[0]}), avoid_script_path, sigdata, ret);
 
     case TxoutType::ANCHOR:
         return true;
@@ -499,13 +803,13 @@ static CScript PushAll(const std::vector<valtype>& values)
     return result;
 }
 
-bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreator& creator, const CScript& fromPubKey, SignatureData& sigdata)
+bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreator& creator, const CScript& fromPubKey, bool avoid_script_path, SignatureData& sigdata)
 {
     if (sigdata.complete) return true;
 
     std::vector<valtype> result;
     TxoutType whichType;
-    bool solved = SignStep(provider, creator, fromPubKey, result, whichType, SigVersion::BASE, sigdata);
+    bool solved = SignStep(provider, creator, fromPubKey, result, whichType, SigVersion::BASE, avoid_script_path, sigdata);
     bool P2SH = false;
     CScript subscript;
 
@@ -516,7 +820,7 @@ bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreato
         // and then the serialized subscript:
         subscript = CScript(result[0].begin(), result[0].end());
         sigdata.redeem_script = subscript;
-        solved = solved && SignStep(provider, creator, subscript, result, whichType, SigVersion::BASE, sigdata) && whichType != TxoutType::SCRIPTHASH;
+        solved = solved && SignStep(provider, creator, subscript, result, whichType, SigVersion::BASE, avoid_script_path, sigdata) && whichType != TxoutType::SCRIPTHASH;
         P2SH = true;
     }
 
@@ -525,7 +829,7 @@ bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreato
         CScript witnessscript;
         witnessscript << OP_DUP << OP_HASH160 << ToByteVector(result[0]) << OP_EQUALVERIFY << OP_CHECKSIG;
         TxoutType subType;
-        solved = solved && SignStep(provider, creator, witnessscript, result, subType, SigVersion::WITNESS_V0, sigdata);
+        solved = solved && SignStep(provider, creator, witnessscript, result, subType, SigVersion::WITNESS_V0, avoid_script_path, sigdata);
         sigdata.scriptWitness.stack = result;
         sigdata.witness = true;
         result.clear();
@@ -536,7 +840,7 @@ bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreato
         sigdata.witness_script = witnessscript;
 
         TxoutType subType{TxoutType::NONSTANDARD};
-        solved = solved && SignStep(provider, creator, witnessscript, result, subType, SigVersion::WITNESS_V0, sigdata) && subType != TxoutType::SCRIPTHASH && subType != TxoutType::WITNESS_V0_SCRIPTHASH && subType != TxoutType::WITNESS_V0_KEYHASH;
+        solved = solved && SignStep(provider, creator, witnessscript, result, subType, SigVersion::WITNESS_V0, avoid_script_path, sigdata) && subType != TxoutType::SCRIPTHASH && subType != TxoutType::WITNESS_V0_SCRIPTHASH && subType != TxoutType::WITNESS_V0_KEYHASH;
 
         // If we couldn't find a solution with the legacy satisfier, try satisfying the script using Miniscript.
         // Note we need to check if the result stack is empty before, because it might be used even if the Script
@@ -737,6 +1041,22 @@ public:
         sig.assign(64, '\000');
         return true;
     }
+    bool CreateMuSig2AggregateSig(const std::vector<CPubKey>& participants, std::vector<uint8_t>& sig, const CPubKey& aggregate_pubkey, const CPubKey& script_pubkey, const uint256* leaf_hash, const std::vector<std::pair<uint256, bool>>& tweaks, SigVersion sigversion, const SignatureData& sigdata) const override
+    {
+        sig.assign(64, '\000');
+        return true;
+    }
+    bool CreateMuSig2PartialSig(const SigningProvider& provider, uint256& partial_sig, const CPubKey& aggregate_pubkey, const CPubKey& script_pubkey, const CPubKey& part_pubkey, const uint256* leaf_hash, const std::vector<std::pair<uint256, bool>>& tweaks, SigVersion sigversion, const SignatureData& sigdata) const override
+    {
+        partial_sig = uint256::ONE;
+        return true;
+    }
+    std::vector<uint8_t> CreateMuSig2Nonce(const SigningProvider& provider, const CPubKey& aggregate_pubkey, const CPubKey& script_pubkey, const CPubKey& part_pubkey, const uint256* leaf_hash, const uint256* merkle_root, SigVersion sigversion, const SignatureData& sigdata) const override
+    {
+        std::vector<uint8_t> out;
+        out.assign(66, '\000');
+        return out;
+    }
 };
 
 }
@@ -763,7 +1083,7 @@ bool IsSegWitOutput(const SigningProvider& provider, const CScript& script)
     return false;
 }
 
-bool SignTransaction(CMutableTransaction& mtx, const SigningProvider* keystore, const std::map<COutPoint, Coin>& coins, int nHashType, std::map<int, bilingual_str>& input_errors)
+bool SignTransaction(CMutableTransaction& mtx, const SigningProvider* keystore, const std::map<COutPoint, Coin>& coins, int nHashType, bool avoid_script_path, std::map<int, bilingual_str>& input_errors)
 {
     bool fHashSingle = ((nHashType & ~SIGHASH_ANYONECANPAY) == SIGHASH_SINGLE);
 
@@ -801,7 +1121,7 @@ bool SignTransaction(CMutableTransaction& mtx, const SigningProvider* keystore, 
         SignatureData sigdata = DataFromTransaction(mtx, i, coin->second.out);
         // Only sign SIGHASH_SINGLE if there's a corresponding output:
         if (!fHashSingle || (i < mtx.vout.size())) {
-            ProduceSignature(*keystore, MutableTransactionSignatureCreator(mtx, i, amount, &txdata, nHashType), prevPubKey, sigdata);
+            ProduceSignature(*keystore, MutableTransactionSignatureCreator(mtx, i, amount, &txdata, nHashType), prevPubKey, avoid_script_path, sigdata);
         }
 
         UpdateInput(txin, sigdata);

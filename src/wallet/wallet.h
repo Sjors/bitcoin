@@ -158,7 +158,8 @@ static constexpr uint64_t KNOWN_WALLET_FLAGS =
     |   WALLET_FLAG_EXTERNAL_SIGNER;
 
 static constexpr uint64_t MUTABLE_WALLET_FLAGS =
-        WALLET_FLAG_AVOID_REUSE;
+        WALLET_FLAG_AVOID_REUSE
+    |   WALLET_FLAG_EXTERNAL_SIGNER;
 
 static const std::map<WalletFlags, std::string> WALLET_FLAG_TO_STRING{
     {WALLET_FLAG_AVOID_REUSE, "avoid_reuse"},
@@ -686,6 +687,7 @@ public:
                   std::optional<int> sighash_type = std::nullopt,
                   bool sign = true,
                   bool bip32derivs = true,
+                  bool avoid_script_path = false,
                   size_t* n_signed = nullptr,
                   bool finalize = true) const;
 
@@ -948,6 +950,9 @@ public:
     //! Returns all unique ScriptPubKeyMans in m_internal_spk_managers and m_external_spk_managers
     std::set<ScriptPubKeyMan*> GetActiveScriptPubKeyMans() const;
     bool IsActiveScriptPubKeyMan(const ScriptPubKeyMan& spkm) const;
+
+    //! Returns all unused(key) SPKMs
+    std::set<DescriptorScriptPubKeyMan*> GetScriptlessSPKMs() const;
 
     //! Returns all unique ScriptPubKeyMans
     std::set<ScriptPubKeyMan*> GetAllScriptPubKeyMans() const;

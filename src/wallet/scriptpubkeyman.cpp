@@ -266,7 +266,7 @@ bool LegacyDataSPKM::CanProvide(const CScript& script, SignatureData& sigdata)
         return true;
     } else {
         // If, given the stuff in sigdata, we could make a valid signature, then we can provide for this script
-        ProduceSignature(*this, DUMMY_SIGNATURE_CREATOR, script, sigdata);
+        ProduceSignature(*this, DUMMY_SIGNATURE_CREATOR, script, /*avoid_script_path=*/false, sigdata);
         if (!sigdata.signatures.empty()) {
             // If we could make signatures, make sure we have a private key to actually make a signature
             bool has_privkeys = false;
@@ -1257,6 +1257,10 @@ std::unique_ptr<FlatSigningProvider> DescriptorScriptPubKeyMan::GetSigningProvid
         FlatSigningProvider master_provider;
         master_provider.keys = GetKeys();
         m_wallet_descriptor.descriptor->ExpandPrivate(index, master_provider, *out_keys);
+
+        // Always include musig_secnonces as this descriptor may have a participant private key
+        // but not a musig() descriptor
+        out_keys->musig2_secnonces = &m_musig2_secnonces;
     }
 
     return out_keys;
@@ -1283,7 +1287,7 @@ bool DescriptorScriptPubKeyMan::SignTransaction(CMutableTransaction& tx, const s
         keys->Merge(std::move(*coin_keys));
     }
 
-    return ::SignTransaction(tx, keys.get(), coins, sighash, input_errors);
+    return ::SignTransaction(tx, keys.get(), coins, sighash, /*avoid_script_path=*/false, input_errors);
 }
 
 SigningResult DescriptorScriptPubKeyMan::SignMessage(const std::string& message, const PKHash& pkhash, std::string& str_sig) const
@@ -1304,7 +1308,7 @@ SigningResult DescriptorScriptPubKeyMan::SignMessage(const std::string& message,
     return SigningResult::OK;
 }
 
-std::optional<PSBTError> DescriptorScriptPubKeyMan::FillPSBT(PartiallySignedTransaction& psbtx, const PrecomputedTransactionData& txdata, std::optional<int> sighash_type, bool sign, bool bip32derivs, int* n_signed, bool finalize) const
+std::optional<PSBTError> DescriptorScriptPubKeyMan::FillPSBT(PartiallySignedTransaction& psbtx, const PrecomputedTransactionData& txdata, std::optional<int> sighash_type, bool sign, bool bip32derivs, bool avoid_script_path, int* n_signed, bool finalize) const
 {
     if (n_signed) {
         *n_signed = 0;
@@ -1374,7 +1378,7 @@ std::optional<PSBTError> DescriptorScriptPubKeyMan::FillPSBT(PartiallySignedTran
             }
         }
 
-        PSBTError res = SignPSBTInput(HidingSigningProvider(keys.get(), /*hide_secret=*/!sign, /*hide_origin=*/!bip32derivs), psbtx, i, &txdata, sighash_type, nullptr, finalize);
+        PSBTError res = SignPSBTInput(HidingSigningProvider(keys.get(), /*hide_secret=*/!sign, /*hide_origin=*/!bip32derivs), psbtx, i, &txdata, sighash_type, nullptr, avoid_script_path, finalize);
         if (res != PSBTError::OK && res != PSBTError::INCOMPLETE) {
             return res;
         }

@@ -97,11 +97,13 @@ static UniValue FinishTransaction(const std::shared_ptr<CWallet> pwallet, const 
     // Make a blank psbt
     PartiallySignedTransaction psbtx(rawTx);
 
+    bool keypath_only{options.exists("keypath_only") ? options["keypath_only"].get_bool() : false};
+
     // First fill transaction with our data without signing,
     // so external signers are not asked to sign more than once.
     bool complete;
-    pwallet->FillPSBT(psbtx, complete, std::nullopt, /*sign=*/false, /*bip32derivs=*/true);
-    const auto err{pwallet->FillPSBT(psbtx, complete, std::nullopt, /*sign=*/true, /*bip32derivs=*/false)};
+    pwallet->FillPSBT(psbtx, complete, std::nullopt, /*sign=*/false, /*bip32derivs=*/true, /*avoid_script_path=*/keypath_only);
+    const auto err{pwallet->FillPSBT(psbtx, complete, std::nullopt, /*sign=*/true, /*bip32derivs=*/false, /*avoid_script_path=*/keypath_only)};
     if (err) {
         throw JSONRPCPSBTError(*err);
     }
@@ -534,6 +536,7 @@ CreatedTransactionResult FundTransaction(CWallet& wallet, const CMutableTransact
                 {"includeWatching", UniValueType(UniValue::VBOOL)},
                 {"include_watching", UniValueType(UniValue::VBOOL)},
                 {"inputs", UniValueType(UniValue::VARR)},
+                {"keypath_only", UniValueType(UniValue::VBOOL)},
                 {"lockUnspents", UniValueType(UniValue::VBOOL)},
                 {"lock_unspents", UniValueType(UniValue::VBOOL)},
                 {"locktime", UniValueType(UniValue::VNUM)},
@@ -1185,7 +1188,7 @@ static RPCHelpMan bumpfee_helper(std::string method_name)
     } else {
         PartiallySignedTransaction psbtx(mtx);
         bool complete = false;
-        const auto err{pwallet->FillPSBT(psbtx, complete, std::nullopt, /*sign=*/false, /*bip32derivs=*/true)};
+        const auto err{pwallet->FillPSBT(psbtx, complete, std::nullopt, /*sign=*/false, /*bip32derivs=*/true, /*avoid_script_path=*/false)};
         CHECK_NONFATAL(!err);
         CHECK_NONFATAL(!complete);
         DataStream ssTx{};
@@ -1257,6 +1260,7 @@ RPCHelpMan send()
                           }},
                         },
                     },
+                    {"keypath_only", RPCArg::Type::BOOL, RPCArg::Default{false}, "Only sign the key path (for taproot inputs).\n"},
                     {"locktime", RPCArg::Type::NUM, RPCArg::Default{0}, "Raw locktime. Non-0 value also locktime-activates inputs"},
                     {"lock_unspents", RPCArg::Type::BOOL, RPCArg::Default{false}, "Lock selected unspent outputs"},
                     {"psbt", RPCArg::Type::BOOL,  RPCArg::DefaultHint{"automatic"}, "Always return a PSBT, implies add_to_wallet=false."},
@@ -1270,6 +1274,7 @@ RPCHelpMan send()
                     },
                     {"max_tx_weight", RPCArg::Type::NUM, RPCArg::Default{MAX_STANDARD_TX_WEIGHT}, "The maximum acceptable transaction weight.\n"
                                                   "Transaction building will fail if this can not be satisfied."},
+
                 },
                 FundTxDoc()),
                 RPCArgOptions{.oneline_description="options"}},
@@ -1651,7 +1656,7 @@ RPCHelpMan walletprocesspsbt()
 
     if (sign) EnsureWalletIsUnlocked(*pwallet);
 
-    const auto err{wallet.FillPSBT(psbtx, complete, nHashType, sign, bip32derivs, nullptr, finalize)};
+    const auto err{wallet.FillPSBT(psbtx, complete, nHashType, sign, bip32derivs, /*avoid_script_path=*/false, nullptr, finalize)};
     if (err) {
         throw JSONRPCPSBTError(*err);
     }
@@ -1790,7 +1795,7 @@ RPCHelpMan walletcreatefundedpsbt()
     // Fill transaction with out data but don't sign
     bool bip32derivs = request.params[4].isNull() ? true : request.params[4].get_bool();
     bool complete = true;
-    const auto err{wallet.FillPSBT(psbtx, complete, std::nullopt, /*sign=*/false, /*bip32derivs=*/bip32derivs)};
+    const auto err{wallet.FillPSBT(psbtx, complete, std::nullopt, /*sign=*/false, /*bip32derivs=*/bip32derivs, /*avoid_script_path=*/false)};
     if (err) {
         throw JSONRPCPSBTError(*err);
     }

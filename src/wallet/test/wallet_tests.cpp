@@ -53,7 +53,7 @@ static CMutableTransaction TestSimpleSpend(const CTransaction& from, uint32_t in
     std::map<COutPoint, Coin> coins;
     coins[mtx.vin[0].prevout].out = from.vout[index];
     std::map<int, bilingual_str> input_errors;
-    BOOST_CHECK(SignTransaction(mtx, &keystore, coins, SIGHASH_ALL, input_errors));
+    BOOST_CHECK(SignTransaction(mtx, &keystore, coins, SIGHASH_ALL, /*avoid_script_path=*/false, input_errors));
     return mtx;
 }
 
@@ -523,7 +523,7 @@ static size_t CalculateNestedKeyhashInputSize(bool use_max_sig)
     // Fill in dummy signatures for fee calculation.
     SignatureData sig_data;
 
-    if (!ProduceSignature(keystore, use_max_sig ? DUMMY_MAXIMUM_SIGNATURE_CREATOR : DUMMY_SIGNATURE_CREATOR, script_pubkey, sig_data)) {
+    if (!ProduceSignature(keystore, use_max_sig ? DUMMY_MAXIMUM_SIGNATURE_CREATOR : DUMMY_SIGNATURE_CREATOR, script_pubkey, /*avoid_script_path=*/false, sig_data)) {
         // We're hand-feeding it correct arguments; shouldn't happen
         assert(false);
     }

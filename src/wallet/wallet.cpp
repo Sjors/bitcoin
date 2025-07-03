@@ -2090,7 +2090,7 @@ bool CWallet::SignTransaction(CMutableTransaction& tx, const std::map<COutPoint,
     return false;
 }
 
-std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& complete, std::optional<int> sighash_type, bool sign, bool bip32derivs, size_t * n_signed, bool finalize) const
+std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& complete, std::optional<int> sighash_type, bool sign, bool bip32derivs, bool avoid_script_path, size_t * n_signed, bool finalize) const
 {
     if (n_signed) {
         *n_signed = 0;
@@ -2123,7 +2123,7 @@ std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bo
     // Fill in information from ScriptPubKeyMans
     for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
         int n_signed_this_spkm = 0;
-        const auto error{spk_man->FillPSBT(psbtx, txdata, sighash_type, sign, bip32derivs, &n_signed_this_spkm, finalize)};
+        const auto error{spk_man->FillPSBT(psbtx, txdata, sighash_type, sign, bip32derivs, avoid_script_path, &n_signed_this_spkm, finalize)};
         if (error) {
             return error;
         }
@@ -3488,6 +3488,20 @@ void CWallet::ConnectScriptPubKeyManNotifiers()
     }
 }
 
+std::set<DescriptorScriptPubKeyMan*> CWallet::GetScriptlessSPKMs() const
+{
+    std::set<DescriptorScriptPubKeyMan*> spk_mans;
+    for (const auto& spkm : GetAllScriptPubKeyMans()) {
+        DescriptorScriptPubKeyMan* desc_spkm = dynamic_cast<DescriptorScriptPubKeyMan*>(spkm);
+        if (!desc_spkm) continue;
+        LOCK(desc_spkm->cs_desc_man);
+        if (!desc_spkm->GetWalletDescriptor().descriptor->HasScripts()) {
+            spk_mans.insert(desc_spkm);
+        }
+    }
+    return spk_mans;
+}
+
 DescriptorScriptPubKeyMan& CWallet::LoadDescriptorScriptPubKeyMan(uint256 id, WalletDescriptor& desc)
 {
     DescriptorScriptPubKeyMan* spk_manager;
@@ -3716,9 +3730,9 @@ util::Result<std::reference_wrapper<DescriptorScriptPubKeyMan>> CWallet::AddWall
         return util::Error{_("Could not top up scriptPubKeys")};
     }
 
-    // Apply the label if necessary
+    // Apply the label if necessary, for descriptors that produce output scripts (i.e. not unused())
     // Note: we disable labels for ranged descriptors
-    if (!desc.descriptor->IsRange()) {
+    if (!desc.descriptor->IsRange() && desc.descriptor->HasScripts()) {
         auto script_pub_keys = spk_man->GetScriptPubKeys();
         if (script_pub_keys.empty()) {
             return util::Error{_("Could not generate scriptPubKeys (cache is empty)")};
