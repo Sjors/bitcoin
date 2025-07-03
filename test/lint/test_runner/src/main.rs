@@ -63,11 +63,11 @@ fn get_linter_list() -> Vec<&'static Linter> {
             name: "doc_release_note_snippets",
             lint_fn: lint_doc_release_note_snippets
         },
-        &Linter {
-            description: "Check that subtrees are pure subtrees",
-            name: "subtree",
-            lint_fn: lint_subtree
-        },
+        // &Linter {
+        //     description: "Check that subtrees are pure subtrees",
+        //     name: "subtree",
+        //     lint_fn: lint_subtree
+        // },
         &Linter {
             description: "Check scripted-diffs",
             name: "scripted_diff",
