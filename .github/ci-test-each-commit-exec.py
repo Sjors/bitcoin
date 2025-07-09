@@ -30,11 +30,8 @@ def main():
         "-DCMAKE_C_COMPILER=clang",
         "-DCMAKE_CXX_COMPILER=clang++",
         "-DWERROR=ON",
-        "-DWITH_ZMQ=ON",
-        "-DBUILD_GUI=ON",
         "-DBUILD_BENCH=ON",
         "-DBUILD_FUZZ_BINARY=ON",
-        "-DWITH_USDT=ON",
         "-DCMAKE_CXX_FLAGS=-Wno-error=unused-member-function",
     ])
     run(["cmake", "--build", "build", "-j", str(num_procs)])
