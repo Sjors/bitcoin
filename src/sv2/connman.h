@@ -57,6 +57,12 @@ struct Sv2Client
      */
     unsigned int m_coinbase_tx_outputs_size;
 
+    /**
+     * Tracks the best template in the Template Provider m_block_template_cache map.
+     * Not guaranteed to still exist.
+    */
+    uint64_t m_best_template_id = 0;
+
     explicit Sv2Client(size_t id, std::unique_ptr<Sv2Transport> transport) :
                        m_id{id}, m_transport{std::move(transport)} {};
 
@@ -75,6 +81,18 @@ struct Sv2Client
 class Sv2EventsInterface
 {
 public:
+    /**
+     * We received and successfully parsed a RequestTransactionData message.
+     * Deal with it and respond with either RequestTransactionData.Success or
+     * RequestTransactionData.Error.
+     */
+    virtual void RequestTransactionData(Sv2Client& client, node::Sv2RequestTransactionDataMsg msg) = 0;
+
+    /**
+     * We received and successfully parsed a SubmitSolution message.
+     */
+    virtual void SubmitSolution(node::Sv2SubmitSolutionMsg solution) = 0;
+
     virtual ~Sv2EventsInterface() = default;
 };
 

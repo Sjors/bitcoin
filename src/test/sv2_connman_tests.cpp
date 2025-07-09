@@ -155,6 +155,14 @@ public:
         return node::Sv2NetMsg{node::Sv2MsgType::SETUP_CONNECTION, std::move(bytes)};
     }
 
+    void RequestTransactionData(Sv2Client& client, node::Sv2RequestTransactionDataMsg msg) override {
+        BOOST_TEST_MESSAGE("Process RequestTransactionData");
+    }
+
+    void SubmitSolution(node::Sv2SubmitSolutionMsg solution) override {
+        BOOST_TEST_MESSAGE("Process SubmitSolution");
+    }
+
 };
 
 BOOST_AUTO_TEST_CASE(client_tests)
