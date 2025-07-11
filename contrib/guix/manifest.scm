@@ -17,6 +17,7 @@
              ((gnu packages python) #:select (python-minimal))
              ((gnu packages python-build) #:select (python-poetry-core))
              ((gnu packages python-crypto) #:select (python-asn1crypto))
+	     ((gnu packages python-science) #:select (python-scikit-build-core))
              ((gnu packages tls) #:select (openssl))
              ((gnu packages version-control) #:select (git-minimal))
              (guix build-system cmake)
@@ -357,7 +358,8 @@ specific moment in time, whitelisting and revocation checks.")
               python-oscrypto
               python-certvalidator
               python-elfesteem))
-      (native-inputs (list python-poetry-core))
+      (native-inputs (list python-poetry-core
+		      python-scikit-build-core))
       ;; There are no tests, but attempting to run python setup.py test leads to
       ;; problems, just disable the test
       (arguments '(#:tests? #f))
