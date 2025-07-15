@@ -544,3 +544,37 @@ jobs:
         uses: ./.github/actions/save-caches
         with:
           job-name: ${{ matrix.id }}
+
+  lint:
+    name: 'lint'
+    runs-on: ${{ (github.repository == 'bitcoin/bitcoin' || vars.USE_CIRRUS_RUNNERS == 'true') && 'ghcr.io/cirruslabs/ubuntu-runner-amd64:24.04-sm' || 'ubuntu-24.04' }}
+    if: ${{ vars.SKIP_BRANCH_PUSH != 'true' || github.event_name == 'pull_request' }}
+    timeout-minutes: 20
+    env:
+      CONTAINER_NAME: "bitcoin-linter"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        if: ${{ github.event_name == 'push' && github.ref_name == 'master' && vars.REGISTRY_USERNAME != '' }}
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ vars.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+
+      - name: CI script
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/master" && -n "${{ vars.REGISTRY_USERNAME }}" && -n "${{ secrets.REGISTRY_TOKEN }}" ]]; then
+            DOCKER_BUILD_CACHE_ARGS="--cache-from=type=registry,ref=${{ env.REGISTRY }}/${{ env.REGISTRY_ORG }}/${{ env.REGISTRY_REPO }}:${{ env.CONTAINER_NAME }} --cache-to=type=registry,ref=${{ env.REGISTRY }}/${{ env.REGISTRY_ORG }}/${{ env.REGISTRY_REPO }}:${{ env.CONTAINER_NAME }},mode=max --load"
+          else
+            DOCKER_BUILD_CACHE_ARGS="--cache-from=type=registry,ref=${{ env.REGISTRY }}/${{ env.REGISTRY_ORG }}/${{ env.REGISTRY_REPO }}:${{ env.CONTAINER_NAME }} --load"
+          fi
+          docker buildx build -t ${{ env.CONTAINER_NAME }} $DOCKER_BUILD_CACHE_ARGS --file "./ci/lint_imagefile" .
+          docker run --rm -v $(pwd):/bitcoin ${{ env.CONTAINER_NAME }}
