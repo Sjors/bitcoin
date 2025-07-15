@@ -441,6 +441,14 @@ jobs:
             file-env: './ci/test/00_setup_env_mac_cross.sh'
             build-dir-suffix: 'mac-cross'
 
+          - name: 'No wallet, libbitcoinkernel'
+            id: 'libbitcoinkernel-nowallet'
+            cirrus-runner: 'ghcr.io/cirruslabs/ubuntu-runner-amd64:24.04-md'
+            fallback-runner: 'ubuntu-24.04'
+            timeout-minutes: 120
+            file-env: './ci/test/00_setup_env_native_nowallet_libbitcoinkernel.sh'
+            build-dir-suffix: 'libbitcoinkernel'
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
