@@ -481,6 +481,14 @@ jobs:
             file-env: './ci/test/00_setup_env_native_centos.sh'
             build-dir-suffix: 'centos'
 
+          - name: 'tidy'
+            id: 'tidy'
+            cirrus-runner: 'ghcr.io/cirruslabs/ubuntu-runner-amd64:24.04-md'
+            fallback-runner: 'ubuntu-24.04'
+            timeout-minutes: 120
+            file-env: './ci/test/00_setup_env_native_tidy.sh'
+            build-dir-suffix: 'tidy'
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
