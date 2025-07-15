@@ -449,6 +449,14 @@ jobs:
             file-env: './ci/test/00_setup_env_native_nowallet_libbitcoinkernel.sh'
             build-dir-suffix: 'libbitcoinkernel'
 
+          - name: 'multiprocess, i686, DEBUG'
+            id: 'multiprocess-i686-debug'
+            cirrus-runner: 'ghcr.io/cirruslabs/ubuntu-runner-amd64:24.04-md'
+            fallback-runner: 'ubuntu-24.04'
+            timeout-minutes: 120
+            file-env: './ci/test/00_setup_env_i686_multiprocess.sh'
+            build-dir-suffix: 'multiprocess'
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
