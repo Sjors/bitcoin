@@ -497,6 +497,15 @@ jobs:
             file-env: './ci/test/00_setup_env_native_tsan.sh'
             build-dir-suffix: 'tidy'
 
+          - name: 'MSan, depends'
+            id: 'msan-depends'
+            cirrus-runner: 'ghcr.io/cirruslabs/ubuntu-runner-amd64:24.04-lg'
+            fallback-runner: 'ubuntu-24.04'
+            timeout-minutes: 300
+            file-env: './ci/test/00_setup_env_native_msan.sh'
+            build-dir-suffix: 'msan'
+
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -524,7 +533,7 @@ jobs:
         run: sed -i "s|\${INSTALL_BCC_TRACING_TOOLS}|true|g" ./ci/test/00_setup_env_native_asan.sh
 
       - name: Set mmap_rnd_bits
-        if: ${{ matrix.name == 'TSan, depends, gui' }}
+        if: ${{ matrix.name == 'TSan, depends, gui' || matrix.name == 'MSan, depends' }}
         # Prevents crashes due to high ASLR entropy
         run: sudo sysctl -w vm.mmap_rnd_bits=28
 
