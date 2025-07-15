@@ -443,3 +443,54 @@ jobs:
           path: ${{ env.CCACHE_DIR }}
           # https://github.com/actions/cache/blob/main/tips-and-workarounds.md#update-a-cache
           key: ${{ github.job }}-ccache-${{ github.run_id }}
+
+  ci-matrix:
+    name: ${{ matrix.name }}
+    runs-on: ${{ (github.repository == 'bitcoin/bitcoin' || vars.USE_CIRRUS_RUNNERS == 'true') && matrix.cirrus-runner || matrix.fallback-runner }}
+
+    if: ${{ vars.SKIP_BRANCH_PUSH != 'true' || github.event_name == 'pull_request' }}
+    timeout-minutes: ${{ matrix.timeout-minutes }}
+
+    env:
+      FILE_ENV: ${{ matrix.file-env }}
+      DANGER_CI_ON_HOST_FOLDERS: 1
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: '32 bit ARM, unit tests, no functional tests'
+            id: '32bit-arm'
+            cirrus-runner: 'ghcr.io/cirruslabs/ubuntu-runner-arm64:24.04-md'
+            fallback-runner: 'ubuntu-24.04-arm'
+            timeout-minutes: 120
+            file-env: './ci/test/00_setup_env_arm.sh'
+            build-dir-suffix: 'arm'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set CI directories
+        run: |
+          echo "BASE_ROOT_DIR=${{ runner.temp }}" >> "$GITHUB_ENV"
+          echo "BASE_BUILD_DIR=${{ runner.temp }}/build-${{ matrix.build-dir-suffix }}" >> "$GITHUB_ENV"
+
+      - name: Restore caches
+        uses: ./.github/actions/restore-caches
+        with:
+          job-name: ${{ matrix.id }}
+
+      - name: Configure Docker
+        uses: ./.github/actions/configure-docker
+        with:
+          registry-username: ${{ vars.REGISTRY_USERNAME }}
+          registry-password: ${{ secrets.REGISTRY_TOKEN }}
+
+      - name: CI script
+        run: ./ci/test_run_all.sh
+
+      - name: Save caches
+        uses: ./.github/actions/save-caches
+        with:
+          job-name: ${{ matrix.id }}
