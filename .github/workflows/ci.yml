@@ -20,6 +20,9 @@ concurrency:
 env:
   CI_FAILFAST_TEST_LEAVE_DANGLING: 1  # GHA does not care about dangling processes and setting this variable avoids killing the CI script itself on error
   MAKEJOBS: '-j10'
+  REGISTRY: ${{ vars.REGISTRY || 'quay.io' }}
+  REGISTRY_ORG: ${{ vars.REGISTRY_ORG || 'bitcoin-core' }} # TODO: Set correct org
+  REGISTRY_REPO: ${{ vars.REGISTRY_REPO || 'core-ci' }} # TODO: Set correct repo
 
 defaults:
   run:
