@@ -23,6 +23,7 @@ env:
   REGISTRY: ${{ vars.REGISTRY || 'quay.io' }}
   REGISTRY_ORG: ${{ vars.REGISTRY_ORG || 'bitcoin-core' }} # TODO: Set correct org
   REGISTRY_REPO: ${{ vars.REGISTRY_REPO || 'core-ci' }} # TODO: Set correct repo
+  USE_BUILDX: 1
 
 defaults:
   run:
