@@ -206,6 +206,7 @@ std::vector<std::any> BaseIndex::ProcessBlocks(bool process_in_order, const CBlo
 
     // If ordering is not required, process blocks directly from end to start
     for (const CBlockIndex* block = end; block && start->pprev != block; block = block->pprev) {
+        if (block->nHeight < m_start_height) continue;
         results.emplace_back(ProcessBlock(block));
     }
 
