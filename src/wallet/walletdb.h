@@ -13,6 +13,7 @@
 #include <wallet/walletutil.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -61,6 +62,7 @@ extern const std::string ACTIVEEXTERNALSPK;
 extern const std::string ACTIVEINTERNALSPK;
 extern const std::string BESTBLOCK;
 extern const std::string BESTBLOCK_NOMERKLE;
+extern const std::string BIP388_HMAC;
 extern const std::string CRYPTED_KEY;
 extern const std::string CSCRIPT;
 extern const std::string DEFAULTKEY;
@@ -276,6 +278,11 @@ public:
     bool EraseRecords(const std::unordered_set<std::string>& types);
 
     bool WriteWalletFlags(uint64_t flags);
+
+    // Write BIP-388 policy metadata for the signer identified by fingerprint.
+    // An absent hmac is stored as an empty string for backwards-compatible DB encoding.
+    bool WriteHmacBip388(const std::string& policy_name, const std::string& fingerprint, const std::optional<std::string>& hmac);
+
     //! Begin a new transaction
     bool TxnBegin();
     //! Commit current transaction
