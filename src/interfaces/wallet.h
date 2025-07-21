@@ -22,6 +22,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -130,6 +131,9 @@ public:
 
     //! Display address on external signer
     virtual util::Result<void> displayAddress(const CTxDestination& dest) = 0;
+
+    //! Register BIP388 policy on external signer, store and return optional hmac
+    virtual util::Result<std::optional<std::string>> registerPolicy(const std::optional<std::string>& name) = 0;
 
     //! Lock coin.
     virtual bool lockCoin(const COutPoint& output, bool write_to_db) = 0;
