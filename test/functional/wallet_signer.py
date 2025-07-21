@@ -9,6 +9,7 @@ See also rpc_signer.py for tests without wallet context.
 """
 import os
 
+from test_framework.descriptors import descsum_create
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal,
@@ -44,6 +45,8 @@ class WalletSignerTest(BitcoinTestFramework):
         self.test_invalid_signer()
         self.restart_node(1, [f"-signer={self.mock_signer_path('multi_signers.py')}", "-keypool=10"])
         self.test_multiple_signers()
+        self.restart_node(1)
+        self.test_bip388_policy()
 
     def test_valid_signer(self):
         self.log.debug(f"-signer={self.mock_signer_path()}")
@@ -253,6 +256,49 @@ class WalletSignerTest(BitcoinTestFramework):
         self.log.info('Test multiple external signers')
 
         assert_raises_rpc_error(-1, "More than one external signer found", self.nodes[1].createwallet, wallet_name='multi_hww', external_signer=True)
+
+    def test_bip388_policy(self):
+        self.log.debug(f"-signer={self.mock_signer_path()}")
+        self.log.info('Register BIP388 wallet policy')
+
+        self.nodes[1].createwallet(wallet_name='hww_policy', disable_private_keys=True, external_signer=True, blank=True)
+        wallet = self.nodes[1].get_wallet_rpc('hww_policy')
+        self.log.debug(wallet.getwalletinfo())
+        # With blank=True the wallet starts empty: no device single-sig
+        # descriptors are auto-imported, so the only descriptor present
+        # after importdescriptors is the multisig policy under test.
+        assert_equal(wallet.listdescriptors()["descriptors"], [])
+
+        # e.g. obtained via hwi getxpub
+        device_key = "[00000001/47h/1h/0h]tpubD6NzVbkrYhZ4YNXVQbNhMK1WqguFsUXceaVJKbmno2aZ3B6QfbMeraaYvnBSGpV3vxLyTTK9DYT1yoEck4XUScMzXoQ2U2oSmE2JyMedq3H"
+        # for this test it doesn't matter that we can't actually sign with it
+        our_key = "[00000001/47h/1h/0h]tpubDAXcJ7s7ZwicqjprRaEWdPoHKrCS215qxGYxpusRLLmJuT69ZSicuGdSfyvyKpvUNYBW1s2U3NSrT6vrCYB9e6nZUEvrqnwXPF8ArTCRXMY"
+
+        res = wallet.importdescriptors([{
+            "desc": descsum_create(f"wsh(multi(2,{device_key}/<0;1>/*,{our_key}/<0;1>/*))"),
+            "active": True,
+            "timestamp": "now"
+        }])
+        assert_equal(res[0]["success"], True)
+
+        self.log.debug(wallet.listdescriptors())
+
+        res = wallet.registerpolicy()
+        hmac = res["hmac"]
+
+        assert_equal(hmac, "0000000000000000000000000000000000000000000000000000000000000000")
+
+        info = wallet.getwalletinfo()
+        assert_equal(info["bip388"][0]["hmac"], hmac)
+
+        # Make sure it's persisted
+        self.nodes[1].unloadwallet("hww_policy")
+        self.nodes[1].loadwallet("hww_policy")
+        wallet = self.nodes[1].get_wallet_rpc('hww_policy')
+
+        info = wallet.getwalletinfo()
+        assert_equal(info["bip388"][0]["hmac"], hmac)
+
 
 if __name__ == '__main__':
     WalletSignerTest(__file__).main()
