@@ -7,6 +7,7 @@
 #include <common/system.h>
 #include <external_signer.h>
 #include <node/types.h>
+#include <util/strencodings.h>
 #include <wallet/external_signer_scriptpubkeyman.h>
 
 #include <iostream>
@@ -52,7 +53,7 @@ std::unique_ptr<ExternalSignerScriptPubKeyMan> ExternalSignerScriptPubKeyMan::Cr
     return spkm;
 }
 
- util::Result<ExternalSigner> ExternalSignerScriptPubKeyMan::GetExternalSigner() {
+util::Result<ExternalSigner> ExternalSignerScriptPubKeyMan::GetExternalSigner() {
     const std::string command = gArgs.GetArg("-signer", "");
     if (command == "") return util::Error{Untranslated("restart bitcoind with -signer=<cmd>")};
     std::vector<ExternalSigner> signers;
@@ -113,4 +114,21 @@ std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBT(PartiallySigned
     if (options.finalize) FinalizePSBT(psbt); // This won't work in a multisig setup
     return {};
 }
+
+util::Result<std::string> ExternalSignerScriptPubKeyMan::RegisterDescriptor(const ExternalSigner& signer,
+                                                                            const std::string& name,
+                                                                            const std::string& descriptor) const
+{
+    const UniValue& result{signer.RegisterDescriptor(name, descriptor)};
+
+    const UniValue& error = result.find_value("error");
+    if (error.isStr()) return util::Error{strprintf(_("Signer returned error: %s"), error.getValStr())};
+
+    const UniValue& registration = result.find_value("registration");
+    if (!registration.isStr() || registration.getValStr().empty()) {
+        return util::Error{_("Signer returned invalid registration field")};
+    }
+    return registration.getValStr();
+}
+
 } // namespace wallet
