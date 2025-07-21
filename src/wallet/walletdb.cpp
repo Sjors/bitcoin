@@ -33,6 +33,7 @@ const std::string ACENTRY{"acentry"};
 const std::string ACTIVEEXTERNALSPK{"activeexternalspk"};
 const std::string ACTIVEINTERNALSPK{"activeinternalspk"};
 const std::string BESTBLOCK_NOMERKLE{"bestblock_nomerkle"};
+const std::string EXTERNAL_SIGNER_REGISTRATION{"external_signer_registration"};
 const std::string BESTBLOCK{"bestblock"};
 const std::string CRYPTED_KEY{"ckey"};
 const std::string CSCRIPT{"cscript"};
@@ -941,6 +942,29 @@ static DBErrors LoadDescriptorWalletRecords(CWallet* pwallet, DatabaseBatch& bat
     return desc_res.m_result;
 }
 
+static DBErrors LoadExternalSignerRegistrationRecords(CWallet* pwallet, DatabaseBatch& batch) EXCLUSIVE_LOCKS_REQUIRED(pwallet->cs_wallet)
+{
+    AssertLockHeld(pwallet->cs_wallet);
+
+    LoadResult res = LoadRecords(pwallet, batch, DBKeys::EXTERNAL_SIGNER_REGISTRATION,
+        [] (CWallet* pwallet, DataStream& key, DataStream& value, std::string& err) EXCLUSIVE_LOCKS_REQUIRED(pwallet->cs_wallet) {
+        std::string fingerprint;
+        std::string registration;
+        key >> fingerprint;
+        value >> registration;
+        pwallet->LoadExternalSignerRegistration(fingerprint, registration);
+        return DBErrors::LOAD_OK;
+    });
+
+    if (res.m_result <= DBErrors::NONCRITICAL_ERROR) {
+        // Only log if there are no critical errors
+        pwallet->WalletLogPrintf("Loaded external signer descriptor registrations: %u", res.m_records);
+    }
+
+    return res.m_result;
+}
+
+
 static DBErrors LoadAddressBookRecords(CWallet* pwallet, DatabaseBatch& batch) EXCLUSIVE_LOCKS_REQUIRED(pwallet->cs_wallet)
 {
     AssertLockHeld(pwallet->cs_wallet);
@@ -1195,6 +1219,9 @@ DBErrors WalletBatch::LoadWallet(CWallet* pwallet)
         // when in reality the wallet is simply too new.
         if (result == DBErrors::UNKNOWN_DESCRIPTOR) return result;
 
+        // Load external signer descriptor registrations
+        result = std::max(LoadExternalSignerRegistrationRecords(pwallet, *m_batch), result);
+
         // Load address book
         result = std::max(LoadAddressBookRecords(pwallet, *m_batch), result);
 
@@ -1348,6 +1375,11 @@ bool WalletBatch::WriteLastOpenedFeatures()
 bool WalletBatch::WriteLastDecryptedFeatures()
 {
     return WriteIC(DBKeys::LAST_DECRYPTED_FEATURES, WALLET_CLIENT_FEATURES);
+}
+
+bool WalletBatch::WriteExternalSignerRegistration(const std::string& fingerprint, const std::string& registration)
+{
+    return WriteIC(std::make_pair(DBKeys::EXTERNAL_SIGNER_REGISTRATION, fingerprint), registration);
 }
 
 bool WalletBatch::EraseRecords(const std::unordered_set<std::string>& types)
