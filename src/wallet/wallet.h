@@ -579,6 +579,27 @@ public:
     /** Display address on an external signer. */
     util::Result<void> DisplayAddress(const CTxDestination& dest) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
+    /** Determine if the SPKM contains a descriptor that may need device registration. */
+    bool IsCandidateForDescriptorRegistration(DescriptorScriptPubKeyMan& spkm) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
+    /**
+     * Combine receive and change descriptors into a multipath descriptor.
+     *
+     * Ignores trivial single sig policies: pkh(KEY), wpkh(KEY), sh(wpkh(KEY))
+     * and tr(KEY)
+     *
+     * If no SKPM pair is provided, look for the first suitable pair.
+     *
+     * @param[in] spk_pair The receive and change SKPM to use.
+     *
+     * @return the combined multipath descriptor, or an error if no suitable
+     *         descriptors were found or the pair is incompatible.
+     */
+    util::Result<std::string> DeriveRegistrationDescriptor(const std::optional<std::pair<DescriptorScriptPubKeyMan&, DescriptorScriptPubKeyMan&>>& spk_pair) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
+    /** Register a descriptor on all connected external signers and persist the results. */
+    util::Result<std::vector<ExternalSignerRegistration>> RegisterDescriptor(const std::optional<std::string>& name) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
     bool IsLockedCoin(const COutPoint& output) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     void LoadLockedCoin(const COutPoint& coin, bool persistent) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     bool LockCoin(const COutPoint& output, bool persist) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);

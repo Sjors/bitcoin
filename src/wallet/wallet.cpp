@@ -37,6 +37,7 @@
 #include <pubkey.h>
 #include <random.h>
 #include <script/descriptor.h>
+#include <script/parsing.h>
 #include <script/interpreter.h>
 #include <script/script.h>
 #include <script/sign.h>
@@ -2726,7 +2727,7 @@ util::Result<void> CWallet::DisplayAddress(const CTxDestination& dest)
 {
     CScript scriptPubKey = GetScriptForDestination(dest);
     for (const auto& spk_man : GetScriptPubKeyMans(scriptPubKey)) {
-        auto signer_spk_man = dynamic_cast<ExternalSignerScriptPubKeyMan *>(spk_man);
+        auto signer_spk_man = dynamic_cast<ExternalSignerScriptPubKeyMan*>(spk_man);
         if (signer_spk_man == nullptr) {
             continue;
         }
@@ -2735,6 +2736,119 @@ util::Result<void> CWallet::DisplayAddress(const CTxDestination& dest)
         return signer_spk_man->DisplayAddress(dest, *signer);
     }
     return util::Error{_("There is no ScriptPubKeyManager for this address")};
+}
+
+bool CWallet::IsCandidateForDescriptorRegistration(DescriptorScriptPubKeyMan& spkm)
+{
+    std::string desc;
+    if (!Assume(spkm.GetDescriptorString(desc, /*priv=*/false))) return false;
+
+    std::span<const char> sp{desc};
+
+    if (!(script::Const("tr(", sp, /*skip=*/true) || script::Const("wsh(", sp, /*skip=*/true))) return false;
+    // Must be MuSig2, have a leaf script or segwit multisig
+    if (desc.find(',') == std::string::npos) return false;
+
+    return true;
+}
+
+util::Result<std::string> CWallet::DeriveRegistrationDescriptor(const std::optional<std::pair<DescriptorScriptPubKeyMan&, DescriptorScriptPubKeyMan&>>& spk_pair)
+{
+    std::string receive_descriptor;
+    std::string change_descriptor;
+
+    DescriptorScriptPubKeyMan* receive{nullptr};
+    DescriptorScriptPubKeyMan* change{nullptr};
+
+    if (spk_pair) {
+        if (!IsCandidateForDescriptorRegistration(spk_pair->first) || !IsCandidateForDescriptorRegistration(spk_pair->second)) {
+            return util::Error{_("Provided descriptors are not suitable for registration")};
+        }
+        receive = &spk_pair->first;
+        change = &spk_pair->second;
+    } else {
+        for (bool internal : {false, true}) {
+            // TODO: support P2SH.
+            for (const OutputType type : {OutputType::BECH32M, OutputType::BECH32}) {
+                // Only look for a single candidate
+                if (!internal && receive) continue;
+                if (internal && change) continue;
+
+                auto spk_man = GetScriptPubKeyMan(type, internal);
+                if (!spk_man) continue;
+                auto desc_spk_man = dynamic_cast<DescriptorScriptPubKeyMan*>(spk_man);
+                if (!desc_spk_man) continue;
+
+                if (!IsCandidateForDescriptorRegistration(*desc_spk_man)) continue;
+
+                if (internal) {
+                    change = desc_spk_man;
+                } else {
+                    receive = desc_spk_man;
+                }
+            }
+        }
+    }
+
+    if (!receive || !change) {
+        return util::Error{_("No suitable receive and change descriptors found for registration")};
+    }
+
+    bool res{receive->GetDescriptorString(receive_descriptor, /*priv=*/false)};
+    res &= change->GetDescriptorString(change_descriptor, /*priv=*/false);
+    if (!Assume(res)) {
+        return util::Error{_("Failed to get descriptor strings")};
+    }
+
+    // Drop the checksums, then restore the multipath expression that was
+    // expanded into separate receive and change descriptors at import time.
+    if (const auto checksum{receive_descriptor.find('#')}; checksum != std::string::npos) receive_descriptor.erase(checksum);
+    if (const auto checksum{change_descriptor.find('#')}; checksum != std::string::npos) change_descriptor.erase(checksum);
+    if (receive_descriptor.find("/0/*") == std::string::npos || change_descriptor.find("/1/*") == std::string::npos) {
+        return util::Error{_("Receive and change descriptors do not contain the expected /0/* and /1/* paths")};
+    }
+    util::ReplaceAll(receive_descriptor, "/0/*", "/<0;1>/*", /*regex=*/false);
+    util::ReplaceAll(change_descriptor, "/1/*", "/<0;1>/*", /*regex=*/false);
+
+    if (receive_descriptor != change_descriptor) {
+        return util::Error{Untranslated(strprintf(
+            "Receive and change descriptors are incompatible for registration:\n%s\n%s",
+            receive_descriptor,
+            change_descriptor
+        ))};
+    }
+
+    return receive_descriptor;
+}
+
+util::Result<std::vector<ExternalSignerRegistration>> CWallet::RegisterDescriptor(const std::optional<std::string>& name)
+{
+    const std::string descriptor_name{name.value_or(m_name)};
+
+    // A wallet with multiple complex descriptor pairs could have multiple
+    // registrations, but selecting a specific pair is currently unsupported.
+    const auto descriptor{DeriveRegistrationDescriptor(/*spk_pair=*/std::nullopt)};
+    if (!descriptor) return util::Error{util::ErrorString(descriptor)};
+
+    for (const auto& spk_man : GetActiveScriptPubKeyMans()) {
+        auto signer_spk_man = dynamic_cast<ExternalSignerScriptPubKeyMan *>(spk_man);
+        if (signer_spk_man == nullptr) {
+            continue;
+        }
+        auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
+        if (!signer) return util::Error{util::ErrorString(signer)};
+
+        util::Result<std::string> res{signer_spk_man->RegisterDescriptor(*signer, descriptor_name, *descriptor)};
+        if (!res) return util::Error{util::ErrorString(res)};
+
+        WalletBatch batch(GetDatabase());
+        if (!batch.WriteExternalSignerRegistration(signer->m_fingerprint, *res)) {
+            return util::Error{_("Failed to store external signer descriptor registration in wallet database.")};
+        }
+        LoadExternalSignerRegistration(signer->m_fingerprint, *res);
+        return std::vector<ExternalSignerRegistration>{{signer->m_fingerprint, *res}};
+    }
+    return util::Error{_("Could not find ExternalSignerScriptPubKeyManager")};
 }
 
 void CWallet::LoadLockedCoin(const COutPoint& coin, bool persistent)
