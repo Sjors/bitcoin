@@ -59,6 +59,14 @@ public:
     //! @returns see doc/external-signer.md
     UniValue GetDescriptors(int account);
 
+    //! Register BIP388 policy on the device.
+    //! Calls `<command> register` and passes the name, policy and key info
+    //! @param[in] name policy name to display on the signer
+    //! @param[in] descriptor_template BIP388 descriptor template
+    //! @param[in] keys_info key with origin for each participant
+    //! @returns optional hmac provided by the signer
+    UniValue RegisterPolicy(const std::string& name, const std::string& descriptor_template, const std::vector<std::string>& keys_info) const;
+
     //! Sign PartiallySignedTransaction on the device.
     //! Calls `<command> --stdin --fingerprint <fingerprint> --chain <chain>` and passes the
     //! `signtx` command and PSBT via stdin.
