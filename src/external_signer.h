@@ -59,6 +59,13 @@ public:
     //! @returns see doc/external-signer.md
     UniValue GetDescriptors(int account);
 
+    //! Register a descriptor on the device.
+    //! Calls `<command> registerdescriptor <name> <descriptor>`.
+    //! @param[in] name       descriptor name to display on the signer
+    //! @param[in] descriptor combined multipath descriptor
+    //! @returns opaque registration provided by the signer
+    UniValue RegisterDescriptor(const std::string& name, const std::string& descriptor) const;
+
     //! Sign PartiallySignedTransaction on the device.
     //! Calls `<command> --stdin --fingerprint <fingerprint> --chain <chain>` and passes the
     //! `signtx` command and PSBT via stdin.
