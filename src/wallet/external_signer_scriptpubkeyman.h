@@ -8,6 +8,7 @@
 #include <wallet/scriptpubkeyman.h>
 
 #include <memory>
+#include <optional>
 #include <util/result.h>
 
 struct bilingual_str;
@@ -43,6 +44,16 @@ public:
  util::Result<void> DisplayAddress(const CTxDestination& dest, const ExternalSigner& signer) const;
 
   std::optional<common::PSBTError> FillPSBT(PartiallySignedTransaction& psbt, const PrecomputedTransactionData& txdata, const common::PSBTFillOptions& options, int* n_signed = nullptr) const override;
+
+  /**
+   * Register a descriptor with an external signer.
+   * @param[in] name        descriptor name to display on the signer
+   * @param[in] descriptor  combined multipath descriptor
+   * @returns opaque registration or an error message
+   */
+  util::Result<std::string> RegisterDescriptor(const ExternalSigner& signer,
+                                               const std::string& name,
+                                               const std::string& descriptor) const;
 };
 } // namespace wallet
 #endif // BITCOIN_WALLET_EXTERNAL_SIGNER_SCRIPTPUBKEYMAN_H
