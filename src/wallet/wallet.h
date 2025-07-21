@@ -307,6 +307,12 @@ struct CRecipient
     bool fSubtractFeeFromAmount;
 };
 
+/** Opaque descriptor registration returned by an external signer. */
+struct ExternalSignerRegistration {
+    std::string fingerprint;
+    std::string registration;
+};
+
 class WalletRescanReserver; //forward declarations for ScanForWalletTransactions/RescanFromTime
 /**
  * A CWallet maintains a set of transactions and balances, and provides the ability to create new transactions.
@@ -384,6 +390,8 @@ private:
 
     /** WalletFlags set on this wallet. */
     std::atomic<uint64_t> m_wallet_flags{0};
+
+    std::vector<ExternalSignerRegistration> m_external_signer_registrations;
 
     bool SetAddressBookWithDB(WalletBatch& batch, const CTxDestination& address, const std::string& strName, const std::optional<AddressPurpose>& strPurpose);
 
@@ -936,6 +944,11 @@ public:
     bool LoadWalletFlags(uint64_t flags);
     //! Retrieve all of the wallet's flags
     uint64_t GetWalletFlags() const;
+
+    const std::vector<ExternalSignerRegistration>& GetExternalSignerRegistrations() const { return m_external_signer_registrations; }
+
+    //! Load an opaque descriptor registration returned by an external signer.
+    void LoadExternalSignerRegistration(const std::string& fingerprint, const std::string& registration);
 
     /** Return wallet name for use in logs, will return "default wallet" if the wallet has no name. */
     std::string LogName() const override
