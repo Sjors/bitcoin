@@ -8,6 +8,7 @@
 #include <wallet/scriptpubkeyman.h>
 
 #include <memory>
+#include <optional>
 #include <util/result.h>
 
 struct bilingual_str;
@@ -38,6 +39,18 @@ public:
  util::Result<void> DisplayAddress(const CTxDestination& dest, const ExternalSigner& signer) const;
 
   std::optional<common::PSBTError> FillPSBT(PartiallySignedTransaction& psbt, const PrecomputedTransactionData& txdata, const common::PSBTFillOptions& options, int* n_signed = nullptr) const override;
+
+  /**
+   * Register BIP388 wallet policy.
+   * @param[in] name policy name to display on the signer
+   * @param[in] descriptor_template BIP388 descriptor template
+   * @param[in] keys_info key with origin for each participant
+   * @returns optional hmac or an error message
+   */
+  util::Result<std::optional<std::string>> RegisterPolicy(const ExternalSigner& signer,
+                                                          const std::string& name,
+                                                          const std::string& descriptor_template,
+                                                          const std::vector<std::string>& keys_info) const;
 };
 } // namespace wallet
 #endif // BITCOIN_WALLET_EXTERNAL_SIGNER_SCRIPTPUBKEYMAN_H
