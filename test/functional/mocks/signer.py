@@ -57,6 +57,14 @@ def displayaddress(args):
 
     return sys.stdout.write(json.dumps({"address": expected_desc[args.desc]}))
 
+def registerdescriptor(args):
+    if args.fingerprint != "00000001":
+        return sys.stdout.write(json.dumps({"error": "Unexpected fingerprint", "fingerprint": args.fingerprint}))
+
+    if "/<0;1>/*" not in args.descriptor:
+        return sys.stdout.write(json.dumps({"error": "Expected multipath descriptor", "descriptor": args.descriptor}))
+    return sys.stdout.write(json.dumps({"registration": "cmRlc2MBBHRlc3Q="}))
+
 def signtx(args):
     if args.fingerprint != "00000001":
         return sys.stdout.write(json.dumps({"error": "Unexpected fingerprint", "fingerprint": args.fingerprint}))
@@ -90,6 +98,11 @@ parser_getdescriptors.add_argument('--account', metavar='account')
 parser_displayaddress = subparsers.add_parser('displayaddress', help='display address on signer')
 parser_displayaddress.add_argument('--desc', metavar='desc')
 parser_displayaddress.set_defaults(func=displayaddress)
+
+parser_register = subparsers.add_parser('registerdescriptor')
+parser_register.add_argument('name')
+parser_register.add_argument('descriptor')
+parser_register.set_defaults(func=registerdescriptor)
 
 parser_signtx = subparsers.add_parser('signtx')
 parser_signtx.add_argument('psbt', metavar='psbt')
