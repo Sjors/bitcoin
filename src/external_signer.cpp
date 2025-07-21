@@ -80,6 +80,11 @@ UniValue ExternalSigner::GetDescriptors(const int account)
     return RunCommandParseJSON(Cat(m_command, Cat(Cat({"--fingerprint", m_fingerprint}, NetworkArg()), {"getdescriptors", "--account", strprintf("%d", account)})), "");
 }
 
+UniValue ExternalSigner::RegisterDescriptor(const std::string& name, const std::string& descriptor) const
+{
+    return RunCommandParseJSON(Cat(m_command, Cat(Cat({"--fingerprint", m_fingerprint}, NetworkArg()), {"registerdescriptor", name, descriptor})), "");
+}
+
 //! Find a sighash type used by the signer that doesn't commit to all outputs;
 //! a signature with SIGHASH_NONE or SIGHASH_SINGLE would let anyone alter
 //! them. SIGHASH_ANYONECANPAY is acceptable, since it only permits adding
