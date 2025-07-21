@@ -1797,6 +1797,17 @@ uint64_t CWallet::GetWalletFlags() const
     return m_wallet_flags;
 }
 
+void CWallet::LoadExternalSignerRegistration(const std::string& fingerprint, const std::string& registration)
+{
+    for (auto& entry : m_external_signer_registrations) {
+        if (entry.fingerprint == fingerprint) {
+            entry.registration = registration;
+            return;
+        }
+    }
+    m_external_signer_registrations.emplace_back(ExternalSignerRegistration{fingerprint, registration});
+}
+
 void CWallet::MaybeUpdateBirthTime(int64_t time)
 {
     int64_t birthtime = m_birth_time.load();
