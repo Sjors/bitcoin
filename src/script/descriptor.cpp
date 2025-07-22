@@ -626,6 +626,31 @@ public:
         return true;
     }
 
+    bool IsWatchOnly(const SigningProvider& arg) const override
+    {
+        size_t privkey_count{0};
+        std::set<CPubKey> pubkeys;
+        std::set<CExtPubKey> ext_pubkeys;
+        this->GetPubKeys(pubkeys, ext_pubkeys);
+        auto output_type{this->GetOutputType()};
+        for (auto pubkey : pubkeys) {
+            CKey key;
+            if (arg.GetKey(pubkey.GetID(), key)) {
+                privkey_count += 1;
+            } else if (output_type.has_value() && *output_type == OutputType::BECH32M && arg.GetKeyByXOnly(XOnlyPubKey(pubkey), key)) {
+                privkey_count += 1;
+            }
+        }
+        for (auto extpubkey : ext_pubkeys) {
+            CKey dummy;
+            if (arg.GetKey(extpubkey.pubkey.GetID(), dummy)) {
+                privkey_count += 1;
+            }
+        }
+        size_t pubkey_count{pubkeys.size() + ext_pubkeys.size()};
+        return (privkey_count == 0 || pubkey_count > privkey_count);
+    }
+
     // NOLINTNEXTLINE(misc-no-recursion)
     bool IsRange() const final
     {
