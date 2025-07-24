@@ -237,6 +237,7 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   httpserver.cpp
   i2p.cpp
   index/base.cpp
+  index/bip352.cpp
   index/blockfilterindex.cpp
   index/coinstatsindex.cpp
   index/txindex.cpp
@@ -325,6 +326,7 @@ target_link_libraries(bitcoin_node
     $<TARGET_NAME_IF_EXISTS:bitcoin_zmq>
     leveldb
     minisketch
+    secp256k1
     univalue
     Boost::headers
     $<TARGET_NAME_IF_EXISTS:libevent::core>
