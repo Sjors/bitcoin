@@ -127,9 +127,6 @@ bool BIP352Index::CustomAppend(const interfaces::BlockInfo& block)
     // is needed on non-mainnet chains because m_start_height is 0 by default.
     if (block.height == 0) return true;
 
-    // Exclude pre-taproot
-    if (block.height < m_start_height) return true;
-
     tweak_index_entry index_entry;
     GetSilentPaymentKeys(Assert(block.data)->vtx, *Assert(block.undo_data), index_entry);
 
