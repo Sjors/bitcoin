@@ -343,6 +343,7 @@ BASE_SCRIPTS = [
     'wallet_orphanedreward.py',
     'wallet_timelock.py',
     'p2p_permissions.py',
+    'rpc_getsilentpaymentblockdata.py',
     'feature_blocksdir.py',
     'wallet_startup.py',
     'feature_remove_pruned_files_on_startup.py',
