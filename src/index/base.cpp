@@ -264,6 +264,13 @@ void BaseIndex::Sync()
         return;
     }
 
+    // If pindex_next is our first block and we are starting from a custom height,
+    // set pindex to be the previous block. This ensures we test that we can still rewind
+    // from our custom start height in the event of a reorg.
+    if (pindex_next->nHeight == m_start_height && m_start_height > 0) {
+        pindex = pindex_next->pprev;
+    }
+
     // Handle potential reorgs; if the next block's parent doesn't match our current tip,
     // rewind our index state to match the chain and resume from there.
     if (pindex_next->pprev != pindex && !Rewind(pindex, pindex_next->pprev)) {
@@ -413,6 +420,13 @@ void BaseIndex::Sync()
             if (!pindex_next) {
                 m_synced = true;
                 break;
+            }
+
+            // If pindex_next is our first block and we are starting from a custom height,
+            // set pindex to be the previous block. This ensures we test that we can still rewind
+            // from our custom start height in the event of a reorg.
+            if (pindex_next->nHeight == m_start_height && m_start_height > 0) {
+                pindex = pindex_next->pprev;
             }
 
             // New blocks arrived during sync.
