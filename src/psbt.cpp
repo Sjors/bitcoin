@@ -149,6 +149,9 @@ void PSBTInput::FillSignatureData(SignatureData& sigdata) const
     for (const auto& [hash, preimage] : hash256_preimages) {
         sigdata.hash256_preimages.emplace(std::vector<unsigned char>(hash.begin(), hash.end()), preimage);
     }
+    sigdata.musig2_pubkeys.insert(m_musig2_participants.begin(), m_musig2_participants.end());
+    sigdata.musig2_pubnonces.insert(m_musig2_pubnonces.begin(), m_musig2_pubnonces.end());
+    sigdata.musig2_partial_sigs.insert(m_musig2_partial_sigs.begin(), m_musig2_partial_sigs.end());
 }
 
 void PSBTInput::FromSignatureData(const SignatureData& sigdata)
@@ -196,6 +199,13 @@ void PSBTInput::FromSignatureData(const SignatureData& sigdata)
     for (const auto& [pubkey, leaf_origin] : sigdata.taproot_misc_pubkeys) {
         m_tap_bip32_paths.emplace(pubkey, leaf_origin);
     }
+    m_musig2_participants.insert(sigdata.musig2_pubkeys.begin(), sigdata.musig2_pubkeys.end());
+    for (const auto& [agg_key_lh, pubnonces] : sigdata.musig2_pubnonces) {
+        m_musig2_pubnonces[agg_key_lh].insert(pubnonces.begin(), pubnonces.end());
+    }
+    for (const auto& [agg_key_lh, psigs] : sigdata.musig2_partial_sigs) {
+        m_musig2_partial_sigs[agg_key_lh].insert(psigs.begin(), psigs.end());
+    }
 }
 
 void PSBTInput::Merge(const PSBTInput& input)
@@ -223,6 +233,13 @@ void PSBTInput::Merge(const PSBTInput& input)
     if (m_tap_key_sig.empty() && !input.m_tap_key_sig.empty()) m_tap_key_sig = input.m_tap_key_sig;
     if (m_tap_internal_key.IsNull() && !input.m_tap_internal_key.IsNull()) m_tap_internal_key = input.m_tap_internal_key;
     if (m_tap_merkle_root.IsNull() && !input.m_tap_merkle_root.IsNull()) m_tap_merkle_root = input.m_tap_merkle_root;
+    m_musig2_participants.insert(input.m_musig2_participants.begin(), input.m_musig2_participants.end());
+    for (const auto& [agg_key_lh, pubnonces] : input.m_musig2_pubnonces) {
+        m_musig2_pubnonces[agg_key_lh].insert(pubnonces.begin(), pubnonces.end());
+    }
+    for (const auto& [agg_key_lh, psigs] : input.m_musig2_partial_sigs) {
+        m_musig2_partial_sigs[agg_key_lh].insert(psigs.begin(), psigs.end());
+    }
 }
 
 void PSBTOutput::FillSignatureData(SignatureData& sigdata) const
@@ -252,6 +269,7 @@ void PSBTOutput::FillSignatureData(SignatureData& sigdata) const
         sigdata.taproot_misc_pubkeys.emplace(pubkey, leaf_origin);
         sigdata.tap_pubkeys.emplace(Hash160(pubkey), pubkey);
     }
+    sigdata.musig2_pubkeys.insert(m_musig2_participants.begin(), m_musig2_participants.end());
 }
 
 void PSBTOutput::FromSignatureData(const SignatureData& sigdata)
@@ -274,6 +292,7 @@ void PSBTOutput::FromSignatureData(const SignatureData& sigdata)
     for (const auto& [pubkey, leaf_origin] : sigdata.taproot_misc_pubkeys) {
         m_tap_bip32_paths.emplace(pubkey, leaf_origin);
     }
+    m_musig2_participants.insert(sigdata.musig2_pubkeys.begin(), sigdata.musig2_pubkeys.end());
 }
 
 bool PSBTOutput::IsNull() const
@@ -291,6 +310,7 @@ void PSBTOutput::Merge(const PSBTOutput& output)
     if (witness_script.empty() && !output.witness_script.empty()) witness_script = output.witness_script;
     if (m_tap_internal_key.IsNull() && !output.m_tap_internal_key.IsNull()) m_tap_internal_key = output.m_tap_internal_key;
     if (m_tap_tree.empty() && !output.m_tap_tree.empty()) m_tap_tree = output.m_tap_tree;
+    m_musig2_participants.insert(output.m_musig2_participants.begin(), output.m_musig2_participants.end());
 }
 
 bool PSBTInputSigned(const PSBTInput& input)
@@ -351,7 +371,7 @@ void UpdatePSBTOutput(const SigningProvider& provider, PartiallySignedTransactio
     // Construct a would-be spend of this output, to update sigdata with.
     // Note that ProduceSignature is used to fill in metadata (not actual signatures),
     // so provider does not need to provide any private keys (it can be a HidingSigningProvider).
-    MutableTransactionSignatureCreator creator(tx, /*input_idx=*/0, out.nValue, SIGHASH_ALL);
+    MutableTransactionSignatureCreator creator(tx, /*input_idx=*/0, out.nValue, {.sighash_type = SIGHASH_ALL});
     ProduceSignature(provider, creator, out.scriptPubKey, sigdata);
 
     // Put redeem_script, witness_script, key paths, into PSBTOutput.
@@ -375,7 +395,7 @@ PrecomputedTransactionData PrecomputePSBTData(const PartiallySignedTransaction& 
     return txdata;
 }
 
-PSBTError SignPSBTInput(const SigningProvider& provider, PartiallySignedTransaction& psbt, int index, const PrecomputedTransactionData* txdata, std::optional<int> sighash,  SignatureData* out_sigdata, bool finalize)
+PSBTError SignPSBTInput(const SigningProvider& provider, PartiallySignedTransaction& psbt, int index, const PrecomputedTransactionData* txdata, common::PSBTFillOptions options,  SignatureData* out_sigdata)
 {
     PSBTInput& input = psbt.inputs.at(index);
     const CMutableTransaction& tx = *psbt.tx;
@@ -418,8 +438,8 @@ PSBTError SignPSBTInput(const SigningProvider& provider, PartiallySignedTransact
     // If only the parameter is provided, use it and add it to the PSBT if it is other than SIGHASH_DEFAULT
     // for all input types, and not SIGHASH_ALL for non-taproot input types.
     // If neither are provided, use SIGHASH_DEFAULT if it is taproot, and SIGHASH_ALL for everything else.
-    if (!sighash) sighash = utxo.scriptPubKey.IsPayToTaproot() ? SIGHASH_DEFAULT : SIGHASH_ALL;
-    Assert(sighash.has_value());
+    int sighash{options.sighash_type.value_or(utxo.scriptPubKey.IsPayToTaproot() ? SIGHASH_DEFAULT : SIGHASH_ALL)};
+
     // For user safety, the desired sighash must be provided if the PSBT wants something other than the default set in the previous line.
     if (input.sighash_type && input.sighash_type != sighash) {
         return PSBTError::SIGHASH_MISMATCH;
@@ -441,14 +461,14 @@ PSBTError SignPSBTInput(const SigningProvider& provider, PartiallySignedTransact
             if (sig.size() != 64) return PSBTError::SIGHASH_MISMATCH;
         }
     } else {
-        if (!input.m_tap_key_sig.empty() && (input.m_tap_key_sig.size() != 65 || input.m_tap_key_sig.back() != *sighash)) {
+        if (!input.m_tap_key_sig.empty() && (input.m_tap_key_sig.size() != 65 || input.m_tap_key_sig.back() != sighash)) {
             return PSBTError::SIGHASH_MISMATCH;
         }
         for (const auto& [_, sig] : input.m_tap_script_sigs) {
-            if (sig.size() != 65 || sig.back() != *sighash) return PSBTError::SIGHASH_MISMATCH;
+            if (sig.size() != 65 || sig.back() != sighash) return PSBTError::SIGHASH_MISMATCH;
         }
         for (const auto& [_, sig] : input.partial_sigs) {
-            if (sig.second.back() != *sighash) return PSBTError::SIGHASH_MISMATCH;
+            if (sig.second.back() != sighash) return PSBTError::SIGHASH_MISMATCH;
         }
     }
 
@@ -457,14 +477,14 @@ PSBTError SignPSBTInput(const SigningProvider& provider, PartiallySignedTransact
     if (txdata == nullptr) {
         sig_complete = ProduceSignature(provider, DUMMY_SIGNATURE_CREATOR, utxo.scriptPubKey, sigdata);
     } else {
-        MutableTransactionSignatureCreator creator(tx, index, utxo.nValue, txdata, *sighash);
+        MutableTransactionSignatureCreator creator(tx, index, utxo.nValue, txdata, {.sighash_type = sighash, .avoid_script_path = options.avoid_script_path});
         sig_complete = ProduceSignature(provider, creator, utxo.scriptPubKey, sigdata);
     }
     // Verify that a witness signature was produced in case one was required.
     if (require_witness_sig && !sigdata.witness) return PSBTError::INCOMPLETE;
 
     // If we are not finalizing, set sigdata.complete to false to not set the scriptWitness
-    if (!finalize && sigdata.complete) sigdata.complete = false;
+    if (!options.finalize && sigdata.complete) sigdata.complete = false;
 
     input.FromSignatureData(sigdata);
 
@@ -534,7 +554,7 @@ bool FinalizePSBT(PartiallySignedTransaction& psbtx)
     const PrecomputedTransactionData txdata = PrecomputePSBTData(psbtx);
     for (unsigned int i = 0; i < psbtx.tx->vin.size(); ++i) {
         PSBTInput& input = psbtx.inputs.at(i);
-        complete &= (SignPSBTInput(DUMMY_SIGNING_PROVIDER, psbtx, i, &txdata, input.sighash_type, nullptr, true) == PSBTError::OK);
+        complete &= (SignPSBTInput(DUMMY_SIGNING_PROVIDER, psbtx, i, &txdata, {.sighash_type = input.sighash_type, .finalize = true}, nullptr) == PSBTError::OK);
     }
 
     return complete;

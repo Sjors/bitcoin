@@ -389,13 +389,6 @@ std::shared_ptr<CWallet> CreateWallet(WalletContext& context, const std::string&
         wallet_creation_flags |= WALLET_FLAG_BLANK_WALLET;
     }
 
-    // Private keys must be disabled for an external signer wallet
-    if ((wallet_creation_flags & WALLET_FLAG_EXTERNAL_SIGNER) && !(wallet_creation_flags & WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
-        error = Untranslated("Private keys must be disabled when using an external signer");
-        status = DatabaseStatus::FAILED_CREATE;
-        return nullptr;
-    }
-
     // Do not allow a passphrase when private keys are disabled
     if (!passphrase.empty() && (wallet_creation_flags & WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
         error = Untranslated("Passphrase provided but private keys are disabled. A passphrase is only used to encrypt private keys, so cannot be used for wallets with private keys disabled.");
@@ -1710,6 +1703,10 @@ uint64_t CWallet::GetWalletFlags() const
     return m_wallet_flags;
 }
 
+void CWallet::LoadHmacBIP388(std::string policy_name, std::string hmac) {
+    m_bip388 = {.name = policy_name, .hmac = hmac};
+}
+
 void CWallet::MaybeUpdateBirthTime(int64_t time)
 {
     int64_t birthtime = m_birth_time.load();
@@ -2085,7 +2082,7 @@ bool CWallet::SignTransaction(CMutableTransaction& tx, const std::map<COutPoint,
     return false;
 }
 
-std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& complete, std::optional<int> sighash_type, bool sign, bool bip32derivs, size_t * n_signed, bool finalize) const
+std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, common::PSBTFillOptions options, bool& complete, size_t* n_signed) const
 {
     if (n_signed) {
         *n_signed = 0;
@@ -2118,7 +2115,7 @@ std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bo
     // Fill in information from ScriptPubKeyMans
     for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
         int n_signed_this_spkm = 0;
-        const auto error{spk_man->FillPSBT(psbtx, txdata, sighash_type, sign, bip32derivs, &n_signed_this_spkm, finalize)};
+        const auto error{spk_man->FillPSBT(psbtx, txdata, options, &n_signed_this_spkm)};
         if (error) {
             return error;
         }
@@ -2582,6 +2579,44 @@ util::Result<void> CWallet::DisplayAddress(const CTxDestination& dest)
     return util::Error{_("There is no ScriptPubKeyManager for this address")};
 }
 
+util::Result<std::string> CWallet::RegisterPolicy(std::optional<std::string> name)
+{
+    // TODO: use wallet name as default
+    const std::string policy_name{name.has_value() ? *name : "Core"};
+
+    // TODO: derive policy from descriptor (fail if not possible)
+    const std::string descriptor_template{"wsh(multi(@0,@1))"};
+
+    // TODO: extract key information
+    const std::vector<std::string> keys_info{
+            "[00000001/47h/1h/0h]tpubD6NzVbkrYhZ4YNXVQbNhMK1WqguFsUXceaVJKbmno2aZ3B6QfbMeraaYvnBSGpV3vxLyTTK9DYT1yoEck4XUScMzXoQ2U2oSmE2JyMedq3H",
+            "[00000001/47h/1h/0h]tpubDAXcJ7s7ZwicqjprRaEWdPoHKrCS215qxGYxpusRLLmJuT69ZSicuGdSfyvyKpvUNYBW1s2U3NSrT6vrCYB9e6nZUEvrqnwXPF8ArTCRXMY"
+    };
+
+    for (const auto& spk_man : GetActiveScriptPubKeyMans()) {
+        auto signer_spk_man = dynamic_cast<ExternalSignerScriptPubKeyMan *>(spk_man);
+        if (signer_spk_man == nullptr) {
+            continue;
+        }
+        auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
+        if (!signer) return util::ErrorString(signer).original;
+
+        util::Result<std::string> res{signer_spk_man->RegisterPolicy(*signer, policy_name, descriptor_template, keys_info)};
+
+        if (res) {
+            // Store hmac in wallet
+            WalletBatch batch(GetDatabase());
+            if(!batch.WriteHmacBip388(policy_name, *res)) {
+                return util::Error{_("Failed to store BIP388 hmac in wallet database.")};
+            };
+            LoadHmacBIP388(policy_name, *res);
+        }
+
+        return res;
+    }
+    return util::Error{_("Could not find ExternalSignerScriptPubKeyMananager")};
+}
+
 void CWallet::LoadLockedCoin(const COutPoint& coin, bool persistent)
 {
     AssertLockHeld(cs_wallet);
@@ -2881,7 +2916,13 @@ std::shared_ptr<CWallet> CWallet::Create(WalletContext& context, const std::stri
         // Only descriptor wallets can be created
         assert(walletInstance->IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
 
-        if ((wallet_creation_flags & WALLET_FLAG_EXTERNAL_SIGNER) || !(wallet_creation_flags & (WALLET_FLAG_DISABLE_PRIVATE_KEYS | WALLET_FLAG_BLANK_WALLET))) {
+        // Don't generate or import keys for a blank wallet
+        if (!(wallet_creation_flags & WALLET_FLAG_BLANK_WALLET) && (
+            // Fetch keys from an external signer; or
+             (wallet_creation_flags & WALLET_FLAG_EXTERNAL_SIGNER) ||
+            // Generate them, unless private keys are disabled
+            !(wallet_creation_flags & (WALLET_FLAG_DISABLE_PRIVATE_KEYS)))
+        ) {
             walletInstance->SetupDescriptorScriptPubKeyMans();
         }
 
@@ -3458,6 +3499,20 @@ void CWallet::ConnectScriptPubKeyManNotifiers()
     }
 }
 
+std::set<DescriptorScriptPubKeyMan*> CWallet::GetScriptlessSPKMs() const
+{
+    std::set<DescriptorScriptPubKeyMan*> spk_mans;
+    for (const auto& spkm : GetAllScriptPubKeyMans()) {
+        DescriptorScriptPubKeyMan* desc_spkm = dynamic_cast<DescriptorScriptPubKeyMan*>(spkm);
+        if (!desc_spkm) continue;
+        LOCK(desc_spkm->cs_desc_man);
+        if (!desc_spkm->GetWalletDescriptor().descriptor->HasScripts()) {
+            spk_mans.insert(desc_spkm);
+        }
+    }
+    return spk_mans;
+}
+
 DescriptorScriptPubKeyMan& CWallet::LoadDescriptorScriptPubKeyMan(uint256 id, WalletDescriptor& desc)
 {
     DescriptorScriptPubKeyMan* spk_manager;
@@ -3687,8 +3742,8 @@ util::Result<std::reference_wrapper<DescriptorScriptPubKeyMan>> CWallet::AddWall
     }
 
     // Apply the label if necessary
-    // Note: we disable labels for ranged descriptors
-    if (!desc.descriptor->IsRange()) {
+    // Note: we disable labels for descriptors that are ranged or that don't produce output scripts (i.e. unused())
+    if (!desc.descriptor->IsRange() && desc.descriptor->HasScripts()) {
         auto script_pub_keys = spk_man->GetScriptPubKeys();
         if (script_pub_keys.empty()) {
             return util::Error{_("Could not generate scriptPubKeys (cache is empty)")};
