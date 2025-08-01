@@ -385,7 +385,7 @@ static RPCHelpMan createwallet()
     WalletContext& context = EnsureWalletContext(request.context);
     uint64_t flags = 0;
 
-    std::optional<bool> disable_private_keys = request.params[1].isNull() ? std::nullopt : std::optional<bool>(request.params[1].get_bool());
+    std::optional<bool> disable_private_keys{self.MaybeArg<bool>("disable_private_keys")};
 
     if (!request.params[2].isNull() && request.params[2].get_bool()) {
         flags |= WALLET_FLAG_BLANK_WALLET;
@@ -422,7 +422,7 @@ static RPCHelpMan createwallet()
 #endif
     }
 
-    if (disable_private_keys.has_value() && *disable_private_keys) {
+    if (disable_private_keys.value_or(false)) {
         flags |= WALLET_FLAG_DISABLE_PRIVATE_KEYS;
     }
 
