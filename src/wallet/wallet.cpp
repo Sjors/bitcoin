@@ -1703,8 +1703,8 @@ uint64_t CWallet::GetWalletFlags() const
     return m_wallet_flags;
 }
 
-void CWallet::LoadHmacBIP388(std::string policy_name, std::string hmac) {
-    m_bip388 = {.name = policy_name, .hmac = hmac};
+void CWallet::LoadHmacBIP388(const std::string& policy_name, const std::string& fingerprint, const std::string& hmac) {
+    m_bip388.push_back({.name = policy_name, .fingerprint = fingerprint, .hmac = hmac});
 }
 
 void CWallet::MaybeUpdateBirthTime(int64_t time)
@@ -2606,10 +2606,10 @@ util::Result<std::string> CWallet::RegisterPolicy(std::optional<std::string> nam
         if (res) {
             // Store hmac in wallet
             WalletBatch batch(GetDatabase());
-            if(!batch.WriteHmacBip388(policy_name, *res)) {
+            if(!batch.WriteHmacBip388(policy_name, signer->m_fingerprint, *res)) {
                 return util::Error{_("Failed to store BIP388 hmac in wallet database.")};
             };
-            LoadHmacBIP388(policy_name, *res);
+            LoadHmacBIP388(policy_name, signer->m_fingerprint, *res);
         }
 
         return res;

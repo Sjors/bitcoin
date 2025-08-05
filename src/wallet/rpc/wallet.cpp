@@ -57,7 +57,15 @@ static RPCHelpMan getwalletinfo()
                         }, /*skip_type_check=*/true},
                         {RPCResult::Type::BOOL, "descriptors", "whether this wallet uses descriptors for output script management"},
                         {RPCResult::Type::BOOL, "external_signer", "whether this wallet is configured to use an external signer such as a hardware wallet"},
-                        {RPCResult::Type::STR, "bip388_hmac", /*optional=*/true, "BIP388 HMAC provided by the external signer"},
+                        {RPCResult::Type::ARR, "bip388", /*optional=*/true, "BIP388 HMACs provided by external signers",
+                        {
+                            {RPCResult::Type::OBJ, "bip388_hmacs", "BIP388 HMACs for the policies registered with the external signer",
+                            {
+                                {RPCResult::Type::STR, "name", "the name of the BIP388 policy"},
+                                {RPCResult::Type::STR, "fingerprint", "the fingerprint of the external signer"},
+                                {RPCResult::Type::STR_HEX, "hmac", "the BIP388 HMAC for the policy and fingerprint"},
+                            },
+                        }}},
                         {RPCResult::Type::BOOL, "blank", "Whether this wallet intentionally does not contain any keys, scripts, or descriptors"},
                         {RPCResult::Type::NUM_TIME, "birthtime", /*optional=*/true, "The start time for blocks scanning. It could be modified by (re)importing any descriptor with an earlier timestamp."},
                         {RPCResult::Type::ARR, "flags", "The flags currently set on the wallet",
@@ -110,8 +118,16 @@ static RPCHelpMan getwalletinfo()
     }
     obj.pushKV("descriptors", pwallet->IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
     obj.pushKV("external_signer", pwallet->IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER));
-    if (pwallet->GetHmacBIP388()) {
-        obj.pushKV("bip388_hmac", pwallet->GetHmacBIP388()->hmac);
+    if (pwallet->IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER)) {
+        UniValue bip388_hmacs(UniValue::VARR);
+        for (const wallet::BIP388& hmac : pwallet->GetHmacs()) {
+            UniValue bip388(UniValue::VOBJ);
+            bip388.pushKV("name", hmac.name);
+            bip388.pushKV("fingerprint", hmac.fingerprint);
+            bip388.pushKV("hmac", hmac.hmac);
+            bip388_hmacs.push_back(std::move(bip388));
+        }
+        obj.pushKV("bip388", bip388_hmacs);
     }
     obj.pushKV("blank", pwallet->IsWalletFlagSet(WALLET_FLAG_BLANK_WALLET));
     if (int64_t birthtime = pwallet->GetBirthTime(); birthtime != UNKNOWN_TIME) {

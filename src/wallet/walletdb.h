@@ -269,7 +269,8 @@ public:
     bool EraseRecords(const std::unordered_set<std::string>& types);
 
     bool WriteWalletFlags(const uint64_t flags);
-    bool WriteHmacBip388(std::string policy_name, std::string hmac);
+    // Write a  BIP-388 policy hmac for the signer identified by fingerprint.
+    bool WriteHmacBip388(const std::string& policy_name, const std::string& fingerprint, const std::string& hmac);
 
     //! Begin a new transaction
     bool TxnBegin();

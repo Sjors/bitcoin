@@ -951,10 +951,13 @@ static DBErrors LoadWalletPolicyRecords(CWallet* pwallet, DatabaseBatch& batch, 
 
     LoadResult res = LoadRecords(pwallet, batch, DBKeys::BIP388_HMAC,
         [] (CWallet* pwallet, DataStream& key, DataStream& value, std::string& err) EXCLUSIVE_LOCKS_REQUIRED(pwallet->cs_wallet) {
-        std::string policy_name, hmac;
-        key >> policy_name;
+        std::pair<std::string, std::string> key_pair;
+        std::string hmac;
+        key >> key_pair;
         value >> hmac;
-        pwallet->LoadHmacBIP388(policy_name, hmac);
+        std::string policy_name = key_pair.first;
+        std::string fingerprint = key_pair.second;
+        pwallet->LoadHmacBIP388(policy_name, fingerprint, hmac);
         return DBErrors::LOAD_OK;
     });
 
@@ -1303,9 +1306,9 @@ bool WalletBatch::WriteWalletFlags(const uint64_t flags)
     return WriteIC(DBKeys::FLAGS, flags);
 }
 
-bool WalletBatch::WriteHmacBip388(std::string policy_name, std::string hmac)
+bool WalletBatch::WriteHmacBip388(const std::string& policy_name, const std::string& fingerprint, const std::string& hmac)
 {
-    return WriteIC(std::make_pair(DBKeys::BIP388_HMAC, policy_name), hmac);
+    return WriteIC(std::make_pair(DBKeys::BIP388_HMAC, std::make_pair(policy_name, fingerprint)), hmac);
 }
 
 bool WalletBatch::EraseRecords(const std::unordered_set<std::string>& types)

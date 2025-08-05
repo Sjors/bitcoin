@@ -267,7 +267,7 @@ class WalletSignerTest(BitcoinTestFramework):
         assert_equal(hmac, "0000000000000000000000000000000000000000000000000000000000000000")
 
         info = wallet.getwalletinfo()
-        assert_equal(info["bip388_hmac"], hmac)
+        assert_equal(info["bip388"][0]["hmac"], hmac)
 
         # Make sure it's persisted
         self.nodes[1].unloadwallet("hww_policy")
@@ -275,7 +275,7 @@ class WalletSignerTest(BitcoinTestFramework):
         wallet = self.nodes[1].get_wallet_rpc('hww_policy')
 
         info = wallet.getwalletinfo()
-        assert_equal(info["bip388_hmac"], hmac)
+        assert_equal(info["bip388"][0]["hmac"], hmac)
 
 
 if __name__ == '__main__':
