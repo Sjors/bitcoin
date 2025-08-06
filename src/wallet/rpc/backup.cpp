@@ -11,11 +11,13 @@
 #include <merkleblock.h>
 #include <rpc/util.h>
 #include <script/descriptor.h>
+#include <script/parsing.h>
 #include <script/script.h>
 #include <script/solver.h>
 #include <sync.h>
 #include <uint256.h>
 #include <util/bip32.h>
+#include <util/check.h>
 #include <util/fs.h>
 #include <util/time.h>
 #include <util/translation.h>
@@ -150,6 +152,7 @@ static UniValue ProcessDescriptorImport(CWallet& wallet, const UniValue& data, c
         const std::string& descriptor = data["desc"].get_str();
         const bool active = data.exists("active") ? data["active"].get_bool() : false;
         const std::string label{LabelFromValue(data["label"])};
+        const bool unsafe = data.exists("unsafe") ? data["unsafe"].get_bool() : false;
 
         // Parse descriptor string
         FlatSigningProvider keys;
@@ -158,6 +161,30 @@ static UniValue ProcessDescriptorImport(CWallet& wallet, const UniValue& data, c
         if (parsed_descs.empty()) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, error);
         }
+
+        // Additional safety checks for valid descriptors
+        size_t pos{0};
+        while (!unsafe && (pos = descriptor.find("older(", pos)) != std::string::npos) {
+            auto sp{std::span(descriptor).subspan(pos + sizeof("older(") -1)};
+            // BIP 379 allows height and time locks that have no consensus
+            // meaning in BIP 68 / BIP 112. This is used by some protocols like
+            // Lightning to encode extra data, but is unsafe when used
+            // unintentionally. E.g. older(65536) is equivalent to older(1).
+            int arg_size{script::FindNextChar(sp, ')')};
+            CHECK_NONFATAL(arg_size > 0);
+            const auto num{ToIntegral<uint32_t>(std::string_view(sp.data(), arg_size))};
+            CHECK_NONFATAL(num >= 0);
+            const bool is_time_lock{(*num & CTxIn::SEQUENCE_LOCKTIME_TYPE_FLAG) != 0};
+            if ((*num & ~CTxIn::SEQUENCE_LOCKTIME_TYPE_FLAG) > 65535) {
+                if (!is_time_lock) {
+                    throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("older(%d) > 65535 is unsafe", *num));
+                } else {
+                    throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, strprintf("older(%d - 1<<22) > 65535 is unsafe", *num));
+                }
+            }
+            pos++;
+        }
+
         std::optional<bool> internal;
         if (data.exists("internal")) {
             if (parsed_descs.size() > 1) {
@@ -258,6 +285,26 @@ static UniValue ProcessDescriptorImport(CWallet& wallet, const UniValue& data, c
                }
             }
 
+            // If this is an unused(KEY) descriptor, check that the wallet doesn't already have other descriptors with this key
+            if (!parsed_desc->HasScripts()) {
+                if (wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
+                    throw JSONRPCError(RPC_WALLET_ERROR, "Cannot import unused() to wallet without private keys enabled");
+                }
+                // Unused descriptors must contain a single key.
+                // Earlier checks will have enforced that this key is either a private key when private keys are enabled,
+                // or that this key is a public key when private keys are disabled.
+                // If we can retrieve the corresponding private key from the wallet, then this key is already in the wallet
+                // and we should not import it.
+                std::set<CPubKey> pubkeys;
+                std::set<CExtPubKey> extpubs;
+                parsed_desc->GetPubKeys(pubkeys, extpubs);
+                std::transform(extpubs.begin(), extpubs.end(), std::inserter(pubkeys, pubkeys.begin()), [](const CExtPubKey& xpub) { return xpub.pubkey; });
+                CHECK_NONFATAL(pubkeys.size() == 1);
+                if (wallet.GetKey(pubkeys.begin()->GetID())) {
+                    throw JSONRPCError(RPC_WALLET_ERROR, "Cannot import an unused() descriptor when its private key is already in the wallet");
+                }
+            }
+
             WalletDescriptor w_desc(std::move(parsed_desc), timestamp, range_start, range_end, next_index);
 
             // Add descriptor to the wallet
@@ -319,6 +366,7 @@ RPCHelpMan importdescriptors()
                                     },
                                     {"internal", RPCArg::Type::BOOL, RPCArg::Default{false}, "Whether matching outputs should be treated as not incoming payments (e.g. change)"},
                                     {"label", RPCArg::Type::STR, RPCArg::Default{""}, "Label to assign to the address, only allowed with internal=false. Disabled for ranged descriptors"},
+                                    {"unsafe", RPCArg::Type::BOOL, RPCArg::Default{false}, "Allow the import of descriptors that contain height or time locks with no consensus meaning, e.g. older(65536)"},
                                 },
                             },
                         },
@@ -490,6 +538,9 @@ RPCHelpMan listdescriptors()
     if (!wallet) return UniValue::VNULL;
 
     const bool priv = !request.params[0].isNull() && request.params[0].get_bool();
+    if (wallet->IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS) && priv) {
+        throw JSONRPCError(RPC_WALLET_ERROR, "Can't get private descriptor string for watch-only wallets");
+    }
     if (priv) {
         EnsureWalletIsUnlocked(*wallet);
     }
@@ -516,9 +567,7 @@ RPCHelpMan listdescriptors()
         LOCK(desc_spk_man->cs_desc_man);
         const auto& wallet_descriptor = desc_spk_man->GetWalletDescriptor();
         std::string descriptor;
-        if (!desc_spk_man->GetDescriptorString(descriptor, priv)) {
-            throw JSONRPCError(RPC_WALLET_ERROR, "Can't get descriptor string.");
-        }
+        CHECK_NONFATAL(desc_spk_man->GetDescriptorString(descriptor, priv));
         const bool is_range = wallet_descriptor.descriptor->IsRange();
         wallet_descriptors.push_back({
             descriptor,

@@ -108,10 +108,19 @@ struct Descriptor {
     /** Convert the descriptor back to a string, undoing parsing. */
     virtual std::string ToString(bool compat_format=false) const = 0;
 
-    /** Whether this descriptor will return one scriptPubKey or multiple (aka is or is not combo) */
+    /** Whether this descriptor will return at most one scriptPubKey or multiple (aka is or is not combo) */
     virtual bool IsSingleType() const = 0;
 
-    /** Convert the descriptor to a private string. This fails if the provided provider does not have the relevant private keys. */
+    /** Whether this descriptor contains any private key material */
+    virtual bool IsWatchOnly(const SigningProvider& provider) const = 0;
+
+    /** Convert the descriptor to a private string. This uses public keys if the relevant private keys are not in the SigningProvider.
+     *  If none of the relevant private keys are available, the output string in the "out" parameter will not contain any private key information,
+     *  and this function will return "false".
+     *  @param[in] provider The SigningProvider to query for private keys.
+     *  @param[out] out The resulting descriptor string, containing private keys if available.
+     *  @returns true if at least one private key available.
+     */
     virtual bool ToPrivateString(const SigningProvider& provider, std::string& out) const = 0;
 
     /** Convert the descriptor to a normalized string. Normalized descriptors have the xpub at the last hardened step. This fails if the provided provider does not have the private keys to derive that xpub. */
@@ -165,6 +174,9 @@ struct Descriptor {
      * @param[out] ext_pubs Any extended public keys
      */
     virtual void GetPubKeys(std::set<CPubKey>& pubkeys, std::set<CExtPubKey>& ext_pubs) const = 0;
+
+    /** Whether this descriptor produces any scripts with the Expand functions */
+    virtual bool HasScripts() const = 0;
 };
 
 /** Parse a `descriptor` string. Included private keys are put in `out`.

@@ -204,7 +204,9 @@ public:
     /** Get the descriptor string form. */
     virtual std::string ToString(StringType type=StringType::PUBLIC) const = 0;
 
-    /** Get the descriptor string form including private data (if available in arg). */
+    /** Get the descriptor string form including private data (if available in arg).
+     * If no private data is available, the string will be the same as ToString(StringType::PUBLIC).
+    */
     virtual bool ToPrivateString(const SigningProvider& arg, std::string& out) const = 0;
 
     /** Get the descriptor string form with the xpub at the last hardened derivation,
@@ -260,9 +262,9 @@ public:
     bool ToPrivateString(const SigningProvider& arg, std::string& ret) const override
     {
         std::string sub;
-        if (!m_provider->ToPrivateString(arg, sub)) return false;
+        bool has_priv_key{m_provider->ToPrivateString(arg, sub)};
         ret = "[" + OriginString(StringType::PUBLIC) + "]" + std::move(sub);
-        return true;
+        return has_priv_key;
     }
     bool ToNormalizedString(const SigningProvider& arg, std::string& ret, const DescriptorCache* cache) const override
     {
@@ -329,7 +331,10 @@ public:
     bool ToPrivateString(const SigningProvider& arg, std::string& ret) const override
     {
         std::optional<CKey> key = GetPrivKey(arg);
-        if (!key) return false;
+        if (!key) {
+            ret = ToString(StringType::PUBLIC);
+            return false;
+        }
         ret = EncodeSecret(*key);
         return true;
     }
@@ -492,7 +497,10 @@ public:
     bool ToPrivateString(const SigningProvider& arg, std::string& out) const override
     {
         CExtKey key;
-        if (!GetExtKey(arg, key)) return false;
+        if (!GetExtKey(arg, key)) {
+            out = ToString(StringType::PUBLIC);
+            return false;
+        }
         out = EncodeExtKey(key) + FormatHDKeypath(m_path, /*apostrophe=*/m_apostrophe);
         if (IsRange()) {
             out += "/*";
@@ -841,6 +849,31 @@ public:
         return true;
     }
 
+    bool IsWatchOnly(const SigningProvider& arg) const override
+    {
+        size_t privkey_count{0};
+        std::set<CPubKey> pubkeys;
+        std::set<CExtPubKey> ext_pubkeys;
+        this->GetPubKeys(pubkeys, ext_pubkeys);
+        auto output_type{this->GetOutputType()};
+        for (auto pubkey : pubkeys) {
+            CKey key;
+            if (arg.GetKey(pubkey.GetID(), key)) {
+                privkey_count += 1;
+            } else if (output_type.has_value() && *output_type == OutputType::BECH32M && arg.GetKeyByXOnly(XOnlyPubKey(pubkey), key)) {
+                privkey_count += 1;
+            }
+        }
+        for (auto extpubkey : ext_pubkeys) {
+            CKey dummy;
+            if (arg.GetKey(extpubkey.pubkey.GetID(), dummy)) {
+                privkey_count += 1;
+            }
+        }
+        size_t pubkey_count{pubkeys.size() + ext_pubkeys.size()};
+        return (privkey_count == 0 || pubkey_count > privkey_count);
+    }
+
     // NOLINTNEXTLINE(misc-no-recursion)
     bool IsRange() const final
     {
@@ -854,24 +887,27 @@ public:
     }
 
     // NOLINTNEXTLINE(misc-no-recursion)
-    virtual bool ToStringSubScriptHelper(const SigningProvider* arg, std::string& ret, const StringType type, const DescriptorCache* cache = nullptr) const
+    virtual bool ToStringSubScriptHelper(const SigningProvider* arg, std::string& ret, const StringType type, bool* has_priv_key, const DescriptorCache* cache = nullptr) const
     {
         size_t pos = 0;
         for (const auto& scriptarg : m_subdescriptor_args) {
             if (pos++) ret += ",";
             std::string tmp;
-            if (!scriptarg->ToStringHelper(arg, tmp, type, cache)) return false;
+            bool subscript_has_priv_key{false};
+            if (!scriptarg->ToStringHelper(arg, tmp, type, &subscript_has_priv_key, cache)) return false;
+            *has_priv_key = *has_priv_key || subscript_has_priv_key;
             ret += tmp;
         }
         return true;
     }
 
     // NOLINTNEXTLINE(misc-no-recursion)
-    virtual bool ToStringHelper(const SigningProvider* arg, std::string& out, const StringType type, const DescriptorCache* cache = nullptr) const
+    virtual bool ToStringHelper(const SigningProvider* arg, std::string& out, const StringType type, bool* has_priv_key = nullptr, const DescriptorCache* cache = nullptr) const
     {
         std::string extra = ToStringExtra();
         size_t pos = extra.size() > 0 ? 1 : 0;
         std::string ret = m_name + "(" + extra;
+
         for (const auto& pubkey : m_pubkey_args) {
             if (pos++) ret += ",";
             std::string tmp;
@@ -880,7 +916,8 @@ public:
                     if (!pubkey->ToNormalizedString(*arg, tmp, cache)) return false;
                     break;
                 case StringType::PRIVATE:
-                    if (!pubkey->ToPrivateString(*arg, tmp)) return false;
+                    assert(has_priv_key != nullptr);
+                    *has_priv_key = pubkey->ToPrivateString(*arg, tmp) || *has_priv_key;
                     break;
                 case StringType::PUBLIC:
                     tmp = pubkey->ToString();
@@ -892,7 +929,9 @@ public:
             ret += tmp;
         }
         std::string subscript;
-        if (!ToStringSubScriptHelper(arg, subscript, type, cache)) return false;
+        bool subscript_has_priv_key{false};
+        if (!ToStringSubScriptHelper(arg, subscript, type, &subscript_has_priv_key, cache)) return false;
+        if (has_priv_key != nullptr) *has_priv_key = *has_priv_key || subscript_has_priv_key;
         if (pos && subscript.size()) ret += ',';
         out = std::move(ret) + std::move(subscript) + ")";
         return true;
@@ -907,14 +946,17 @@ public:
 
     bool ToPrivateString(const SigningProvider& arg, std::string& out) const override
     {
-        bool ret = ToStringHelper(&arg, out, StringType::PRIVATE);
+        bool has_priv_key{false};
+        // ToStringHelper should never fail for StringType::PRIVATE,
+        // because it falls back to StringType::PUBLIC when no private key is available.
+        assert(ToStringHelper(&arg, out, StringType::PRIVATE, &has_priv_key));
         out = AddChecksum(out);
-        return ret;
+        return has_priv_key;
     }
 
     bool ToNormalizedString(const SigningProvider& arg, std::string& out, const DescriptorCache* cache) const override final
     {
-        bool ret = ToStringHelper(&arg, out, StringType::NORMALIZED, cache);
+        bool ret = ToStringHelper(&arg, out, StringType::NORMALIZED, nullptr, cache);
         out = AddChecksum(out);
         return ret;
     }
@@ -996,6 +1038,8 @@ public:
     }
 
     virtual std::unique_ptr<DescriptorImpl> Clone() const = 0;
+
+    bool HasScripts() const override { return true; }
 };
 
 /** A parsed addr(A) descriptor. */
@@ -1388,10 +1432,11 @@ protected:
         out.tr_trees[output] = builder;
         return Vector(GetScriptForDestination(output));
     }
-    bool ToStringSubScriptHelper(const SigningProvider* arg, std::string& ret, const StringType type, const DescriptorCache* cache = nullptr) const override
+    bool ToStringSubScriptHelper(const SigningProvider* arg, std::string& ret, const StringType type, bool* has_priv_key, const DescriptorCache* cache = nullptr) const override
     {
         if (m_depths.empty()) return true;
         std::vector<bool> path;
+
         for (size_t pos = 0; pos < m_depths.size(); ++pos) {
             if (pos) ret += ',';
             while ((int)path.size() <= m_depths[pos]) {
@@ -1399,7 +1444,9 @@ protected:
                 path.push_back(false);
             }
             std::string tmp;
-            if (!m_subdescriptor_args[pos]->ToStringHelper(arg, tmp, type, cache)) return false;
+            bool subscript_has_priv_key{false};
+            if (!m_subdescriptor_args[pos]->ToStringHelper(arg, tmp, type, &subscript_has_priv_key, cache)) return false;
+            if (has_priv_key != nullptr) *has_priv_key = *has_priv_key || subscript_has_priv_key;
             ret += tmp;
             while (!path.empty() && path.back()) {
                 if (path.size() > 1) ret += '}';
@@ -1496,11 +1543,12 @@ public:
     StringMaker(const SigningProvider* arg LIFETIMEBOUND, const std::vector<std::unique_ptr<PubkeyProvider>>& pubkeys LIFETIMEBOUND, bool priv)
         : m_arg(arg), m_pubkeys(pubkeys), m_private(priv) {}
 
-    std::optional<std::string> ToString(uint32_t key) const
+    std::string ToString(uint32_t key, bool* has_priv_key = nullptr) const
     {
         std::string ret;
         if (m_private) {
-            if (!m_pubkeys[key]->ToPrivateString(*m_arg, ret)) return {};
+            assert(has_priv_key != nullptr);
+            *has_priv_key = m_pubkeys[key]->ToPrivateString(*m_arg, ret);
         } else {
             ret = m_pubkeys[key]->ToString();
         }
@@ -1533,13 +1581,10 @@ public:
         : DescriptorImpl(std::move(providers), "?"), m_node(std::move(node)) {}
 
     bool ToStringHelper(const SigningProvider* arg, std::string& out, const StringType type,
-                        const DescriptorCache* cache = nullptr) const override
+                        bool* has_priv_key, const DescriptorCache* cache = nullptr) const override
     {
-        if (const auto res = m_node->ToString(StringMaker(arg, m_pubkey_args, type == StringType::PRIVATE))) {
-            out = *res;
-            return true;
-        }
-        return false;
+        out = m_node->ToString(StringMaker(arg, m_pubkey_args, type == StringType::PRIVATE), has_priv_key);
+        return true;
     }
 
     bool IsSolvable() const override { return true; }
@@ -1602,6 +1647,23 @@ public:
     }
 };
 
+/** A parsed unused(KEY) descriptor */
+class UnusedDescriptor final : public DescriptorImpl
+{
+protected:
+    std::vector<CScript> MakeScripts(const std::vector<CPubKey>& keys, std::span<const CScript> scripts, FlatSigningProvider& out) const override { return {}; }
+public:
+    UnusedDescriptor(std::unique_ptr<PubkeyProvider> prov) : DescriptorImpl(Vector(std::move(prov)), "unused") {}
+    bool IsSingleType() const final { return true; }
+    bool HasScripts() const override { return false; }
+
+    std::unique_ptr<DescriptorImpl> Clone() const override
+    {
+        return std::make_unique<RawTRDescriptor>(m_pubkey_args.at(0)->Clone());
+    }
+};
+
+
 ////////////////////////////////////////////////////////////////////////////
 // Parser                                                                 //
 ////////////////////////////////////////////////////////////////////////////
@@ -1647,6 +1709,7 @@ std::optional<uint32_t> ParseKeyPathNum(std::span<const char> elem, bool& apostr
  * @param[out] apostrophe only updated if hardened derivation is found
  * @param[out] error parsing error message
  * @param[in] allow_multipath Allows the parsed path to use the multipath specifier
+ * @param[out] has_hardened Records whether the path contains any hardened derivation
  * @returns false if parsing failed
  **/
 [[nodiscard]] bool ParseKeyPath(const std::vector<std::span<const char>>& split, std::vector<KeyPath>& out, bool& apostrophe, std::string& error, bool allow_multipath, bool& has_hardened)
@@ -1843,20 +1906,20 @@ std::vector<std::unique_ptr<PubkeyProvider>> ParsePubkey(uint32_t& key_exp_index
         bool any_ranged = false;
         bool all_bip32 = true;
         std::vector<std::vector<std::unique_ptr<PubkeyProvider>>> providers;
-        bool any_key_parsed = true;
+        bool any_key_parsed = false;
         size_t max_multipath_len = 0;
         while (expr.size()) {
-            if (!any_key_parsed && !Const(",", expr)) {
+            if (any_key_parsed && !Const(",", expr)) {
                 error = strprintf("musig(): expected ',', got '%c'", expr[0]);
                 return {};
             }
-            any_key_parsed = false;
             auto arg = Expr(expr);
             auto pk = ParsePubkey(key_exp_index, arg, ParseScriptContext::MUSIG, out, error);
             if (pk.empty()) {
                 error = strprintf("musig(): %s", error);
                 return {};
             }
+            any_key_parsed = true;
 
             any_ranged = any_ranged || pk.at(0)->IsRange();
             all_bip32 = all_bip32 &&  pk.at(0)->IsBIP32();
@@ -1866,7 +1929,7 @@ std::vector<std::unique_ptr<PubkeyProvider>> ParsePubkey(uint32_t& key_exp_index
             providers.emplace_back(std::move(pk));
             key_exp_index++;
         }
-        if (any_key_parsed) {
+        if (!any_key_parsed) {
             error = "musig(): Must contain key expressions";
             return {};
         }
@@ -2076,7 +2139,7 @@ struct KeyParser {
         return key;
     }
 
-    std::optional<std::string> ToString(const Key& key) const
+    std::string ToString(const Key& key, bool* has_priv_key = nullptr) const
     {
         return m_keys.at(key).at(0)->ToString();
     }
@@ -2442,6 +2505,27 @@ std::vector<std::unique_ptr<DescriptorImpl>> ParseScript(uint32_t& key_exp_index
         error = "Can only have rawtr at top level";
         return {};
     }
+    if (ctx == ParseScriptContext::TOP && Func("unused", expr)) {
+        // Check for only one expression, should not find commas, brackets, or parentheses
+        auto arg = Expr(expr);
+        if (expr.size()) {
+            error = strprintf("unused(): only one key expected");
+            return {};
+        }
+        auto keys = ParsePubkey(key_exp_index, arg, ctx, out, error);
+        if (keys.empty()) return {};
+        for (auto& pubkey : keys) {
+            if (pubkey->IsRange()) {
+                error = "unused(): key cannot be ranged";
+                return {};
+            }
+            ret.emplace_back(std::make_unique<UnusedDescriptor>(std::move(pubkey)));
+        }
+        return ret;
+    } else if (Func("unused", expr)) {
+        error = "Can only have unused at top level";
+        return {};
+    }
     if (ctx == ParseScriptContext::TOP && Func("raw", expr)) {
         std::string str(expr.begin(), expr.end());
         if (!IsHex(str)) {
@@ -2473,7 +2557,7 @@ std::vector<std::unique_ptr<DescriptorImpl>> ParseScript(uint32_t& key_exp_index
                 // Try to find the first insane sub for better error reporting.
                 auto insane_node = node.get();
                 if (const auto sub = node->FindInsaneSub()) insane_node = sub;
-                if (const auto str = insane_node->ToString(parser)) error = *str;
+                error = insane_node->ToString(parser);
                 if (!insane_node->IsValid()) {
                     error += " is invalid";
                 } else if (!node->IsSane()) {
