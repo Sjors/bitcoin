@@ -732,6 +732,7 @@ static RPCHelpMan getsilentpaymentblockdata()
                 {
                     {"block_hash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The block hash"},
                     {"dust", RPCArg::Type::AMOUNT, RPCArg::Default{CAmount(0)}, strprintf("Dust threshold in satoshi (max %d): all outputs must be greater or equal. This filter has limited precision.", BIP352Index::max_dust_threshold)},
+                    {"filter_spent", RPCArg::Type::BOOL, RPCArg::Default{false}, "Enable filtering spent transactions to reduce redundant tweak data. Requires -bip352ctindex"},
                 },
                 {
                     RPCResult{
@@ -744,15 +745,12 @@ static RPCHelpMan getsilentpaymentblockdata()
                 },
                 RPCExamples{
                     HelpExampleCli("getsilentpaymentblockdata", "\"00000000000000000002cbdf64ae445b53b545ba1e960f9e83787130d1530484\"")
+            + HelpExampleCli("getsilentpaymentblockdata", "\"00000000000000000002cbdf64ae445b53b545ba1e960f9e83787130d1530484\" 546 true")
             + HelpExampleRpc("getsilentpaymentblockdata", "\"00000000000000000002cbdf64ae445b53b545ba1e960f9e83787130d1530484\"")
+            + HelpExampleRpc("getsilentpaymentblockdata", "\"00000000000000000002cbdf64ae445b53b545ba1e960f9e83787130d1530484\", 0, false")
                 },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
 {
-    // TODO: add cut-through argument, check which index to use here
-    if (!g_bip352_index) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "Requires bip352index");
-    }
-
     uint256 block_hash(ParseHashV(request.params[0], "block_hash"));
     {
         ChainstateManager& chainman = EnsureAnyChainman(request.context);
@@ -772,13 +770,26 @@ static RPCHelpMan getsilentpaymentblockdata()
         }
     }
 
-    BIP352Index::tweak_index_entry tweak_index_entry;
-    if (!g_bip352_index->FindSilentPayment(block_hash, tweak_index_entry)) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "Block has not been indexed yet");
+    bool filter_spent = false;
+    if (!request.params[2].isNull()) {
+        filter_spent = request.params[2].get_bool();
     }
 
     UniValue ret(UniValue::VOBJ);
     UniValue tweaks_res(UniValue::VARR);
+
+    BIP352Index::tweak_index_entry tweak_index_entry;
+    if (filter_spent && g_bip352_ct_index) {
+        if (!g_bip352_ct_index->FindSilentPayment(block_hash, tweak_index_entry)) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Block has not been indexed yet");
+        }
+    } else if (!filter_spent && g_bip352_index) {
+        if (!g_bip352_index->FindSilentPayment(block_hash, tweak_index_entry)) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Block has not been indexed yet");
+        }
+    } else {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Requires -bip352index and -bip352ctindex if spent tx filtering is needed");
+    }
 
     for (const auto& entry : tweak_index_entry) {
         if ((CAmount(entry.second) << BIP352Index::dust_shift) >= dust_threshold) {

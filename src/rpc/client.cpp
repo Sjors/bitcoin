@@ -310,7 +310,8 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "stop", 0, "wait" },
     { "addnode", 2, "v2transport" },
     { "addconnection", 2, "v2transport" },
-    { "getsilentpaymentblockdata", 1, "dust"},
+    { "getsilentpaymentblockdata", 1, "dust" },
+    { "getsilentpaymentblockdata", 2, "filter_spent" },
 };
 // clang-format on
 
