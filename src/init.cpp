@@ -971,7 +971,7 @@ bool AppInitParameterInteraction(const ArgsManager& args)
             return InitError(_("Prune mode is incompatible with -txindex."));
         if (args.GetBoolArg("-bip352index", DEFAULT_BIP352_INDEX))
             return InitError(_("Prune mode is incompatible with -bip352index."));
-        if (args.GetBoolArg("-bip352index", DEFAULT_BIP352_CT_INDEX))
+        if (args.GetBoolArg("-bip352ctindex", DEFAULT_BIP352_CT_INDEX))
             return InitError(_("Prune mode is incompatible with -bip352ctindex."));
         if (args.GetBoolArg("-reindex-chainstate", false)) {
             return InitError(_("Prune mode is incompatible with -reindex-chainstate. Use full -reindex instead."));
