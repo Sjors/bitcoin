@@ -22,6 +22,7 @@ Bitcoin Core requires one of the following compilers.
 | [Boost](../depends/packages/boost.mk) | [link](https://www.boost.org/users/download/) | [1.73.0](https://github.com/bitcoin/bitcoin/pull/29066) |
 | CMake | [link](https://cmake.org/) | [3.22](https://github.com/bitcoin/bitcoin/pull/30454) |
 | [libevent](../depends/packages/libevent.mk) | [link](https://github.com/libevent/libevent/releases) | [2.1.8](https://github.com/bitcoin/bitcoin/pull/24681) |
+[Cap'n Proto](../depends/packages/capnp.mk) | [link](https://capnproto.org) | [1.0.1](https://capnproto.org/install.html) | 1.2.0 | Yes |
 
 ### Runtime
 
