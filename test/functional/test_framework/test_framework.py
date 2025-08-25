@@ -165,7 +165,6 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
         self.noban_tx_relay: bool = False
         self.nodes: list[TestNode] = []
         self.extra_args = None
-        self.extra_init = None
         self.network_thread = None
         self.rpc_timeout = 60  # Wait for up to 60 seconds for the RPC server to respond
         self.supports_cli = True
@@ -562,8 +561,6 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
 
             bin_dirs.append(bin_dir)
 
-        extra_init = [{}] * num_nodes if self.extra_init is None else self.extra_init
-        assert_equal(len(extra_init), num_nodes)
         assert_equal(len(extra_confs), num_nodes)
         assert_equal(len(extra_args), num_nodes)
         assert_equal(len(versions), num_nodes)
@@ -587,7 +584,6 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
                 v2transport=self.options.v2transport,
                 uses_wallet=self.uses_wallet,
             )
-            init.update(extra_init[i])
             test_node_i = TestNode(
                 i,
                 get_datadir_path(self.options.tmpdir, i),
