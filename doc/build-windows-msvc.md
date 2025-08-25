@@ -42,8 +42,6 @@ Available presets can be listed as follows:
 cmake --list-presets
 ```
 
-By default, all presets set `BUILD_GUI` to `ON`.
-
 ## Building
 
 CMake will put the resulting object files, libraries, and executables into a dedicated build directory.
@@ -62,7 +60,7 @@ cmake --install build --config Release         # Optional.
 ### 5. Building with Dynamic Linking without GUI
 
 ```
-cmake -B build --preset vs2022 -DBUILD_GUI=OFF # It might take a while if the vcpkg binary cache is unpopulated or invalidated.
+cmake -B build --preset vs2022   # It might take a while if the vcpkg binary cache is unpopulated or invalidated.
 cmake --build build --config Release           # Append "-j N" for N parallel jobs.
 ctest --test-dir build --build-config Release  # Append "-j N" for N parallel tests. Some tests are disabled if Python 3 is not available.
 ```
@@ -71,8 +69,7 @@ ctest --test-dir build --build-config Release  # Append "-j N" for N parallel te
 
 vcpkg installation during the configuration step might fail for various reasons unrelated to Bitcoin Core.
 
-If the failure is due to a "Buildtrees path … is too long" error, which is often encountered when building
-with `BUILD_GUI=ON` and using the default vcpkg installation provided by Visual Studio, you can
+If the failure is due to a "Buildtrees path … is too long" error, which may be encountered when using the default vcpkg installation provided by Visual Studio, you can
 specify a shorter path to store intermediate build files by using
 the [`--x-buildtrees-root`](https://learn.microsoft.com/en-us/vcpkg/commands/common-options#buildtrees-root) option:
 
@@ -95,7 +92,7 @@ cmake -B build --preset vs2022-static -DVCPKG_INSTALLED_DIR="C:\path_without_spa
 One can skip vcpkg manifest default features to speedup the configuration step.
 For example, the following invocation will skip all features except for "wallet" and "tests" and their dependencies:
 ```
-cmake -B build --preset vs2022 -DVCPKG_MANIFEST_NO_DEFAULT_FEATURES=ON -DVCPKG_MANIFEST_FEATURES="wallet;tests" -DBUILD_GUI=OFF
+cmake -B build --preset vs2022 -DVCPKG_MANIFEST_NO_DEFAULT_FEATURES=ON -DVCPKG_MANIFEST_FEATURES="wallet;tests"
 ```
 
 Available features are listed in the [`vcpkg.json`](/vcpkg.json) file.

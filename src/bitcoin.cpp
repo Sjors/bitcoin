@@ -20,13 +20,12 @@ const TranslateFn G_TRANSLATION_FUN{nullptr};
 static constexpr auto HELP_USAGE = R"(Usage: %s [OPTIONS] COMMAND...
 
 Options:
-  -m, --multiprocess     Run multiprocess binaries bitcoin-node, bitcoin-gui.
+  -m, --multiprocess     Run multiprocess binaries bitcoin-node.
   -M, --monolithic       Run monolithic binaries bitcoind, bitcoin-qt. (Default behavior)
   -v, --version          Show version information
   -h, --help             Show full help message
 
 Commands:
-  gui [ARGS]     Start GUI, equivalent to running 'bitcoin-qt [ARGS]' or 'bitcoin-gui [ARGS]'.
   node [ARGS]    Start node, equivalent to running 'bitcoind [ARGS]' or 'bitcoin-node [ARGS]'.
   rpc [ARGS]     Call RPC method, equivalent to running 'bitcoin-cli -named [ARGS]'.
   wallet [ARGS]  Call wallet command, equivalent to running 'bitcoin-wallet [ARGS]'.
@@ -40,7 +39,6 @@ Additional less commonly used commands:
   chainstate [ARGS] Run bitcoin kernel chainstate util, equivalent to running 'bitcoin-chainstate [ARGS]'.
   mine [ARGS]       Run client for IPC mining interface, equivalent to running 'bitcoin-mine [ARGS]'.
   test [ARGS]       Run unit tests, equivalent to running 'test_bitcoin [ARGS]'.
-  test-gui [ARGS]   Run GUI unit tests, equivalent to running 'test_bitcoin-qt [ARGS]'.
 )";
 
 static constexpr auto HELP_SHORT = R"(
@@ -78,8 +76,6 @@ int main(int argc, char* argv[])
                 tfm::format(std::cout, HELP_SHORT, exe_name);
                 return EXIT_FAILURE;
             }
-        } else if (cmd.command == "gui") {
-            args.emplace_back(cmd.use_multiprocess ? "bitcoin-gui" : "bitcoin-qt");
         } else if (cmd.command == "node") {
             args.emplace_back(cmd.use_multiprocess ? "bitcoin-node" : "bitcoind");
         } else if (cmd.command == "rpc") {
@@ -103,8 +99,6 @@ int main(int argc, char* argv[])
             args.emplace_back("bitcoin-mine");
         } else if (cmd.command == "test") {
             args.emplace_back("test_bitcoin");
-        } else if (cmd.command == "test-gui") {
-            args.emplace_back("test_bitcoin-qt");
         } else if (cmd.command == "util") {
             args.emplace_back("bitcoin-util");
         } else {

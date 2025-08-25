@@ -474,15 +474,11 @@ fn get_pathspecs_exclude_whitespace() -> Vec<String> {
         [
             // Permanent excludes
             "*.patch",
-            "src/qt/locale",
             "contrib/windeploy/win-codesign.cert",
             "doc/README_windows.txt",
             // Temporary excludes, or existing violations
             "contrib/init/bitcoind.openrc",
-            "contrib/macdeploy/macdeployqtplus",
             "src/crypto/sha256_sse4.cpp",
-            "src/qt/res/src/*.svg",
-            "contrib/qos/tc.sh",
             "contrib/verify-commits/gpg.sh",
             "src/univalue/include/univalue_escapes.h",
             "src/univalue/test/object.cpp",

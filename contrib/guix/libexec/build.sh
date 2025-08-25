@@ -73,15 +73,6 @@ unset OBJCPLUS_INCLUDE_PATH
 build_CC="${NATIVE_GCC}/bin/gcc -isystem ${NATIVE_GCC}/include"
 build_CXX="${NATIVE_GCC}/bin/g++ -isystem ${NATIVE_GCC}/include/c++ -isystem ${NATIVE_GCC}/include"
 
-case "$HOST" in
-    *darwin*) export LIBRARY_PATH="${NATIVE_GCC}/lib" ;; # Required for qt/qmake
-    *mingw*) export LIBRARY_PATH="${NATIVE_GCC}/lib" ;;
-    *)
-        NATIVE_GCC_STATIC="$(store_path gcc-toolchain static)"
-        export LIBRARY_PATH="${NATIVE_GCC}/lib:${NATIVE_GCC_STATIC}/lib"
-        ;;
-esac
-
 # Set environment variables to point the CROSS toolchain to the right
 # includes/libs for $HOST
 case "$HOST" in
@@ -179,16 +170,9 @@ make -C depends --jobs="$JOBS" HOST="$HOST" \
                                    x86_64_linux_RANLIB=x86_64-linux-gnu-gcc-ranlib \
                                    x86_64_linux_NM=x86_64-linux-gnu-gcc-nm \
                                    x86_64_linux_STRIP=x86_64-linux-gnu-strip \
-                                   NO_QT=1 \
                                    NO_WALLET=1 \
                                    NO_ZMQ=1
 
-case "$HOST" in
-    *darwin*)
-        # Unset now that Qt is built
-        unset LIBRARY_PATH
-        ;;
-esac
 
 ###########################
 # Source Tarball Building #
@@ -211,7 +195,7 @@ mkdir -p "$OUTDIR"
 # TODO: once bitcoin-node with Mining interface is in a release:
 # -DBUILD_CLI=OFF
 # -DBUILD_DAEMON=OFF
-CONFIGFLAGS="-DBUILD_UTIL=OFF -DBUILD_TX=OFF -DENABLE_WALLET=OFF -DENABLE_EXTERNAL_SIGNER=OFF -DWITH_USDT=OFF -DWITH_ZMQ=OFF -DREDUCE_EXPORTS=ON -DBUILD_BENCH=OFF -DBUILD_GUI_TESTS=OFF -DBUILD_FUZZ_BINARY=OFF"
+CONFIGFLAGS="-DBUILD_UTIL=OFF -DBUILD_TX=OFF -DENABLE_WALLET=OFF -DENABLE_EXTERNAL_SIGNER=OFF -DWITH_USDT=OFF -DWITH_ZMQ=OFF -DREDUCE_EXPORTS=ON -DBUILD_BENCH=OFF -DBUILD_FUZZ_BINARY=OFF"
 
 # CFLAGS
 HOST_CFLAGS="-O2 -g"

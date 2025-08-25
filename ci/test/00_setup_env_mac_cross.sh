@@ -15,5 +15,5 @@ export PACKAGES="clang lld llvm zip"
 export XCODE_VERSION=15.0
 export XCODE_BUILD_ID=15A240d
 export RUN_UNIT_TESTS=false
-export GOAL="deploy"
+export GOAL="install"
 export BITCOIN_CONFIG="-DREDUCE_EXPORTS=ON"

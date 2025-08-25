@@ -125,7 +125,7 @@ task:
     FILE_ENV: "./ci/test/00_setup_env_arm.sh"
 
 task:
-  name: 'CentOS, depends, gui'
+  name: 'CentOS, depends'
   << : *GLOBAL_TASK_TEMPLATE
   persistent_worker:
     labels:
@@ -143,7 +143,7 @@ task:
     FILE_ENV: "./ci/test/00_setup_env_native_previous_releases.sh"
 
 task:
-  name: 'TSan, depends, no gui'
+  name: 'TSan, depends'
   << : *GLOBAL_TASK_TEMPLATE
   persistent_worker:
     labels:
@@ -190,7 +190,7 @@ task:
     FILE_ENV: "./ci/test/00_setup_env_native_nowallet_libbitcoinkernel.sh"
 
 task:
-  name: 'macOS-cross, gui, no tests'
+  name: 'macOS-cross, no tests'
   << : *GLOBAL_TASK_TEMPLATE
   persistent_worker:
     labels:
