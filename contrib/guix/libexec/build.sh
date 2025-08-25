@@ -178,7 +178,10 @@ make -C depends --jobs="$JOBS" HOST="$HOST" \
                                    x86_64_linux_AR=x86_64-linux-gnu-gcc-ar \
                                    x86_64_linux_RANLIB=x86_64-linux-gnu-gcc-ranlib \
                                    x86_64_linux_NM=x86_64-linux-gnu-gcc-nm \
-                                   x86_64_linux_STRIP=x86_64-linux-gnu-strip
+                                   x86_64_linux_STRIP=x86_64-linux-gnu-strip \
+                                   NO_QT=1 \
+                                   NO_WALLET=1 \
+                                   NO_ZMQ=1
 
 case "$HOST" in
     *darwin*)
@@ -205,8 +208,10 @@ mkdir -p "$OUTDIR"
 # Binary Tarball Building #
 ###########################
 
-# CONFIGFLAGS
-CONFIGFLAGS="-DREDUCE_EXPORTS=ON -DBUILD_BENCH=OFF -DBUILD_GUI_TESTS=OFF -DBUILD_FUZZ_BINARY=OFF"
+# TODO: once bitcoin-node with Mining interface is in a release:
+# -DBUILD_CLI=OFF
+# -DBUILD_DAEMON=OFF
+CONFIGFLAGS="-DBUILD_UTIL=OFF -DBUILD_TX=OFF -DENABLE_WALLET=OFF -DENABLE_EXTERNAL_SIGNER=OFF -DWITH_USDT=OFF -DWITH_ZMQ=OFF -DREDUCE_EXPORTS=ON -DBUILD_BENCH=OFF -DBUILD_GUI_TESTS=OFF -DBUILD_FUZZ_BINARY=OFF"
 
 # CFLAGS
 HOST_CFLAGS="-O2 -g"
@@ -368,22 +373,7 @@ mkdir -p "$DISTSRC"
             )
             ;;
         *darwin*)
-            cmake --build build --target deploy ${V:+--verbose}
-            mv build/dist/Bitcoin-Core.zip "${OUTDIR}/${DISTNAME}-${HOST}-unsigned.zip"
-            mkdir -p "unsigned-app-${HOST}"
-            cp  --target-directory="unsigned-app-${HOST}" \
-                contrib/macdeploy/detached-sig-create.sh
-            mv --target-directory="unsigned-app-${HOST}" build/dist
-            cp -r --target-directory="unsigned-app-${HOST}" "${INSTALLPATH}"
-            (
-                cd "unsigned-app-${HOST}"
-                find . -print0 \
-                    | sort --zero-terminated \
-                    | tar --create --no-recursion --mode='u+rw,go+r-w,a+X' --null --files-from=- \
-                    | gzip -9n > "${OUTDIR}/${DISTNAME}-${HOST}-codesigning.tar.gz" \
-                    || ( rm -f "${OUTDIR}/${DISTNAME}-${HOST}-codesigning.tar.gz" && exit 1 )
-            )
-            ;;
+            # Don't create desktop zip
     esac
 )  # $DISTSRC
 

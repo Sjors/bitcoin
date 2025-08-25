@@ -18,8 +18,10 @@ export RUN_FUZZ_TESTS=false
 export RUN_CHECK_DEPS=true
 export RUN_TIDY=true
 export GOAL="install"
+# Wallet support is kept, because check-deps assumes it
 export BITCOIN_CONFIG="\
- -DWITH_ZMQ=ON -DBUILD_GUI=ON -DBUILD_BENCH=ON -DWITH_USDT=ON \
+ -DBUILD_BENCH=ON \
+ -DWITH_USDT=ON \
  -DCMAKE_C_COMPILER=clang-${TIDY_LLVM_V} \
  -DCMAKE_CXX_COMPILER=clang++-${TIDY_LLVM_V} \
  -DCMAKE_C_FLAGS_RELWITHDEBINFO='-O0 -g0' \
