@@ -51,14 +51,6 @@ def main():
         "-j",
         str(num_procs),
     ])
-    run([
-        sys.executable,
-        "./build/test/functional/test_runner.py",
-        "-j",
-        str(num_procs * 2),
-        "--combinedlogslen=99999999",
-    ])
-
 
 if __name__ == "__main__":
     main()

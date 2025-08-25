@@ -51,11 +51,6 @@ submit new unit tests for old code. Unit tests can be compiled and run
 (assuming they weren't disabled during the generation of the build system) with: `ctest`. Further details on running
 and extending unit tests can be found in [/src/test/README.md](/src/test/README.md).
 
-There are also [regression and integration tests](/test), written
-in Python.
-These tests can be run (if the [test dependencies](/test) are installed) with: `build/test/functional/test_runner.py`
-(assuming `build` is your build directory).
-
 The CI (Continuous Integration) systems make sure that every pull request is tested on Windows, Linux, and macOS.
 The CI must pass on all commits before merge to avoid unrelated CI failures on new pull requests.
 

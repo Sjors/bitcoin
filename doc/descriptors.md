@@ -159,9 +159,6 @@ are lexicographically ordered as described in BIP67.
 
 #### Basic multisig example
 
-For a good example of a basic M-of-N multisig between multiple participants using descriptor
-wallets and PSBTs, as well as a signing flow, see [this functional test](/test/functional/wallet_multisig_descriptor_psbt.py).
-
 Disclaimers: It is important to note that this example serves as a quick-start and is kept basic for readability. A downside of the approach
 outlined here is that each participant must maintain (and backup) two separate wallets: a signer and the corresponding multisig.
 It should also be noted that privacy best-practices are not "by default" here - participants should take care to only use the signer to sign
@@ -194,17 +191,7 @@ You may prefer a daisy chained signing flow where each participant signs the PSB
 the PSBT has been signed `M` times and is "complete." For the most part, the steps above remain the same, except (6, 7)
 change slightly from signing the original PSBT in parallel to signing it in series. `combinepsbt` is not necessary with
 this signing flow and the last (`m`th) signer can just broadcast the PSBT after signing. Note that a parallel signing flow may be
-preferable in cases where there are more signers. This signing flow is also included in the test / Python example.
-[The test](/test/functional/wallet_multisig_descriptor_psbt.py) is meant to be documentation as much as it is a functional test, so
-it is kept as simple and readable as possible.
-
-#### Basic Miniscript-enabled "decaying" multisig example
-
-For an example of a multisig that starts as 4-of-4 and "decays" to 3-of-4, 2-of-4, and finally 1-of-4 at each future halvening block height, see [this functional test](/test/functional/wallet_miniscript_decaying_multisig_descriptor_psbt.py).
-
-This has the same "architecture" and signing flow as the above [Basic multisig example](#basic-multisig-example). The basic steps are identical aside from the descriptor that defines this wallet, which is of the form: `wsh(thresh(4,pk(XPUB1),s:pk(XPUB2),s:pk(XPUB3),s:pk(XPUB4),sln:after(t1),sln:after(t2),sln:after(t3)))`.
-
-[The test](/test/functional/wallet_miniscript_decaying_multisig_descriptor_psbt.py) is meant to be documentation as much as it is a functional test, so it is kept as simple and readable as possible.
+preferable in cases where there are more signers.
 
 ### BIP32 derived keys and chains
 

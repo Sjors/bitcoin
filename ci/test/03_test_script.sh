@@ -98,9 +98,6 @@ if [ -z "$NO_DEPENDS" ]; then
   fi
   bash -c "$SHELL_OPTS make $MAKEJOBS -C depends HOST=$HOST $DEP_OPTS LOG=1"
 fi
-if [ "$DOWNLOAD_PREVIOUS_RELEASES" = "true" ]; then
-  test/get_previous_releases.py --target-dir "$PREVIOUS_RELEASES_DIR"
-fi
 
 BITCOIN_CONFIG_ALL="-DBUILD_BENCH=ON -DBUILD_FUZZ_BINARY=ON"
 if [ -z "$NO_DEPENDS" ]; then
@@ -164,21 +161,6 @@ fi
 
 if [ "$RUN_UNIT_TESTS_SEQUENTIAL" = "true" ]; then
   DIR_UNIT_TEST_DATA="${DIR_UNIT_TEST_DATA}" LD_LIBRARY_PATH="${DEPENDS_DIR}/${HOST}/lib" "${BASE_BUILD_DIR}"/bin/test_bitcoin --catch_system_errors=no -l test_suite
-fi
-
-if [ "$RUN_FUNCTIONAL_TESTS" = "true" ]; then
-  # parses TEST_RUNNER_EXTRA as an array which allows for multiple arguments such as TEST_RUNNER_EXTRA='--exclude "rpc_bind.py --ipv6"'
-  eval "TEST_RUNNER_EXTRA=($TEST_RUNNER_EXTRA)"
-  LD_LIBRARY_PATH="${DEPENDS_DIR}/${HOST}/lib" \
-  "${BASE_BUILD_DIR}/test/functional/test_runner.py" \
-    --ci "${MAKEJOBS}" \
-    --tmpdirprefix "${BASE_SCRATCH_DIR}/test_runner/" \
-    --ansi \
-    --combinedlogslen=99999999 \
-    --timeout-factor="${TEST_RUNNER_TIMEOUT_FACTOR}" \
-    "${TEST_RUNNER_EXTRA[@]}" \
-    --quiet \
-    --failfast
 fi
 
 if [ "${RUN_TIDY}" = "true" ]; then

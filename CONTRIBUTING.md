@@ -307,7 +307,7 @@ In general, all pull requests must:
     the project (for example refactoring for modularisation);
   - Be well peer-reviewed;
   - Have unit tests, functional tests, and fuzz tests, where appropriate;
-  - Follow code style guidelines ([C++](doc/developer-notes.md), [functional tests](test/functional/README.md));
+  - Follow code style guidelines ([C++](doc/developer-notes.md));
   - Not break the existing test suite;
   - Where bugs are fixed, where possible, there should be unit tests
     demonstrating the bug and also proving the fix. This helps prevent regression.

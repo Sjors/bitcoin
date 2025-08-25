@@ -184,10 +184,6 @@ To run clang-tidy on the changed source lines:
 git diff | ( cd ./src/ && clang-tidy-diff -p2 -path ../build -j $(nproc) )
 ```
 
-## Coding Style (Python)
-
-Refer to [/test/functional/README.md#style-guidelines](/test/functional/README.md#style-guidelines).
-
 ## Coding Style (Doxygen-compatible comments)
 
 Bitcoin Core uses [Doxygen](https://www.doxygen.nl/) to generate its official documentation.
@@ -356,8 +352,7 @@ you can run with either the `-signet` or the `-testnet4` config option to test
 with "play bitcoins" on a test network.
 
 If you are testing something that can run on one machine, run with the
-`-regtest` option.  In regression test mode, blocks can be created on demand;
-see [test/functional/](/test/functional) for tests that run in `-regtest` mode.
+`-regtest` option.
 
 ### DEBUG_LOCKORDER
 

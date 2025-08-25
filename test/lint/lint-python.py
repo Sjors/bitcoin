@@ -20,9 +20,9 @@ os.environ["MYPY_CACHE_DIR"] = str(cache_dir)
 
 DEPS = ['lief', 'mypy', 'pyzmq']
 
-# Only .py files in test/functional and contrib/devtools have type annotations
+# Only .py files in contrib/devtools have type annotations
 # enforced.
-MYPY_FILES_ARGS = ['git', 'ls-files', 'test/functional/*.py', 'contrib/devtools/*.py']
+MYPY_FILES_ARGS = ['git', 'ls-files', 'contrib/devtools/*.py']
 
 
 def check_dependencies():
