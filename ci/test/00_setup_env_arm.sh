@@ -14,7 +14,6 @@ export CI_IMAGE_NAME_TAG="mirror.gcr.io/ubuntu:24.04"  # Check that https://pack
 export CI_IMAGE_PLATFORM="linux/arm64"
 export USE_BUSY_BOX=true
 export RUN_UNIT_TESTS=true
-export RUN_FUNCTIONAL_TESTS=false
 export GOAL="install"
 export CI_LIMIT_STACK_SIZE=1
 # -Wno-psabi is to disable ABI warnings: "note: parameter passing for argument of type ... changed in GCC 7.1"

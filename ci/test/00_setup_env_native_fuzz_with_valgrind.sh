@@ -11,7 +11,6 @@ export CONTAINER_NAME=ci_native_fuzz_valgrind
 export PACKAGES="libevent-dev libboost-dev libsqlite3-dev valgrind libcapnp-dev capnproto"
 export NO_DEPENDS=1
 export RUN_UNIT_TESTS=false
-export RUN_FUNCTIONAL_TESTS=false
 export RUN_FUZZ_TESTS=true
 export FUZZ_TESTS_CONFIG="--valgrind"
 export GOAL="all"

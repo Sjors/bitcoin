@@ -81,7 +81,6 @@ def check_ELF_SEPARATE_CODE(binary):
         '.rodata': R,
         '.eh_frame_hdr': R,
         '.eh_frame': R,
-        '.qtmetadata': R,
         '.gcc_except_table': R,
         '.stapsdt.base': R,
         # Writable data

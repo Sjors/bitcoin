@@ -184,10 +184,6 @@ To run clang-tidy on the changed source lines:
 git diff | ( cd ./src/ && clang-tidy-diff -p2 -path ../build -j $(nproc) )
 ```
 
-## Coding Style (Python)
-
-Refer to [/test/functional/README.md#style-guidelines](/test/functional/README.md#style-guidelines).
-
 ## Coding Style (Doxygen-compatible comments)
 
 Bitcoin Core uses [Doxygen](https://www.doxygen.nl/) to generate its official documentation.
@@ -346,9 +342,6 @@ configuration options and toggled while bitcoind is running with the `logging`
 RPC.  For instance, launching bitcoind with `-debug` or `-debug=1` will turn on
 all log categories and `-loglevel=trace` will turn on all log severity levels.
 
-The Qt code routes `qDebug()` output to `debug.log` under category "qt": run with `-debug=qt`
-to see it.
-
 ### Signet, testnet, and regtest modes
 
 If you are testing multi-machine code that needs to operate across the internet,
@@ -356,8 +349,7 @@ you can run with either the `-signet` or the `-testnet4` config option to test
 with "play bitcoins" on a test network.
 
 If you are testing something that can run on one machine, run with the
-`-regtest` option.  In regression test mode, blocks can be created on demand;
-see [test/functional/](/test/functional) for tests that run in `-regtest` mode.
+`-regtest` option.
 
 ### DEBUG_LOCKORDER
 
@@ -913,11 +905,6 @@ int GetInt(Tabs tab)
 
     - *Rationale*: This is redundant. Tinyformat handles strings.
 
-  - Do not use it to convert to `QString`. Use `QString::fromStdString()`.
-
-    - *Rationale*: Qt has built-in functionality for converting their string
-      type from/to C++. No need to roll your own.
-
   - In cases where you do call `.c_str()`, you might want to additionally check that the string does not contain embedded '\0' characters, because
     it will (necessarily) truncate the string. This might be used to hide parts of the string from logging or to circumvent
     checks. If a use of strings is sensitive to this, take care to check the string for embedded NULL characters first
@@ -1079,27 +1066,6 @@ namespace {
 ```
 
   - *Rationale*: Avoids confusion about the namespace context.
-
-## GUI
-
-- Do not display or manipulate dialogs in model code (classes `*Model`).
-
-  - *Rationale*: Model classes pass through events and data from the core, they
-    should not interact with the user. That's where View classes come in. The converse also
-    holds: try to not directly access core data structures from Views.
-
-- Avoid adding slow or blocking code in the GUI thread. In particular, do not
-  add new `interfaces::Node` and `interfaces::Wallet` method calls, even if they
-  may be fast now, in case they are changed to lock or communicate across
-  processes in the future.
-
-  Prefer to offload work from the GUI thread to worker threads (see
-  `RPCExecutor` in console code as an example) or take other steps (see
-  https://doc.qt.io/archives/qq/qq27-responsive-guis.html) to keep the GUI
-  responsive.
-
-  - *Rationale*: Blocking the GUI thread can increase latency, and lead to
-    hangs and deadlocks.
 
 ## Subtrees
 

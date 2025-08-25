@@ -174,12 +174,12 @@ if(ENABLE_WALLET)
       bitcoin_util
       Boost::headers
     )
-    install_binary_component(bitcoin-wallet HAS_MANPAGE)
+    install_binary_component(bitcoin-wallet)
   endif()
 endif()
 
 
-# P2P and RPC server functionality used by `bitcoind` and `bitcoin-qt` executables.
+# P2P and RPC server functionality used by `bitcoind` executable.
 add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   addrdb.cpp
   addrman.cpp
@@ -313,7 +313,7 @@ if(BUILD_DAEMON)
     bitcoin_node
     $<TARGET_NAME_IF_EXISTS:bitcoin_wallet>
   )
-  install_binary_component(bitcoind HAS_MANPAGE)
+  install_binary_component(bitcoind)
 endif()
 if(ENABLE_IPC AND BUILD_DAEMON)
   add_executable(bitcoin-node
@@ -341,7 +341,7 @@ if(ENABLE_IPC AND BUILD_DAEMON)
       bitcoin_ipc
       bitcoin_sv2
     )
-    install_binary_component(bitcoin-mine)
+    install_binary_component(bitcoin-mine HAS_MANPAGE)
   endif()
 endif()
 
@@ -386,7 +386,7 @@ if(BUILD_CLI)
     libevent::core
     libevent::extra
   )
-  install_binary_component(bitcoin-cli HAS_MANPAGE)
+  install_binary_component(bitcoin-cli)
 endif()
 
 
@@ -400,7 +400,7 @@ if(BUILD_TX)
     bitcoin_util
     univalue
   )
-  install_binary_component(bitcoin-tx HAS_MANPAGE)
+  install_binary_component(bitcoin-tx)
 endif()
 
 
@@ -413,14 +413,8 @@ if(BUILD_UTIL)
     bitcoin_common
     bitcoin_util
   )
-  install_binary_component(bitcoin-util HAS_MANPAGE)
+  install_binary_component(bitcoin-util)
 endif()
-
-
-if(BUILD_GUI)
-  add_subdirectory(qt)
-endif()
-
 
 if(BUILD_KERNEL_LIB)
   add_subdirectory(kernel)
