@@ -323,7 +323,7 @@ public:
     /** Construct a new ellswift public key from a given serialization. */
     EllSwiftPubKey(std::span<const std::byte> ellswift) noexcept;
 
-    /** Decode to normal compressed CPubKey (for debugging purposes). */
+    /** Decode to normal compressed CPubKey. */
     CPubKey Decode() const;
 
     // Read-only access for serialization.
