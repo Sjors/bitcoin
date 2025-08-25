@@ -21,7 +21,7 @@ pkg_add sqlite3
 
 To build Bitcoin Core without the wallet, use `-DENABLE_WALLET=OFF`.
 
-Cap'n Proto is needed for IPC functionality (see [multiprocess.md](multiprocess.md))
+Cap'n Proto is needed for IPC functionality.
 and can be built from source: https://capnproto.org/install.html
 
 Compile with `-DENABLE_IPC=OFF` if you do not need IPC functionality.

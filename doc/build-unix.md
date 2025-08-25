@@ -60,7 +60,7 @@ SQLite is required for the wallet:
 
 To build Bitcoin Core without the wallet, see [*Disable-wallet mode*](#disable-wallet-mode)
 
-Cap'n Proto is needed for IPC functionality (see [multiprocess.md](multiprocess.md)):
+Cap'n Proto is needed for IPC functionality.:
 
     sudo apt-get install libcapnp-dev capnproto
 
@@ -120,7 +120,7 @@ User-Space, Statically Defined Tracing (USDT) dependencies:
 
     sudo dnf install systemtap-sdt-devel
 
-Cap'n Proto is needed for IPC functionality (see [multiprocess.md](multiprocess.md)):
+Cap'n Proto is needed for IPC functionality.:
 
     sudo dnf install capnproto capnproto-devel
 
@@ -163,7 +163,7 @@ SQLite is required for the wallet:
 
 To build Bitcoin Core without the wallet, see [*Disable-wallet mode*](#disable-wallet-mode)
 
-Cap'n Proto is needed for IPC functionality (see [multiprocess.md](multiprocess.md)):
+Cap'n Proto is needed for IPC functionality.:
 
     apk add capnproto capnproto-dev
 

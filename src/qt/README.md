@@ -20,10 +20,6 @@ To run:
 
 - A directory that contains [Designer UI](https://doc.qt.io/qt-5.9/designer-using-a-ui-file.html) files. These files specify the characteristics of form elements in XML. Qt UI files can be edited with [Qt Creator](#using-qt-creator-as-ide) or using any text editor.
 
-#### locale/
-
-- Contains translations. They are periodically updated and an effort is made to support as many languages as possible. The process of contributing translations is described in [doc/translation_process.md](/doc/translation_process.md).
-
 #### res/
 
  - Contains graphical resources used to enhance the UI experience.
@@ -71,8 +67,6 @@ To run:
 ## Contribute
 
 See [CONTRIBUTING.md](/CONTRIBUTING.md) for general guidelines.
-
-**Note:** Do not change `local/bitcoin_en.ts`. It is updated [automatically](/doc/translation_process.md#writing-code-with-translations).
 
 ## Using Qt Creator as an IDE
 

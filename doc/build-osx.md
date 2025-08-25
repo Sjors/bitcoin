@@ -61,7 +61,7 @@ install anything.
 
 #### IPC Dependencies
 
-If you do not need IPC functionality (see [multiprocess.md](multiprocess.md))
+If you do not need IPC functionality.
 you can omit `capnp` and use `-DENABLE_IPC=OFF` in the `cmake -B` step below.
 
 ### 4. Clone Bitcoin repository
@@ -112,8 +112,6 @@ brew install zeromq
 ```
 
 Check out the [further configuration](#further-configuration) section for more information.
-
-For more information on ZMQ, see: [zmq.md](zmq.md)
 
 ---
 
