@@ -39,28 +39,6 @@ git clone https://github.com/bitcoin/bitcoin.git
 
 ### 3. Install Optional Dependencies
 
-#### GUI Dependencies
-###### Qt6
-
-Bitcoin Core includes a GUI built with the cross-platform Qt Framework. To compile the GUI, we need to install
-the necessary parts of Qt, the libqrencode and pass `-DBUILD_GUI=ON`. Skip if you don't intend to use the GUI.
-
-```bash
-pkg install qt6-base qt6-tools
-```
-
-###### libqrencode
-
-The GUI will be able to encode addresses in QR codes unless this feature is explicitly disabled. To install libqrencode, run:
-
-```bash
-pkg install libqrencode
-```
-
-Otherwise, if you don't need QR encoding support, use the `-DWITH_QRENCODE=OFF` option to disable this feature in order to compile the GUI.
-
----
-
 #### Notifications
 ###### ZeroMQ
 
@@ -83,12 +61,6 @@ pkg install python3 databases/py-sqlite3 net/py-pyzmq
 ### 1. Configuration
 
 There are many ways to configure Bitcoin Core, here are a few common examples:
-
-##### Wallet and GUI:
-This enables the GUI, assuming `sqlite` and `qt` are installed.
-```bash
-cmake -B build -DBUILD_GUI=ON
-```
 
 Run `cmake -B build -LH` to see the full list of available options.
 

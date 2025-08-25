@@ -13,5 +13,5 @@ export HOST=x86_64-w64-mingw32
 export PACKAGES="g++-mingw-w64-x86-64-posix nsis"
 export RUN_UNIT_TESTS=false
 export GOAL="deploy"
-export BITCOIN_CONFIG="-DREDUCE_EXPORTS=ON -DBUILD_GUI_TESTS=OFF \
+export BITCOIN_CONFIG="-DREDUCE_EXPORTS=ON \
 -DCMAKE_CXX_FLAGS='-Wno-error=maybe-uninitialized'"

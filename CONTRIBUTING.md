@@ -84,25 +84,7 @@ To contribute a patch, the workflow is as follows:
   1. Create topic branch
   1. Commit patches
 
-For GUI-related issues or pull requests, the https://github.com/bitcoin-core/gui repository should be used.
-For all other issues and pull requests, the https://github.com/bitcoin/bitcoin node repository should be used.
-
-The master branch for all monotree repositories is identical.
-
-As a rule of thumb, everything that only modifies `src/qt` is a GUI-only pull
-request. However:
-
-* For global refactoring or other transversal changes the node repository
-  should be used.
-* For GUI-related build system changes, the node repository should be used
-  because the change needs review by the build systems reviewers.
-* Changes in `src/interfaces` need to go to the node repository because they
-  might affect other components like the wallet.
-
-For large GUI changes that include build system and interface changes, it is
-recommended to first open a pull request against the GUI repository. When there
-is agreement to proceed with the changes, a pull request with the build system
-and interfaces changes can be submitted to the node repository.
+The https://github.com/bitcoin/bitcoin repository should be used.
 
 The project coding conventions in the [developer notes](doc/developer-notes.md)
 must be followed.
@@ -143,7 +125,6 @@ the pull request affects. Valid areas as:
 
   - `consensus` for changes to consensus critical code
   - `doc` for changes to the documentation
-  - `qt` or `gui` for changes to bitcoin-qt
   - `log` for changes to log messages
   - `mining` for changes to the mining code
   - `net` or `p2p` for changes to the peer-to-peer network code
@@ -160,7 +141,6 @@ Examples:
 
     consensus: Add new opcode for BIP-XXXX OP_CHECKAWESOMESIG
     net: Automatically create onion service, listen on Tor
-    qt: Add feed bump button
     log: Fix typo in log message
 
 The body of the pull request should contain sufficient description of *what* the

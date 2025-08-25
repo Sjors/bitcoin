@@ -1,13 +1,5 @@
 # MacOS Deployment
 
-The `macdeployqtplus` script should not be run manually. Instead, after building as usual:
-
-```bash
-make deploy
-```
-
-When complete, it will have produced `Bitcoin-Core.zip`.
-
 ## SDK Extraction
 
 ### Step 1: Obtaining `Xcode.app`
