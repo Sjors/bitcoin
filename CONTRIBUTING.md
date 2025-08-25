@@ -174,12 +174,6 @@ any users mentioned in the description will be annoyingly notified each time a
 fork of Bitcoin Core copies the merge. Instead, make any username mentions in a
 subsequent comment to the PR.
 
-### Translation changes
-
-Note that translations should not be submitted as pull requests. Please see
-[Translation Process](https://github.com/bitcoin/bitcoin/blob/master/doc/translation_process.md)
-for more information on helping with translations.
-
 ### Work in Progress Changes and Requests for Comments
 
 If a pull request is not to be considered for merging (yet), please

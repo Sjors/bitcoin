@@ -113,8 +113,6 @@ brew install zeromq
 
 Check out the [further configuration](#further-configuration) section for more information.
 
-For more information on ZMQ, see: [zmq.md](zmq.md)
-
 ---
 
 #### Test Suite Dependencies
