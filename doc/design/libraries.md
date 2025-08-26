@@ -7,7 +7,7 @@
 | *libbitcoin_consensus*   | Consensus functionality used by *libbitcoin_node* and *libbitcoin_wallet*. |
 | *libbitcoin_crypto*      | Hardware-optimized functions for data encryption, hashing, message authentication, and key derivation. |
 | *libbitcoin_kernel*      | Consensus engine and support library used for validation by *libbitcoin_node*. |
-| *libbitcoin_ipc*         | IPC functionality used by *bitcoin-node*, *bitcoin-wallet* executables to communicate when [`-DENABLE_IPC=ON`](multiprocess.md) is used. |
+| *libbitcoin_ipc*         | IPC functionality used by *bitcoin-node*, *bitcoin-wallet* executables to communicate when `-DENABLE_IPC=ON` is used. |
 | *libbitcoin_node*        | P2P and RPC server functionality used by *bitcoind* executable. |
 | *libbitcoin_util*        | Home for common functionality shared by different executables and libraries. Similar to *libbitcoin_common*, but lower-level (see [Dependencies](#dependencies)). |
 | *libbitcoin_wallet*      | Wallet functionality used by *bitcoind* and *bitcoin-wallet* executables. |
