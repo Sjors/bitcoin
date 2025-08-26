@@ -218,25 +218,6 @@ def transform_process_message_target(targets, src_dir):
         targets += [(p2p_msg_target, {"LIMIT_TO_MESSAGE_TYPE": m}) for m in lines]
     return targets
 
-
-def transform_rpc_target(targets, src_dir):
-    """Add a target per RPC command, and also keep ("rpc", {}) to allow for cross-pollination,
-    or unlimited search"""
-
-    rpc_target = "rpc"
-    if (rpc_target, {}) in targets:
-        lines = subprocess.run(
-            ["git", "grep", "--function-context", "RPC_COMMANDS_SAFE_FOR_FUZZING{", src_dir / "src" / "test" / "fuzz" / "rpc.cpp"],
-            check=True,
-            stdout=subprocess.PIPE,
-            text=True,
-        ).stdout.splitlines()
-        lines = [l.split("\"", 1)[1].split("\"")[0] for l in lines if l.startswith("src/test/fuzz/rpc.cpp-    \"")]
-        assert len(lines)
-        targets += [(rpc_target, {"LIMIT_TO_RPC_COMMAND": r}) for r in lines]
-    return targets
-
-
 def generate_corpus(*, fuzz_pool, src_dir, fuzz_bin, corpus_dir, targets):
     """Generates new corpus.
 
@@ -246,7 +227,6 @@ def generate_corpus(*, fuzz_pool, src_dir, fuzz_bin, corpus_dir, targets):
     logging.info("Generating corpus to {}".format(corpus_dir))
     targets = [(t, {}) for t in targets]  # expand to add dictionary for target-specific env variables
     targets = transform_process_message_target(targets, Path(src_dir))
-    targets = transform_rpc_target(targets, Path(src_dir))
 
     def job(command, t, t_env):
         logging.debug(f"Running '{command}'")

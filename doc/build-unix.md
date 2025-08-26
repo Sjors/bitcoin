@@ -52,7 +52,7 @@ Build requirements:
 
 Now, you can either build from self-compiled [depends](#dependencies) or install the required dependencies:
 
-    sudo apt-get install libevent-dev libboost-dev
+    sudo apt-get install libboost-dev
 
 Cap'n Proto is needed for IPC functionality.:
 
@@ -74,7 +74,7 @@ Build requirements:
 
 Now, you can either build from self-compiled [depends](#dependencies) or install the required dependencies:
 
-    sudo dnf install libevent-devel boost-devel
+    sudo dnf install boost-devel
 
 User-Space, Statically Defined Tracing (USDT) dependencies:
 
@@ -96,7 +96,7 @@ Build requirements:
 
 Now, you can either build from self-compiled [depends](#dependencies) or install the required dependencies:
 
-    apk add libevent-dev boost-dev
+    apk add boost-dev
 
 Cap'n Proto is needed for IPC functionality.:
 
@@ -116,7 +116,7 @@ Setup and Build Example: Arch Linux
 -----------------------------------
 This example lists the steps necessary to setup and build a command line only distribution of the latest changes on Arch Linux:
 
-    pacman --sync --needed capnproto cmake boost gcc git libevent make python
+    pacman --sync --needed capnproto cmake boost gcc git make python
     git clone https://github.com/bitcoin/bitcoin.git
     cd bitcoin/
     cmake -B build

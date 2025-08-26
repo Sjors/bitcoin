@@ -129,7 +129,6 @@ the pull request affects. Valid areas as:
   - `mining` for changes to the mining code
   - `net` or `p2p` for changes to the peer-to-peer network code
   - `refactor` for structural changes that do not change behavior
-  - `rpc` or `rest` for changes to the RPC or REST APIs
   - `contrib` or `cli` for changes to the scripts and tools
   - `test`, `qa` or `ci` for changes to the unit tests, QA tests or CI code
   - `util` or `lib` for changes to the utils or libraries

@@ -115,10 +115,6 @@ using SettingsUpdate = std::function<std::optional<interfaces::SettingsAction>(c
 //!   communicate with each other without going through the node
 //!   (https://github.com/bitcoin/bitcoin/pull/15288#discussion_r253321096).
 //!
-//! * The handleRpc, registerRpcs, rpcEnableDeprecated methods and other RPC
-//!   methods can go away if wallets listen for HTTP requests on their own
-//!   ports instead of registering to handle requests on the node HTTP port.
-//!
 //! * Move fee estimation queries to an asynchronous interface and let the
 //!   wallet cache it, fee estimation being driven by node mempool, wallet
 //!   should be the consumer.
@@ -283,9 +279,6 @@ public:
     //! Check if any block has been pruned.
     virtual bool havePruned() = 0;
 
-    //! Get the current prune height.
-    virtual std::optional<int> getPruneHeight() = 0;
-
     //! Check if the node is ready to broadcast transactions.
     virtual bool isReadyToBroadcast() = 0;
 
@@ -337,13 +330,6 @@ public:
     //! Wait for pending notifications to be processed unless block hash points to the current
     //! chain tip.
     virtual void waitForNotificationsIfTipChanged(const uint256& old_tip) = 0;
-
-    //! Register handler for RPC. Command is not copied, so reference
-    //! needs to remain valid until Handler is disconnected.
-    virtual std::unique_ptr<Handler> handleRpc(const CRPCCommand& command) = 0;
-
-    //! Check if deprecated RPC is enabled.
-    virtual bool rpcEnableDeprecated(const std::string& method) = 0;
 
     //! Get settings value.
     virtual common::SettingsValue getSetting(const std::string& arg) = 0;

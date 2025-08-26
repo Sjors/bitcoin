@@ -172,7 +172,6 @@ target_compile_definitions(core_interface_debug INTERFACE
   DEBUG
   DEBUG_LOCKORDER
   DEBUG_LOCKCONTENTION
-  RPC_DOC_CHECK
   ABORT_ON_FAILED_ASSUME
 )
 
@@ -351,10 +350,6 @@ endif()
 
 include(AddBoostIfNeeded)
 add_boost_if_needed()
-
-if(BUILD_TESTS OR BUILD_FUZZ_BINARY)
-  find_package(Libevent 2.1.8 MODULE REQUIRED)
-endif()
 
 include(cmake/introspection.cmake)
 

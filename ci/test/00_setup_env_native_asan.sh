@@ -20,7 +20,7 @@ fi
 
 export CONTAINER_NAME=ci_native_asan
 export APT_LLVM_V="20"
-export PACKAGES="systemtap-sdt-dev clang-${APT_LLVM_V} llvm-${APT_LLVM_V} libclang-rt-${APT_LLVM_V}-dev libevent-dev libboost-dev ${BPFCC_PACKAGE} libcapnp-dev capnproto"
+export PACKAGES="systemtap-sdt-dev clang-${APT_LLVM_V} llvm-${APT_LLVM_V} libclang-rt-${APT_LLVM_V}-dev libboost-dev ${BPFCC_PACKAGE} libcapnp-dev capnproto"
 export NO_DEPENDS=1
 export GOAL="install"
 export CI_LIMIT_STACK_SIZE=1

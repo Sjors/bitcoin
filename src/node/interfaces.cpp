@@ -46,9 +46,6 @@
 #include <policy/settings.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
-#include <rpc/blockchain.h>
-#include <rpc/protocol.h>
-#include <rpc/server.h>
 #include <support/allocators/secure.h>
 #include <sync.h>
 #include <txmempool.h>
@@ -140,12 +137,6 @@ public:
         NodeContext& ctx{*Assert(m_context)};
         if (!(Assert(ctx.shutdown_request))()) {
             LogError("Failed to send shutdown signal\n");
-        }
-
-        // Stop RPC for clean shutdown if any of waitfor* commands is executed.
-        if (args().GetBoolArg("-server", false)) {
-            InterruptRPC();
-            StopRPC();
         }
     }
     bool shutdownRequested() override { return ShutdownRequested(*Assert(m_context)); };
@@ -327,16 +318,6 @@ public:
         if (!m_context->mempool) return CFeeRate{DUST_RELAY_TX_FEE};
         return m_context->mempool->m_opts.dust_relay_feerate;
     }
-    UniValue executeRpc(const std::string& command, const UniValue& params, const std::string& uri) override
-    {
-        JSONRPCRequest req;
-        req.context = m_context;
-        req.params = params;
-        req.strMethod = command;
-        req.URI = uri;
-        return ::tableRPC.execute(req);
-    }
-    std::vector<std::string> listRpcCommands() override { return ::tableRPC.listCommands(); }
     std::optional<Coin> getUnspentOutput(const COutPoint& output) override
     {
         LOCK(::cs_main);
@@ -479,45 +460,6 @@ public:
     }
     ValidationSignals& m_signals;
     std::shared_ptr<NotificationsProxy> m_proxy;
-};
-
-class RpcHandlerImpl : public Handler
-{
-public:
-    explicit RpcHandlerImpl(const CRPCCommand& command) : m_command(command), m_wrapped_command(&command)
-    {
-        m_command.actor = [this](const JSONRPCRequest& request, UniValue& result, bool last_handler) {
-            if (!m_wrapped_command) return false;
-            try {
-                return m_wrapped_command->actor(request, result, last_handler);
-            } catch (const UniValue& e) {
-                // If this is not the last handler and a wallet not found
-                // exception was thrown, return false so the next handler can
-                // try to handle the request. Otherwise, reraise the exception.
-                if (!last_handler) {
-                    const UniValue& code = e["code"];
-                    if (code.isNum() && code.getInt<int>() == RPC_WALLET_NOT_FOUND) {
-                        return false;
-                    }
-                }
-                throw;
-            }
-        };
-        ::tableRPC.appendCommand(m_command.name, &m_command);
-    }
-
-    void disconnect() final
-    {
-        if (m_wrapped_command) {
-            m_wrapped_command = nullptr;
-            ::tableRPC.removeCommand(m_command.name, &m_command);
-        }
-    }
-
-    ~RpcHandlerImpl() override { disconnect(); }
-
-    CRPCCommand m_command;
-    const CRPCCommand* m_wrapped_command;
 };
 
 class ChainImpl : public Chain
@@ -740,11 +682,6 @@ public:
         LOCK(::cs_main);
         return chainman().m_blockman.m_have_pruned;
     }
-    std::optional<int> getPruneHeight() override
-    {
-        LOCK(chainman().GetMutex());
-        return GetPruneHeight(chainman().m_blockman, chainman().ActiveChain());
-    }
     bool isReadyToBroadcast() override { return !chainman().m_blockman.LoadingBlocks() && !isInitialBlockDownload(); }
     bool isInitialBlockDownload() override
     {
@@ -767,11 +704,6 @@ public:
         if (!old_tip.IsNull() && old_tip == WITH_LOCK(::cs_main, return chainman().ActiveChain().Tip()->GetBlockHash())) return;
         validation_signals().SyncWithValidationInterfaceQueue();
     }
-    std::unique_ptr<Handler> handleRpc(const CRPCCommand& command) override
-    {
-        return std::make_unique<RpcHandlerImpl>(command);
-    }
-    bool rpcEnableDeprecated(const std::string& method) override { return IsDeprecatedRPCEnabled(method); }
     common::SettingsValue getSetting(const std::string& name) override
     {
         return args().GetSetting(name);

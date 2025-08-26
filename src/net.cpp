@@ -16,7 +16,6 @@
 #include <compat/compat.h>
 #include <consensus/consensus.h>
 #include <crypto/sha256.h>
-#include <i2p.h>
 #include <key.h>
 #include <logging.h>
 #include <memusage.h>
@@ -445,7 +444,6 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
     Proxy proxy;
     CService addr_bind;
     assert(!addr_bind.IsValid());
-    std::unique_ptr<i2p::sam::Session> i2p_transient_session;
 
     for (auto& target_addr: connect_to) {
         if (target_addr.IsValid()) {
@@ -453,35 +451,7 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
             bool proxyConnectionFailed = false;
 
             if (target_addr.IsI2P() && use_proxy) {
-                i2p::Connection conn;
-                bool connected{false};
-
-                if (m_i2p_sam_session) {
-                    connected = m_i2p_sam_session->Connect(target_addr, conn, proxyConnectionFailed);
-                } else {
-                    {
-                        LOCK(m_unused_i2p_sessions_mutex);
-                        if (m_unused_i2p_sessions.empty()) {
-                            i2p_transient_session =
-                                std::make_unique<i2p::sam::Session>(proxy, &interruptNet);
-                        } else {
-                            i2p_transient_session.swap(m_unused_i2p_sessions.front());
-                            m_unused_i2p_sessions.pop();
-                        }
-                    }
-                    connected = i2p_transient_session->Connect(target_addr, conn, proxyConnectionFailed);
-                    if (!connected) {
-                        LOCK(m_unused_i2p_sessions_mutex);
-                        if (m_unused_i2p_sessions.size() < MAX_UNUSED_I2P_SESSIONS_SIZE) {
-                            m_unused_i2p_sessions.emplace(i2p_transient_session.release());
-                        }
-                    }
-                }
-
-                if (connected) {
-                    sock = std::move(conn.sock);
-                    addr_bind = conn.me;
-                }
+                // Deleted
             } else if (use_proxy) {
                 LogPrintLevel(BCLog::PROXY, BCLog::Level::Debug, "Using proxy: %s to connect to %s\n", proxy.ToString(), target_addr.ToStringAddrPort());
                 sock = ConnectThroughProxy(proxy, target_addr.ToStringAddr(), target_addr.GetPort(), proxyConnectionFailed);
@@ -527,7 +497,6 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
                                 /*inbound_onion=*/false,
                                 CNodeOptions{
                                     .permission_flags = permission_flags,
-                                    .i2p_sam_session = std::move(i2p_transient_session),
                                     .recv_flood_size = nReceiveFloodSize,
                                     .use_v2transport = use_v2transport,
                                 });
@@ -557,7 +526,6 @@ void CNode::CloseSocketDisconnect()
             ConnectedThroughNetwork(),
             Ticks<std::chrono::seconds>(m_connected));
     }
-    m_i2p_sam_session.reset();
 }
 
 void CConnman::AddWhitelistPermissionFlags(NetPermissionFlags& flags, const CNetAddr &addr, const std::vector<NetWhitelistPermissions>& ranges) const {
@@ -3056,49 +3024,6 @@ void CConnman::ThreadMessageHandler()
     }
 }
 
-void CConnman::ThreadI2PAcceptIncoming()
-{
-    static constexpr auto err_wait_begin = 1s;
-    static constexpr auto err_wait_cap = 5min;
-    auto err_wait = err_wait_begin;
-
-    bool advertising_listen_addr = false;
-    i2p::Connection conn;
-
-    auto SleepOnFailure = [&]() {
-        interruptNet.sleep_for(err_wait);
-        if (err_wait < err_wait_cap) {
-            err_wait += 1s;
-        }
-    };
-
-    while (!interruptNet) {
-
-        if (!m_i2p_sam_session->Listen(conn)) {
-            if (advertising_listen_addr && conn.me.IsValid()) {
-                RemoveLocal(conn.me);
-                advertising_listen_addr = false;
-            }
-            SleepOnFailure();
-            continue;
-        }
-
-        if (!advertising_listen_addr) {
-            AddLocal(conn.me, LOCAL_MANUAL);
-            advertising_listen_addr = true;
-        }
-
-        if (!m_i2p_sam_session->Accept(conn)) {
-            SleepOnFailure();
-            continue;
-        }
-
-        CreateNodeFromAcceptedSocket(std::move(conn.sock), NetPermissionFlags::None, conn.me, conn.peer);
-
-        err_wait = err_wait_begin;
-    }
-}
-
 bool CConnman::BindListenPort(const CService& addrBind, bilingual_str& strError, NetPermissionFlags permissions)
 {
     int nOne = 1;
@@ -3292,12 +3217,6 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
         return false;
     }
 
-    Proxy i2p_sam;
-    if (GetProxy(NET_I2P, i2p_sam) && connOptions.m_i2p_accept_incoming) {
-        m_i2p_sam_session = std::make_unique<i2p::sam::Session>(gArgs.GetDataDirNet() / "i2p_private_key",
-                                                                i2p_sam, &interruptNet);
-    }
-
     // Randomize the order in which we may query seednode to potentially prevent connecting to the same one every restart (and signal that we have restarted)
     std::vector<std::string> seed_nodes = connOptions.vSeedNodes;
     if (!seed_nodes.empty()) {
@@ -3367,11 +3286,6 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
 
     // Process messages
     threadMessageHandler = std::thread(&util::TraceThread, "msghand", [this] { ThreadMessageHandler(); });
-
-    if (m_i2p_sam_session) {
-        threadI2PAcceptIncoming =
-            std::thread(&util::TraceThread, "i2paccept", [this] { ThreadI2PAcceptIncoming(); });
-    }
 
     // Dump network addresses
     scheduler.scheduleEvery([this] { DumpAddresses(); }, DUMP_PEERS_INTERVAL);
@@ -3802,8 +3716,7 @@ CNode::CNode(NodeId idIn,
       m_conn_type{conn_type_in},
       id{idIn},
       nLocalHostNonce{nLocalHostNonceIn},
-      m_recv_flood_size{node_opts.recv_flood_size},
-      m_i2p_sam_session{std::move(node_opts.i2p_sam_session)}
+      m_recv_flood_size{node_opts.recv_flood_size}
 {
     if (inbound_onion) assert(conn_type_in == ConnectionType::INBOUND);
 

@@ -14,7 +14,6 @@
 #include <consensus/amount.h>
 #include <crypto/siphash.h>
 #include <hash.h>
-#include <i2p.h>
 #include <kernel/messagestartchars.h>
 #include <net_permissions.h>
 #include <netaddress.h>
@@ -500,7 +499,6 @@ public:
 struct CNodeOptions
 {
     NetPermissionFlags permission_flags = NetPermissionFlags::None;
-    std::unique_ptr<i2p::sam::Session> i2p_sam_session = nullptr;
     bool prefer_evict = false;
     size_t recv_flood_size{DEFAULT_MAXRECEIVEBUFFER * 1000};
     bool use_v2transport = false;
@@ -825,18 +823,6 @@ private:
 
     mapMsgTypeSize mapSendBytesPerMsgType GUARDED_BY(cs_vSend);
     mapMsgTypeSize mapRecvBytesPerMsgType GUARDED_BY(cs_vRecv);
-
-    /**
-     * If an I2P session is created per connection (for outbound transient I2P
-     * connections) then it is stored here so that it can be destroyed when the
-     * socket is closed. I2P sessions involve a data/transport socket (in `m_sock`)
-     * and a control socket (in `m_i2p_sam_session`). For transient sessions, once
-     * the data socket is closed, the control socket is not going to be used anymore
-     * and is just taking up resources. So better close it as soon as `m_sock` is
-     * closed.
-     * Otherwise this unique_ptr is empty.
-     */
-    std::unique_ptr<i2p::sam::Session> m_i2p_sam_session GUARDED_BY(m_sock_mutex);
 };
 
 /**
@@ -913,7 +899,6 @@ public:
         bool m_use_addrman_outgoing = true;
         std::vector<std::string> m_specified_outgoing;
         std::vector<std::string> m_added_nodes;
-        bool m_i2p_accept_incoming;
         bool whitelist_forcerelay = DEFAULT_WHITELISTFORCERELAY;
         bool whitelist_relay = DEFAULT_WHITELISTRELAY;
     };
@@ -1397,13 +1382,6 @@ private:
      */
     CThreadInterrupt interruptNet;
 
-    /**
-     * I2P SAM session.
-     * Used to accept incoming and make outgoing I2P connections from a persistent
-     * address.
-     */
-    std::unique_ptr<i2p::sam::Session> m_i2p_sam_session;
-
     std::thread threadDNSAddressSeed;
     std::thread threadSocketHandler;
     std::thread threadOpenAddedConnections;
@@ -1444,15 +1422,6 @@ private:
      * Mutex protecting m_i2p_sam_sessions.
      */
     Mutex m_unused_i2p_sessions_mutex;
-
-    /**
-     * A pool of created I2P SAM transient sessions that should be used instead
-     * of creating new ones in order to reduce the load on the I2P network.
-     * Creating a session in I2P is not cheap, thus if this is not empty, then
-     * pick an entry from it instead of creating a new session. If connecting to
-     * a host fails, then the created session is put to this pool for reuse.
-     */
-    std::queue<std::unique_ptr<i2p::sam::Session>> m_unused_i2p_sessions GUARDED_BY(m_unused_i2p_sessions_mutex);
 
     /**
      * Mutex protecting m_reconnections.

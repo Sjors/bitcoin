@@ -31,9 +31,6 @@
 #include <policy/fees.h>
 #include <pow.h>
 #include <random.h>
-#include <rpc/blockchain.h>
-#include <rpc/register.h>
-#include <rpc/server.h>
 #include <scheduler.h>
 #include <script/sigcache.h>
 #include <streams.h>
@@ -120,7 +117,6 @@ BasicTestingSetup::BasicTestingSetup(const ChainType chainType, TestOpts opts)
     // Reset globals
     fDiscover = true;
     fListen = true;
-    SetRPCWarmupStarting();
     g_reachable_nets.Reset();
     ClearLocal();
 
@@ -136,7 +132,6 @@ BasicTestingSetup::BasicTestingSetup(const ChainType chainType, TestOpts opts)
             "-logthreadnames",
             "-loglevel=trace",
             "-debug",
-            "-debugexclude=libevent",
             "-debugexclude=leveldb",
         },
         opts.extra_args);
@@ -336,9 +331,6 @@ TestingSetup::TestingSetup(
 {
     m_coins_db_in_memory = opts.coins_db_in_memory;
     m_block_tree_db_in_memory = opts.block_tree_db_in_memory;
-    // Ideally we'd move all the RPC tests to the functional testing framework
-    // instead of unit tests, but for now we need these here.
-    RegisterAllCoreRPCCommands(tableRPC);
 
     LoadVerifyActivateChainstate();
 

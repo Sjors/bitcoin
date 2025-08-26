@@ -33,7 +33,6 @@ WORK_PATH = $(BASEDIR)/work
 BASE_CACHE ?= $(BASEDIR)/built
 SDK_PATH ?= $(BASEDIR)/SDKs
 NO_BOOST ?=
-NO_LIBEVENT ?=
 NO_WALLET ?=
 NO_USDT ?=
 # Default NO_IPC value is 1 on Windows
@@ -149,12 +148,10 @@ $(host_arch)_$(host_os)_id:=$(shell env CC='$(host_CC)' C_STANDARD='$(C_STANDARD
 
 boost_packages_$(NO_BOOST) = $(boost_packages)
 
-libevent_packages_$(NO_LIBEVENT) = $(libevent_packages)
-
 ipc_packages_$(NO_IPC) = $(ipc_packages)
 usdt_packages_$(NO_USDT) = $(usdt_$(host_os)_packages)
 
-packages += $($(host_arch)_$(host_os)_packages) $($(host_os)_packages) $(boost_packages_) $(libevent_packages_) $(wallet_packages_) $(usdt_packages_)
+packages += $($(host_arch)_$(host_os)_packages) $($(host_os)_packages) $(boost_packages_) $(usdt_packages_)
 native_packages += $($(host_arch)_$(host_os)_native_packages) $($(host_os)_native_packages)
 
 ifneq ($(ipc_packages_),)
