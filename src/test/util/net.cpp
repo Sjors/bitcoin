@@ -275,44 +275,6 @@ ssize_t DynSock::Pipe::GetBytes(void* buf, size_t len, int flags)
     return read_bytes;
 }
 
-std::optional<CNetMessage> DynSock::Pipe::GetNetMsg()
-{
-    V1Transport transport{NodeId{0}};
-
-    {
-        WAIT_LOCK(m_mutex, lock);
-
-        WaitForDataOrEof(lock);
-        if (m_eof && m_data.empty()) {
-            return std::nullopt;
-        }
-
-        for (;;) {
-            std::span<const uint8_t> s{m_data};
-            if (!transport.ReceivedBytes(s)) {  // Consumed bytes are removed from the front of s.
-                return std::nullopt;
-            }
-            m_data.erase(m_data.begin(), m_data.begin() + m_data.size() - s.size());
-            if (transport.ReceivedMessageComplete()) {
-                break;
-            }
-            if (m_data.empty()) {
-                WaitForDataOrEof(lock);
-                if (m_eof && m_data.empty()) {
-                    return std::nullopt;
-                }
-            }
-        }
-    }
-
-    bool reject{false};
-    CNetMessage msg{transport.GetReceivedMessage(/*time=*/{}, reject)};
-    if (reject) {
-        return std::nullopt;
-    }
-    return std::make_optional<CNetMessage>(std::move(msg));
-}
-
 void DynSock::Pipe::PushBytes(const void* buf, size_t len)
 {
     LOCK(m_mutex);
