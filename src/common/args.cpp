@@ -627,9 +627,6 @@ std::string ArgsManager::GetHelpMessage() const
             case OptionsCategory::CONNECTION:
                 usage += HelpMessageGroup("Connection options:");
                 break;
-            case OptionsCategory::ZMQ:
-                usage += HelpMessageGroup("ZeroMQ notification options:");
-                break;
             case OptionsCategory::DEBUG_TEST:
                 usage += HelpMessageGroup("Debugging/Testing options:");
                 break;

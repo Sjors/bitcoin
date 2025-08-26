@@ -29,16 +29,6 @@ Now that `git` and all the required dependencies are installed, let's clone the 
 git clone https://github.com/bitcoin/bitcoin.git
 ```
 
-### 3. Install Optional Dependencies
-
-#### Notifications
-###### ZeroMQ
-
-Bitcoin Core can provide notifications via ZeroMQ. If the package is installed, support will be compiled in.
-```bash
-pkg install libzmq4
-```
-
 ## Building Bitcoin Core
 
 ### 1. Configuration

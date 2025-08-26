@@ -133,11 +133,6 @@ endif()
 # The depends/Makefile can generate values with "not-set"
 # semantics as empty strings or strings containing only spaces.
 # Therefore, MATCHES must be used rather than STREQUAL.
-if("@zmq_packages@" MATCHES "^[ ]*$")
-  set(WITH_ZMQ OFF CACHE BOOL "")
-else()
-  set(WITH_ZMQ ON CACHE BOOL "")
-endif()
 
 if("@usdt_packages@" MATCHES "^[ ]*$")
   set(WITH_USDT OFF CACHE BOOL "")

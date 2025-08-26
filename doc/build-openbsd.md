@@ -28,20 +28,12 @@ git clone https://github.com/bitcoin/bitcoin.git
 
 ### 3. Install Optional Dependencies
 
-#### Notifications
-###### ZeroMQ
-
-Bitcoin Core can provide notifications via ZeroMQ. If the package is installed, support will be compiled in.
-```bash
-pkg_add zeromq
-```
-
 #### Test Suite Dependencies
 There is an included test suite that is useful for testing code changes when developing.
 To run the test suite (recommended), you will need to have Python 3 installed:
 
 ```bash
-pkg_add python py3-zmq  # Select the newest version of the python package if necessary.
+pkg_add python # Select the newest version of the python package if necessary.
 ```
 
 ## Building Bitcoin Core

@@ -8,7 +8,6 @@ export LC_ALL=C.UTF-8
 
 # Homebrew's python@3.12 is marked as externally managed (PEP 668).
 # Therefore, `--break-system-packages` is needed.
-export PIP_PACKAGES="--break-system-packages zmq"
 export GOAL="install"
 export CMAKE_GENERATOR="Ninja"
 export BITCOIN_CONFIG="-DREDUCE_EXPORTS=ON -DCMAKE_EXE_LINKER_FLAGS='-Wl,-stack_size -Wl,0x80000'"

@@ -169,9 +169,7 @@ make -C depends --jobs="$JOBS" HOST="$HOST" \
                                    x86_64_linux_AR=x86_64-linux-gnu-gcc-ar \
                                    x86_64_linux_RANLIB=x86_64-linux-gnu-gcc-ranlib \
                                    x86_64_linux_NM=x86_64-linux-gnu-gcc-nm \
-                                   x86_64_linux_STRIP=x86_64-linux-gnu-strip \
-                                   NO_WALLET=1 \
-                                   NO_ZMQ=1
+                                   x86_64_linux_STRIP=x86_64-linux-gnu-strip
 
 
 ###########################
@@ -195,7 +193,7 @@ mkdir -p "$OUTDIR"
 # TODO: once bitcoin-node with Mining interface is in a release:
 # -DBUILD_CLI=OFF
 # -DBUILD_DAEMON=OFF
-CONFIGFLAGS="-DBUILD_UTIL=OFF -DENABLE_EXTERNAL_SIGNER=OFF -DWITH_USDT=OFF -DWITH_ZMQ=OFF -DREDUCE_EXPORTS=ON -DBUILD_FUZZ_BINARY=OFF"
+CONFIGFLAGS="-DBUILD_UTIL=OFF -DENABLE_EXTERNAL_SIGNER=OFF -DWITH_USDT=OFF -DREDUCE_EXPORTS=ON -DBUILD_FUZZ_BINARY=OFF"
 
 # CFLAGS
 HOST_CFLAGS="-O2 -g"

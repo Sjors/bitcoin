@@ -18,7 +18,7 @@ from importlib.metadata import metadata, PackageNotFoundError
 cache_dir = Path(__file__).parent.parent / ".mypy_cache"
 os.environ["MYPY_CACHE_DIR"] = str(cache_dir)
 
-DEPS = ['lief', 'mypy', 'pyzmq']
+DEPS = ['lief', 'mypy']
 
 # Only .py files in contrib/devtools have type annotations
 # enforced.

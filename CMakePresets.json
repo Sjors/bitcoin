@@ -71,8 +71,7 @@
         "BUILD_UTIL_CHAINSTATE": "ON",
         "ENABLE_EXTERNAL_SIGNER": "ON",
         "ENABLE_IPC": "ON",
-        "WITH_USDT": "ON",
-        "WITH_ZMQ": "ON"
+        "WITH_USDT": "ON"
       }
     }
   ]

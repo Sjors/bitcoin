@@ -60,10 +60,6 @@ Cap'n Proto is needed for IPC functionality.:
 
 Compile with `-DENABLE_IPC=OFF` if you do not need IPC functionality.
 
-ZMQ-enabled binaries are compiled with `-DWITH_ZMQ=ON` and require the following dependency:
-
-    sudo apt-get install libzmq3-dev
-
 User-Space, Statically Defined Tracing (USDT) dependencies:
 
     sudo apt install systemtap-sdt-dev
@@ -79,10 +75,6 @@ Build requirements:
 Now, you can either build from self-compiled [depends](#dependencies) or install the required dependencies:
 
     sudo dnf install libevent-devel boost-devel
-
-ZMQ-enabled binaries are compiled with `-DWITH_ZMQ=ON` and require the following dependency:
-
-    sudo dnf install zeromq-devel
 
 User-Space, Statically Defined Tracing (USDT) dependencies:
 
@@ -111,10 +103,6 @@ Cap'n Proto is needed for IPC functionality.:
     apk add capnproto capnproto-dev
 
 Compile with `-DENABLE_IPC=OFF` if you do not need IPC functionality.
-
-ZMQ dependencies (provides ZMQ API):
-
-    apk add zeromq-dev
 
 User-Space, Statically Defined Tracing (USDT) is not supported or tested on Alpine Linux at this time.
 

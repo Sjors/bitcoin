@@ -8,20 +8,13 @@
     "libevent"
   ],
   "default-features": [
-    "tests",
-    "zeromq"
+    "tests"
   ],
   "features": {
     "tests": {
       "description": "Build test_bitcoin.exe executable",
       "dependencies": [
         "boost-test"
-      ]
-    },
-    "zeromq": {
-      "description": "Enable ZMQ notifications",
-      "dependencies": [
-        "zeromq"
       ]
     }
   },

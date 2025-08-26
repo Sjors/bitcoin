@@ -68,7 +68,6 @@ namespace BCLog {
         MEMPOOL     = (CategoryMask{1} <<  2),
         HTTP        = (CategoryMask{1} <<  3),
         BENCH       = (CategoryMask{1} <<  4),
-        ZMQ         = (CategoryMask{1} <<  5),
         WALLETDB    = (CategoryMask{1} <<  6),
         RPC         = (CategoryMask{1} <<  7),
         ESTIMATEFEE = (CategoryMask{1} <<  8),

@@ -66,17 +66,6 @@ All build scripts and commands will run from this directory.
 git clone https://github.com/bitcoin/bitcoin.git
 ```
 
-### 5. Install Optional Dependencies
-
-#### ZMQ Dependencies
-
-Support for ZMQ notifications requires the following dependency.
-Skip if you do not need ZMQ functionality.
-
-``` bash
-brew install zeromq
-```
-
 Check out the [further configuration](#further-configuration) section for more information.
 
 ---

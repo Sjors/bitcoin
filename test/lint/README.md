@@ -47,7 +47,6 @@ or `--help`:
 |-----------|:----------:|
 | [`lint-python.py`](/test/lint/lint-python.py) | [lief](https://github.com/lief-project/LIEF)
 | [`lint-python.py`](/test/lint/lint-python.py) | [mypy](https://github.com/python/mypy)
-| [`lint-python.py`](/test/lint/lint-python.py) | [pyzmq](https://github.com/zeromq/pyzmq)
 | [`lint-python-dead-code.py`](/test/lint/lint-python-dead-code.py) | [vulture](https://github.com/jendrikseipp/vulture)
 | [`lint-shell.py`](/test/lint/lint-shell.py) | [ShellCheck](https://github.com/koalaman/shellcheck)
 | [`lint-spelling.py`](/test/lint/lint-spelling.py) | [codespell](https://github.com/codespell-project/codespell)

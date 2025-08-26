@@ -7,7 +7,6 @@
 export LC_ALL=C.UTF-8
 
 export HOST=s390x-linux-gnu
-export PACKAGES="python3-zmq"
 export CONTAINER_NAME=ci_s390x
 export CI_IMAGE_NAME_TAG="mirror.gcr.io/ubuntu:24.04"
 export CI_IMAGE_PLATFORM="linux/s390x"
