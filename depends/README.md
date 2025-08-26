@@ -88,8 +88,8 @@ The following can be set when running make: `make FOO=bar`
   of build error. After successful build log files are moved along with package archives
 - `LTO`: Enable options needed for LTO. Does not add `-flto` related options to *FLAGS.
 
-If some packages are not built, for example `make NO_IPC=1`, the appropriate CMake cache
-variables will be set when generating the Bitcoin Core buildsystem. In this case, `-DENABLE_IPC=OFF`.
+If some packages are not built, for example `make NO_USDT=1`, the appropriate CMake cache
+variables will be set when generating the Bitcoin Core buildsystem. In this case, `-DENABLE_USDT=OFF`.
 
 ## Cross compilation
 

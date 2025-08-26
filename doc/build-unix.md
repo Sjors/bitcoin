@@ -58,8 +58,6 @@ Cap'n Proto is needed for IPC functionality.:
 
     sudo apt-get install libcapnp-dev capnproto
 
-Compile with `-DENABLE_IPC=OFF` if you do not need IPC functionality.
-
 User-Space, Statically Defined Tracing (USDT) dependencies:
 
     sudo apt install systemtap-sdt-dev
@@ -84,8 +82,6 @@ Cap'n Proto is needed for IPC functionality.:
 
     sudo dnf install capnproto capnproto-devel
 
-Compile with `-DENABLE_IPC=OFF` if you do not need IPC functionality.
-
 ### Alpine
 
 #### Dependency Build Instructions
@@ -101,8 +97,6 @@ Now, you can either build from self-compiled [depends](#dependencies) or install
 Cap'n Proto is needed for IPC functionality.:
 
     apk add capnproto capnproto-dev
-
-Compile with `-DENABLE_IPC=OFF` if you do not need IPC functionality.
 
 User-Space, Statically Defined Tracing (USDT) is not supported or tested on Alpine Linux at this time.
 

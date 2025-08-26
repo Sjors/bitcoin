@@ -18,7 +18,7 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 include(../cmake/crc32c.cmake)
 include(../cmake/leveldb.cmake)
 add_subdirectory(univalue)
-if (ENABLE_IPC AND NOT WITH_EXTERNAL_LIBMULTIPROCESS)
+if (NOT WITH_EXTERNAL_LIBMULTIPROCESS)
   include(../cmake/libmultiprocess.cmake)
   add_libmultiprocess(ipc/libmultiprocess)
 endif()
@@ -53,12 +53,8 @@ add_dependencies(bitcoin_clientversion generate_build_info)
 
 add_subdirectory(crypto)
 add_subdirectory(util)
-if(ENABLE_IPC)
-  add_subdirectory(ipc)
-endif()
-if(WITH_SV2)
-  add_subdirectory(sv2)
-endif()
+add_subdirectory(ipc)
+add_subdirectory(sv2)
 
 add_library(bitcoin_consensus STATIC EXCLUDE_FROM_ALL
   arith_uint256.cpp
@@ -210,22 +206,20 @@ target_link_libraries(bitcoin_node
     $<TARGET_NAME_IF_EXISTS:USDT::headers>
 )
 
-if(ENABLE_IPC)
-  if(BUILD_MINE)
-    add_executable(bitcoin-mine
-      bitcoin-mine.cpp
-      init/basic.cpp
-    )
-    add_windows_resources(bitcoin-mine bitcoin-mine-res.rc)
-    add_windows_application_manifest(bitcoin-mine)
-    target_link_libraries(bitcoin-mine
-      core_interface
-      bitcoin_common
-      bitcoin_ipc
-      bitcoin_sv2
-    )
-    install_binary_component(bitcoin-mine HAS_MANPAGE)
-  endif()
+if(BUILD_MINE)
+  add_executable(bitcoin-mine
+    bitcoin-mine.cpp
+    init/basic.cpp
+  )
+  add_windows_resources(bitcoin-mine bitcoin-mine-res.rc)
+  add_windows_application_manifest(bitcoin-mine)
+  target_link_libraries(bitcoin-mine
+    core_interface
+    bitcoin_common
+    bitcoin_ipc
+    bitcoin_sv2
+  )
+  install_binary_component(bitcoin-mine HAS_MANPAGE)
 endif()
 
 if(BUILD_KERNEL_LIB)

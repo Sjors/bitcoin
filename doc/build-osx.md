@@ -51,11 +51,6 @@ To install, run the following from your terminal:
 brew install cmake boost pkgconf capnp
 ```
 
-#### IPC Dependencies
-
-If you do not need IPC functionality.
-you can omit `capnp` and use `-DENABLE_IPC=OFF` in the `cmake -B` step below.
-
 ### 4. Clone Bitcoin repository
 
 `git` should already be installed by default on your system.

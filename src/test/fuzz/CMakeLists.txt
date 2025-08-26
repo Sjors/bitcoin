@@ -16,12 +16,10 @@ target_link_libraries(fuzz
   Boost::headers
 )
 
-if(WITH_SV2)
-  target_sources(fuzz
-  PRIVATE
-    sv2_noise.cpp
-  )
-  target_link_libraries(fuzz
-    bitcoin_sv2
-  )
-endif()
+target_sources(fuzz
+PRIVATE
+  sv2_noise.cpp
+)
+target_link_libraries(fuzz
+  bitcoin_sv2
+)

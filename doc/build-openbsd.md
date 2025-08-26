@@ -16,8 +16,6 @@ pkg_add git cmake boost
 Cap'n Proto is needed for IPC functionality.
 and can be built from source: https://capnproto.org/install.html
 
-Compile with `-DENABLE_IPC=OFF` if you do not need IPC functionality.
-
 See [dependencies.md](dependencies.md) for a complete overview.
 
 ### 2. Clone Bitcoin Repo

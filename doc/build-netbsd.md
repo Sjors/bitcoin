@@ -37,8 +37,6 @@ Cap'n Proto is needed for IPC functionality.:
 pkgin capnproto
 ```
 
-Compile with `-DENABLE_IPC=OFF` if you do not need IPC functionality.
-
 See [dependencies.md](dependencies.md) for a complete overview.
 
 ### 2. Clone Bitcoin Repo
