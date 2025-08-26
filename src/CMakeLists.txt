@@ -99,10 +99,8 @@ add_library(bitcoin_common STATIC EXCLUDE_FROM_ALL
   common/messages.cpp
   common/netif.cpp
   common/settings.cpp
-  common/signmessage.cpp
   common/sockman.cpp
   common/system.cpp
-  common/url.cpp
   compressor.cpp
   core_read.cpp
   core_write.cpp
@@ -122,7 +120,6 @@ add_library(bitcoin_common STATIC EXCLUDE_FROM_ALL
   policy/policy.cpp
   pow.cpp
   protocol.cpp
-  psbt.cpp
   scheduler.cpp
   script/descriptor.cpp
   script/miniscript.cpp
@@ -184,13 +181,9 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/miner.cpp
   node/mini_miner.cpp
   node/minisketchwrapper.cpp
-  node/psbt.cpp
   node/timeoffsets.cpp
   node/transaction.cpp
-  node/txdownloadman_impl.cpp
-  node/txorphanage.cpp
   node/txreconciliation.cpp
-  node/utxo_snapshot.cpp
   node/warnings.cpp
   noui.cpp
   policy/ephemeral_policy.cpp

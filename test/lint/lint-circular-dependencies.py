@@ -14,7 +14,6 @@ import sys
 EXPECTED_CIRCULAR_DEPENDENCIES = (
     "chainparamsbase -> common/args -> chainparamsbase",
     "node/blockstorage -> validation -> node/blockstorage",
-    "node/utxo_snapshot -> validation -> node/utxo_snapshot",
     "kernel/coinstats -> validation -> kernel/coinstats",
     "versionbits -> versionbits_impl -> versionbits",
 )

@@ -58,7 +58,6 @@ struct PrecomputedTransactionData;
 struct LockPoints;
 struct AssumeutxoData;
 namespace node {
-class SnapshotMetadata;
 } // namespace node
 namespace Consensus {
 struct Params;
@@ -938,18 +937,6 @@ private:
 
     bool NotifyHeaderTip() LOCKS_EXCLUDED(GetMutex());
 
-    //! Internal helper for ActivateSnapshot().
-    //!
-    //! De-serialization of a snapshot that is created with
-    //! the dumptxoutset RPC.
-    //! To reduce space the serialization format of the snapshot avoids
-    //! duplication of tx hashes. The code takes advantage of the guarantee by
-    //! leveldb that keys are lexicographically sorted.
-    [[nodiscard]] util::Result<void> PopulateAndValidateSnapshot(
-        Chainstate& snapshot_chainstate,
-        AutoFile& coins_file,
-        const node::SnapshotMetadata& metadata);
-
     /**
      * If a block header hasn't already been seen, call CheckBlockHeader on it, ensure
      * that it doesn't descend from an invalid block, and then add it to m_block_index.
@@ -1090,33 +1077,6 @@ public:
 
     //! Get all chainstates currently being used.
     std::vector<Chainstate*> GetAll();
-
-    //! Construct and activate a Chainstate on the basis of UTXO snapshot data.
-    //!
-    //! Steps:
-    //!
-    //! - Initialize an unused Chainstate.
-    //! - Load its `CoinsViews` contents from `coins_file`.
-    //! - Verify that the hash of the resulting coinsdb matches the expected hash
-    //!   per assumeutxo chain parameters.
-    //! - Wait for our headers chain to include the base block of the snapshot.
-    //! - "Fast forward" the tip of the new chainstate to the base of the snapshot.
-    //! - Move the new chainstate to `m_snapshot_chainstate` and make it our
-    //!   ChainstateActive().
-    [[nodiscard]] util::Result<CBlockIndex*> ActivateSnapshot(
-        AutoFile& coins_file, const node::SnapshotMetadata& metadata, bool in_memory);
-
-    //! Once the background validation chainstate has reached the height which
-    //! is the base of the UTXO snapshot in use, compare its coins to ensure
-    //! they match those expected by the snapshot.
-    //!
-    //! If the coins match (expected), then mark the validation chainstate for
-    //! deletion and continue using the snapshot chainstate as active.
-    //! Otherwise, revert to using the ibd chainstate and shutdown.
-    SnapshotCompletionResult MaybeCompleteSnapshotValidation() EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
-
-    //! Returns nullptr if no snapshot has been loaded.
-    const CBlockIndex* GetSnapshotBaseBlock() const EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
     //! The most-work chain.
     Chainstate& ActiveChainstate() const;
@@ -1285,10 +1245,6 @@ public:
      *  information. */
     void ReportHeadersPresync(const arith_uint256& work, int64_t height, int64_t timestamp);
 
-    //! When starting up, search the datadir for a chainstate based on a UTXO
-    //! snapshot that is in the process of being validated.
-    bool DetectSnapshotChainstate() EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
-
     void ResetChainstates() EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
     //! Remove the snapshot-based chainstate and all on-disk artifacts.
@@ -1325,10 +1281,6 @@ public:
     //! start > end is possible, meaning no blocks can be pruned.
     std::pair<int, int> GetPruneRange(
         const Chainstate& chainstate, int last_height_can_prune) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
-
-    //! Return the height of the base block of the snapshot in use, if one exists, else
-    //! nullopt.
-    std::optional<int> GetSnapshotBaseHeight() const EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
     //! If, due to invalidation / reconsideration of blocks, the previous
     //! best header is no longer valid / guaranteed to be the most-work
