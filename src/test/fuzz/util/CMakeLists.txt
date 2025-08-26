@@ -4,9 +4,6 @@
 
 add_library(test_fuzz STATIC EXCLUDE_FROM_ALL
   check_globals.cpp
-  descriptor.cpp
-  mempool.cpp
-  net.cpp
   ../fuzz.cpp
   ../util.cpp
 )
