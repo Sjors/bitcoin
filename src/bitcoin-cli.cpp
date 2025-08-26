@@ -64,9 +64,6 @@ static constexpr std::array NETWORKS{"not_publicly_routable", "ipv4", "ipv6", "o
 static constexpr std::array NETWORK_SHORT_NAMES{"npr", "ipv4", "ipv6", "onion", "i2p", "cjdns", "int"};
 static constexpr std::array UNREACHABLE_NETWORK_IDS{/*not_publicly_routable*/0, /*internal*/6};
 
-/** Default number of blocks to generate for RPC generatetoaddress. */
-static const std::string DEFAULT_NBLOCKS = "1";
-
 /** Default -color setting. */
 static const std::string DEFAULT_COLOR_SETTING{"auto"};
 
@@ -83,12 +80,6 @@ static void SetupCliArgs(ArgsManager& argsman)
     argsman.AddArg("-version", "Print version and exit", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-conf=<file>", strprintf("Specify configuration file. Relative paths will be prefixed by datadir location. (default: %s)", BITCOIN_CONF_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-datadir=<dir>", "Specify data directory", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::OPTIONS);
-    argsman.AddArg("-generate",
-                   strprintf("Generate blocks, equivalent to RPC getnewaddress followed by RPC generatetoaddress. Optional positional integer "
-                             "arguments are number of blocks to generate (default: %s) and maximum iterations to try (default: %s), equivalent to "
-                             "RPC generatetoaddress nblocks and maxtries arguments. Example: bitcoin-cli -generate 4 1000",
-                             DEFAULT_NBLOCKS, DEFAULT_MAX_TRIES),
-                   ArgsManager::ALLOW_ANY, OptionsCategory::CLI_COMMANDS);
     argsman.AddArg("-addrinfo", "Get the number of addresses known to the node, per network and total, after filtering for quality and recency. The total number of addresses known to the node may be higher.", ArgsManager::ALLOW_ANY, OptionsCategory::CLI_COMMANDS);
     argsman.AddArg("-getinfo", "Get general information from the remote server. Note that unlike server-side RPC calls, the output of -getinfo is the result of multiple non-atomic requests. Some entries in the output may represent results from different states (e.g. wallet balance may be as of a different block from the chain state reported)", ArgsManager::ALLOW_ANY, OptionsCategory::CLI_COMMANDS);
     argsman.AddArg("-netinfo", strprintf("Get network peer connection information from the remote server. An optional argument from 0 to %d can be passed for different peers listings (default: 0). If a non-zero value is passed, an additional \"outonly\" (or \"o\") argument can be passed to see outbound peers only. Pass \"help\" (or \"h\") for detailed help documentation.", NETINFO_MAX_LEVEL), ArgsManager::ALLOW_ANY, OptionsCategory::CLI_COMMANDS);
@@ -104,17 +95,8 @@ static void SetupCliArgs(ArgsManager& argsman)
     argsman.AddArg("-rpcuser=<user>", "Username for JSON-RPC connections", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-rpcwait", "Wait for RPC server to start", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-rpcwaittimeout=<n>", strprintf("Timeout in seconds to wait for the RPC server to start, or 0 for no timeout. (default: %d)", DEFAULT_WAIT_CLIENT_TIMEOUT), ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::OPTIONS);
-    argsman.AddArg("-rpcwallet=<walletname>", "Send RPC for non-default wallet on RPC server (needs to exactly match corresponding -wallet option passed to bitcoind). This changes the RPC endpoint used, e.g. http://127.0.0.1:8332/wallet/<walletname>", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-stdin", "Read extra arguments from standard input, one per line until EOF/Ctrl-D (recommended for sensitive information such as passphrases). When combined with -stdinrpcpass, the first line from standard input is used for the RPC password.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-stdinrpcpass", "Read RPC password from standard input as a single line. When combined with -stdin, the first line from standard input is used for the RPC password. When combined with -stdinwalletpassphrase, -stdinrpcpass consumes the first line, and -stdinwalletpassphrase consumes the second.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-stdinwalletpassphrase", "Read wallet passphrase from standard input as a single line. When combined with -stdin, the first line from standard input is used for the wallet passphrase.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-}
-
-std::optional<std::string> RpcWalletName(const ArgsManager& args)
-{
-    // Check IsArgNegated to return nullopt instead of "0" if -norpcwallet is specified
-    if (args.IsArgNegated("-rpcwallet")) return std::nullopt;
-    return args.GetArg("-rpcwallet");
 }
 
 /** libevent event log callback */
@@ -327,8 +309,6 @@ struct GetinfoRequestHandler : BaseRequestHandler {
         UniValue result(UniValue::VARR);
         result.push_back(JSONRPCRequestObj("getnetworkinfo", NullUniValue, ID_NETWORKINFO));
         result.push_back(JSONRPCRequestObj("getblockchaininfo", NullUniValue, ID_BLOCKCHAININFO));
-        result.push_back(JSONRPCRequestObj("getwalletinfo", NullUniValue, ID_WALLETINFO));
-        result.push_back(JSONRPCRequestObj("getbalances", NullUniValue, ID_BALANCES));
         return result;
     }
 
@@ -1181,32 +1161,6 @@ static void ParseGetInfoResult(UniValue& result)
     result.setStr(result_string);
 }
 
-/**
- * Call RPC getnewaddress.
- * @returns getnewaddress response as a UniValue object.
- */
-static UniValue GetNewAddress()
-{
-    DefaultRequestHandler rh;
-    return ConnectAndCallRPC(&rh, "getnewaddress", /* args=*/{}, RpcWalletName(gArgs));
-}
-
-/**
- * Check bounds and set up args for RPC generatetoaddress params: nblocks, address, maxtries.
- * @param[in] address  Reference to const string address to insert into the args.
- * @param     args     Reference to vector of string args to modify.
- */
-static void SetGenerateToAddressArgs(const std::string& address, std::vector<std::string>& args)
-{
-    if (args.size() > 2) throw std::runtime_error("too many arguments (maximum 2 for nblocks and maxtries)");
-    if (args.size() == 0) {
-        args.emplace_back(DEFAULT_NBLOCKS);
-    } else if (args.at(0) == "0") {
-        throw std::runtime_error("the first argument (number of blocks to generate, default: " + DEFAULT_NBLOCKS + ") must be an integer value greater than zero");
-    }
-    args.emplace(args.begin() + 1, address);
-}
-
 static int CommandLineRPC(int argc, char *argv[])
 {
     std::string strPrint;
@@ -1233,24 +1187,6 @@ static int CommandLineRPC(int argc, char *argv[])
             gArgs.ForceSetArg("-rpcpassword", rpcPass);
         }
         std::vector<std::string> args = std::vector<std::string>(&argv[1], &argv[argc]);
-        if (gArgs.GetBoolArg("-stdinwalletpassphrase", false)) {
-            NO_STDIN_ECHO();
-            std::string walletPass;
-            if (args.size() < 1 || !args[0].starts_with("walletpassphrase")) {
-                throw std::runtime_error("-stdinwalletpassphrase is only applicable for walletpassphrase(change)");
-            }
-            if (!StdinReady()) {
-                fputs("Wallet passphrase> ", stderr);
-                fflush(stderr);
-            }
-            if (!std::getline(std::cin, walletPass)) {
-                throw std::runtime_error("-stdinwalletpassphrase specified but failed to read from standard input");
-            }
-            if (StdinTerminal()) {
-                fputc('\n', stdout);
-            }
-            args.insert(args.begin() + 1, walletPass);
-        }
         if (gArgs.GetBoolArg("-stdin", false)) {
             // Read one arg per line from stdin and append
             std::string line;
@@ -1272,15 +1208,6 @@ static int CommandLineRPC(int argc, char *argv[])
                 return 0;
             }
             rh.reset(new NetinfoRequestHandler());
-        } else if (gArgs.GetBoolArg("-generate", false)) {
-            const UniValue getnewaddress{GetNewAddress()};
-            const UniValue& error{getnewaddress.find_value("error")};
-            if (error.isNull()) {
-                SetGenerateToAddressArgs(getnewaddress.find_value("result").get_str(), args);
-                rh.reset(new GenerateToAddressRequestHandler());
-            } else {
-                ParseError(error, strPrint, nRet);
-            }
         } else if (gArgs.GetBoolArg("-addrinfo", false)) {
             rh.reset(new AddrinfoRequestHandler());
         } else {
@@ -1293,7 +1220,7 @@ static int CommandLineRPC(int argc, char *argv[])
         }
         if (nRet == 0) {
             // Perform RPC call
-            const std::optional<std::string> wallet_name{RpcWalletName(gArgs)};
+            const std::optional<std::string> wallet_name;
             const UniValue reply = ConnectAndCallRPC(rh.get(), method, args, wallet_name);
 
             // Parse reply

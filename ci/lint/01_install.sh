@@ -29,7 +29,7 @@ if [ ! -d "${PYTHON_PATH}/bin" ]; then
   )
   # For dependencies see https://github.com/pyenv/pyenv/wiki#suggested-build-environment
   ${CI_RETRY_EXE} apt-get install -y build-essential libssl-dev zlib1g-dev \
-    libbz2-dev libreadline-dev libsqlite3-dev curl llvm \
+    libbz2-dev libreadline-dev curl llvm \
     libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev \
     clang
   env CC=clang python-build "$(cat "/.python-version")" "${PYTHON_PATH}"

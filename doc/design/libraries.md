@@ -4,14 +4,12 @@
 |--------------------------|-------------|
 | *libbitcoin_cli*         | RPC client functionality used by *bitcoin-cli* executable |
 | *libbitcoin_common*      | Home for common functionality shared by different executables and libraries. Similar to *libbitcoin_util*, but higher-level (see [Dependencies](#dependencies)). |
-| *libbitcoin_consensus*   | Consensus functionality used by *libbitcoin_node* and *libbitcoin_wallet*. |
+| *libbitcoin_consensus*   | Consensus functionality used by *libbitcoin_node* |
 | *libbitcoin_crypto*      | Hardware-optimized functions for data encryption, hashing, message authentication, and key derivation. |
 | *libbitcoin_kernel*      | Consensus engine and support library used for validation by *libbitcoin_node*. |
-| *libbitcoin_ipc*         | IPC functionality used by *bitcoin-node*, *bitcoin-wallet* executables to communicate when `-DENABLE_IPC=ON` is used. |
+| *libbitcoin_ipc*         | IPC functionality used by *bitcoin-node* executables to communicate when `-DENABLE_IPC=ON` is used. |
 | *libbitcoin_node*        | P2P and RPC server functionality used by *bitcoind* executable. |
 | *libbitcoin_util*        | Home for common functionality shared by different executables and libraries. Similar to *libbitcoin_common*, but lower-level (see [Dependencies](#dependencies)). |
-| *libbitcoin_wallet*      | Wallet functionality used by *bitcoind* and *bitcoin-wallet* executables. |
-| *libbitcoin_wallet_tool* | Lower-level wallet functionality used by *bitcoin-wallet* executable. |
 | *libbitcoin_zmq*         | ZeroMQ functionality used by *bitcoind* executable. |
 | *libbitcoin_sv2*         | Stratum v2 functionality (usage TBD) |
 
@@ -22,7 +20,6 @@
 - Generally each library should have a corresponding source directory and namespace. Source code organization is a work in progress, so it is true that some namespaces are applied inconsistently, and if you look at [`add_library(bitcoin_* ...)`](../../src/CMakeLists.txt) lists you can see that many libraries pull in files from outside their source directory. But when working with libraries, it is good to follow a consistent pattern like:
 
   - *libbitcoin_node* code lives in `src/node/` in the `node::` namespace
-  - *libbitcoin_wallet* code lives in `src/wallet/` in the `wallet::` namespace
   - *libbitcoin_ipc* code lives in `src/ipc/` in the `ipc::` namespace
   - *libbitcoin_util* code lives in `src/util/` in the `util::` namespace
   - *libbitcoin_consensus* code lives in `src/consensus/` in the `Consensus::` namespace
@@ -42,10 +39,6 @@ graph TD;
 bitcoin-cli[bitcoin-cli]-->libbitcoin_cli;
 
 bitcoind[bitcoind]-->libbitcoin_node;
-bitcoind[bitcoind]-->libbitcoin_wallet;
-
-bitcoin-wallet[bitcoin-wallet]-->libbitcoin_wallet;
-bitcoin-wallet[bitcoin-wallet]-->libbitcoin_wallet_tool;
 
 libbitcoin_cli-->libbitcoin_util;
 libbitcoin_cli-->libbitcoin_common;
@@ -68,15 +61,8 @@ libbitcoin_node-->libbitcoin_util;
 
 libbitcoin_util-->libbitcoin_crypto;
 
-libbitcoin_wallet-->libbitcoin_common;
-libbitcoin_wallet-->libbitcoin_crypto;
-libbitcoin_wallet-->libbitcoin_util;
-
-libbitcoin_wallet_tool-->libbitcoin_wallet;
-libbitcoin_wallet_tool-->libbitcoin_util;
-
 classDef bold stroke-width:2px, font-weight:bold, font-size: smaller;
-class bitcoind,bitcoin-cli,bitcoin-wallet bold
+class bitcoind,bitcoin-cli bold
 ```
 </td></tr><tr><td>
 

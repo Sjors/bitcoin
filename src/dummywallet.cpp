@@ -31,7 +31,6 @@ void DummyWalletInit::AddWalletOptions(ArgsManager& argsman) const
         "-avoidpartialspends",
         "-changetype",
         "-consolidatefeerate=<amt>",
-        "-disablewallet",
         "-discardfee=<amt>",
         "-fallbackfee=<amt>",
         "-keypool=<n>",
@@ -39,17 +38,8 @@ void DummyWalletInit::AddWalletOptions(ArgsManager& argsman) const
         "-maxtxfee=<amt>",
         "-mintxfee=<amt>",
         "-paytxfee=<amt>",
-        "-signer=<cmd>",
         "-spendzeroconfchange",
         "-txconfirmtarget=<n>",
-        "-wallet=<path>",
-        "-walletbroadcast",
-        "-walletdir=<dir>",
-        "-walletnotify=<cmd>",
-        "-walletrbf",
-        "-walletrejectlongchains",
-        "-walletcrosschain",
-        "-unsafesqlitesync",
     });
 }
 

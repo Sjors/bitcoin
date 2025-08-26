@@ -85,7 +85,7 @@ _bitcoin_cli() {
             COMPREPLY=( $( compgen -W "true false" -- "$cur" ) )
             return 0
             ;;
-        getbalance|getnewaddress|listtransactions|sendmany)
+        getbalance|listtransactions|sendmany)
             return 0
             ;;
     esac

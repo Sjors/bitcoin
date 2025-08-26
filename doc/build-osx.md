@@ -51,14 +51,6 @@ To install, run the following from your terminal:
 brew install cmake boost pkgconf libevent capnp
 ```
 
-#### Wallet Dependencies
-
-If you do not need wallet functionality, you can use `-DENABLE_WALLET=OFF` in
-the `cmake -B` step below.
-
-SQLite is required, but since macOS ships with a useable `sqlite` package, you don't need to
-install anything.
-
 #### IPC Dependencies
 
 If you do not need IPC functionality.
@@ -111,10 +103,8 @@ It is required that you have `python` and `zip` installed.
 
 There are many ways to configure Bitcoin Core, here are a few common examples:
 
-##### No Wallet or GUI
-
 ``` bash
-cmake -B build -DENABLE_WALLET=OFF
+cmake -B build
 ```
 
 ##### Further Configuration

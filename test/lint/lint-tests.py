@@ -21,7 +21,6 @@ def grep_boost_fixture_test_suite():
         r"^BOOST_FIXTURE_TEST_SUITE\(",
         "--",
         "src/test/**.cpp",
-        "src/wallet/test/**.cpp",
     ]
     return subprocess.check_output(command, text=True, encoding="utf8")
 

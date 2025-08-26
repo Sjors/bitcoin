@@ -111,8 +111,7 @@ will be created for each individual test.
 ### Adding test cases
 
 To add a new unit test file to our test suite, you need
-to add the file to either `src/test/CMakeLists.txt` or
-`src/wallet/test/CMakeLists.txt` for wallet-related tests. The pattern is to create
+to add the file to either `src/test/CMakeLists.txt`. The pattern is to create
 one test file for each class or source file for which you want to create
 unit tests. The file naming convention is `<source_filename>_tests.cpp`
 and such files should wrap their tests in a test suite

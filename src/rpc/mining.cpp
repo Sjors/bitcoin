@@ -161,26 +161,6 @@ static bool GenerateBlock(ChainstateManager& chainman, CBlock&& block, uint64_t&
     return true;
 }
 
-static UniValue generateBlocks(ChainstateManager& chainman, Mining& miner, const CScript& coinbase_output_script, int nGenerate, uint64_t nMaxTries)
-{
-    UniValue blockHashes(UniValue::VARR);
-    while (nGenerate > 0 && !chainman.m_interrupt) {
-        std::unique_ptr<BlockTemplate> block_template(miner.createNewBlock({ .coinbase_output_script = coinbase_output_script }));
-        CHECK_NONFATAL(block_template);
-
-        std::shared_ptr<const CBlock> block_out;
-        if (!GenerateBlock(chainman, block_template->getBlock(), nMaxTries, block_out, /*process_new_block=*/true)) {
-            break;
-        }
-
-        if (block_out) {
-            --nGenerate;
-            blockHashes.push_back(block_out->GetHash().GetHex());
-        }
-    }
-    return blockHashes;
-}
-
 static bool getScriptFromDescriptor(const std::string& descriptor, CScript& script, std::string& error)
 {
     FlatSigningProvider key_provider;
@@ -216,90 +196,11 @@ static bool getScriptFromDescriptor(const std::string& descriptor, CScript& scri
     return true;
 }
 
-static RPCHelpMan generatetodescriptor()
-{
-    return RPCHelpMan{
-        "generatetodescriptor",
-        "Mine to a specified descriptor and return the block hashes.",
-        {
-            {"num_blocks", RPCArg::Type::NUM, RPCArg::Optional::NO, "How many blocks are generated."},
-            {"descriptor", RPCArg::Type::STR, RPCArg::Optional::NO, "The descriptor to send the newly generated bitcoin to."},
-            {"maxtries", RPCArg::Type::NUM, RPCArg::Default{DEFAULT_MAX_TRIES}, "How many iterations to try."},
-        },
-        RPCResult{
-            RPCResult::Type::ARR, "", "hashes of blocks generated",
-            {
-                {RPCResult::Type::STR_HEX, "", "blockhash"},
-            }
-        },
-        RPCExamples{
-            "\nGenerate 11 blocks to mydesc\n" + HelpExampleCli("generatetodescriptor", "11 \"mydesc\"")},
-        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
-{
-    const auto num_blocks{self.Arg<int>("num_blocks")};
-    const auto max_tries{self.Arg<uint64_t>("maxtries")};
-
-    CScript coinbase_output_script;
-    std::string error;
-    if (!getScriptFromDescriptor(self.Arg<std::string>("descriptor"), coinbase_output_script, error)) {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, error);
-    }
-
-    NodeContext& node = EnsureAnyNodeContext(request.context);
-    Mining& miner = EnsureMining(node);
-    ChainstateManager& chainman = EnsureChainman(node);
-
-    return generateBlocks(chainman, miner, coinbase_output_script, num_blocks, max_tries);
-},
-    };
-}
-
 static RPCHelpMan generate()
 {
     return RPCHelpMan{"generate", "has been replaced by the -generate cli option. Refer to -help for more information.", {}, {}, RPCExamples{""}, [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue {
         throw JSONRPCError(RPC_METHOD_NOT_FOUND, self.ToString());
     }};
-}
-
-static RPCHelpMan generatetoaddress()
-{
-    return RPCHelpMan{"generatetoaddress",
-        "Mine to a specified address and return the block hashes.",
-         {
-             {"nblocks", RPCArg::Type::NUM, RPCArg::Optional::NO, "How many blocks are generated."},
-             {"address", RPCArg::Type::STR, RPCArg::Optional::NO, "The address to send the newly generated bitcoin to."},
-             {"maxtries", RPCArg::Type::NUM, RPCArg::Default{DEFAULT_MAX_TRIES}, "How many iterations to try."},
-         },
-         RPCResult{
-             RPCResult::Type::ARR, "", "hashes of blocks generated",
-             {
-                 {RPCResult::Type::STR_HEX, "", "blockhash"},
-             }},
-         RPCExamples{
-            "\nGenerate 11 blocks to myaddress\n"
-            + HelpExampleCli("generatetoaddress", "11 \"myaddress\"")
-            + "If you are using the " CLIENT_NAME " wallet, you can get a new address to send the newly generated bitcoin to with:\n"
-            + HelpExampleCli("getnewaddress", "")
-                },
-        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
-{
-    const int num_blocks{request.params[0].getInt<int>()};
-    const uint64_t max_tries{request.params[2].isNull() ? DEFAULT_MAX_TRIES : request.params[2].getInt<int>()};
-
-    CTxDestination destination = DecodeDestination(request.params[1].get_str());
-    if (!IsValidDestination(destination)) {
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Error: Invalid address");
-    }
-
-    NodeContext& node = EnsureAnyNodeContext(request.context);
-    Mining& miner = EnsureMining(node);
-    ChainstateManager& chainman = EnsureChainman(node);
-
-    CScript coinbase_output_script = GetScriptForDestination(destination);
-
-    return generateBlocks(chainman, miner, coinbase_output_script, num_blocks, max_tries);
-},
-    };
 }
 
 static RPCHelpMan generateblock()
@@ -1139,8 +1040,6 @@ void RegisterMiningRPCCommands(CRPCTable& t)
         {"mining", &submitblock},
         {"mining", &submitheader},
 
-        {"hidden", &generatetoaddress},
-        {"hidden", &generatetodescriptor},
         {"hidden", &generateblock},
         {"hidden", &generate},
     };

@@ -6,15 +6,7 @@
 
 - [Data directory layout](#data-directory-layout)
 
-- [Multi-wallet environment](#multi-wallet-environment)
-
-  - [SQLite database based wallets](#sqlite-database-based-wallets)
-
-- [GUI settings](#gui-settings)
-
 - [Legacy subdirectories and files](#legacy-subdirectories-and-files)
-
-  - [Berkeley DB database based wallets](#berkeley-db-database-based-wallets)
 
 - [Installed Files](#installed-files)
 
@@ -70,8 +62,7 @@ This table describes the files installed by Bitcoin Core across different platfo
 | bin/bitcoin-cli                                            | Tool for making node and wallet RPC calls.                                  |
 | bin/bitcoin-tx                                             | Tool for creating and modifying transactions                                |
 | bin/bitcoin-util                                           | Miscellaneous utilities                                                     |
-| bin/bitcoin-wallet                                         | Bitcoin wallet tool                                                         |
-| bin/bitcoind                                               | Bitcoin node and wallet daemon                                              |
+| bin/bitcoind                                               | Bitcoin node            |
 | *lib/libbitcoinkernel.so*                                  | Shared library containing core consensus and validation code                |
 | *lib/pkgconfig/libbitcoinkernel.pc*                        | Pkg-config metadata for linking to `libbitcoinkernel`                       |
 | *libexec/bitcoin-chainstate*                               | Tool to validate and connect blocks                                         |

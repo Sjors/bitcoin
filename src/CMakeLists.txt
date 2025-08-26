@@ -156,28 +156,6 @@ target_link_libraries(bitcoin_common
 
 include(InstallBinaryComponent)
 
-if(ENABLE_WALLET)
-  add_subdirectory(wallet)
-
-  if(BUILD_WALLET_TOOL)
-    add_executable(bitcoin-wallet
-      bitcoin-wallet.cpp
-      init/bitcoin-wallet.cpp
-      wallet/wallettool.cpp
-    )
-    add_windows_resources(bitcoin-wallet bitcoin-wallet-res.rc)
-    add_windows_application_manifest(bitcoin-wallet)
-    target_link_libraries(bitcoin-wallet
-      core_interface
-      bitcoin_wallet
-      bitcoin_common
-      bitcoin_util
-      Boost::headers
-    )
-    install_binary_component(bitcoin-wallet)
-  endif()
-endif()
-
 
 # P2P and RPC server functionality used by `bitcoind` executable.
 add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
@@ -272,8 +250,7 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   validation.cpp
   validationinterface.cpp
   versionbits.cpp
-  $<$<TARGET_EXISTS:bitcoin_wallet>:wallet/init.cpp>
-  $<$<NOT:$<TARGET_EXISTS:bitcoin_wallet>>:dummywallet.cpp>
+  dummywallet.cpp
 )
 target_link_libraries(bitcoin_node
   PRIVATE
@@ -311,7 +288,6 @@ if(BUILD_DAEMON)
   target_link_libraries(bitcoind
     core_interface
     bitcoin_node
-    $<TARGET_NAME_IF_EXISTS:bitcoin_wallet>
   )
   install_binary_component(bitcoind)
 endif()
@@ -324,7 +300,6 @@ if(ENABLE_IPC AND BUILD_DAEMON)
     core_interface
     bitcoin_node
     bitcoin_ipc
-    $<TARGET_NAME_IF_EXISTS:bitcoin_wallet>
   )
   install_binary_component(bitcoin-node INTERNAL)
 

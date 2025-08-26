@@ -432,8 +432,7 @@ struct WalletMigrationResult
 //! dummywallet.cpp and throws if the wallet component is not compiled.
 std::unique_ptr<Wallet> MakeWallet(wallet::WalletContext& context, const std::shared_ptr<wallet::CWallet>& wallet);
 
-//! Return implementation of ChainClient interface for a wallet loader. This
-//! function will be undefined in builds where ENABLE_WALLET is false.
+//! Return implementation of ChainClient interface for a wallet loader. This stubs the wallet.
 std::unique_ptr<WalletLoader> MakeWalletLoader(Chain& chain, ArgsManager& args);
 
 } // namespace interfaces

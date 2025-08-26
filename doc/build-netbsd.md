@@ -31,14 +31,6 @@ cmake -B build
     ...
 ```
 
-SQLite is required for the wallet:
-
-```bash
-pkgin sqlite3
-```
-
-To build Bitcoin Core without the wallet, use `-DENABLE_WALLET=OFF`.
-
 Cap'n Proto is needed for IPC functionality.:
 
 ```bash
@@ -80,11 +72,10 @@ pkgin install python310 py310-zmq
 
 ### 1. Configuration
 
-There are many ways to configure Bitcoin Core. Here is an example that
-explicitly disables the wallet and GUI:
+There are many ways to configure Bitcoin Core. Here is an example:
 
 ```bash
-cmake -B build -DENABLE_WALLET=OFF
+cmake -B build
 ```
 
 Run `cmake -B build -LH` to see the full list of available options.
