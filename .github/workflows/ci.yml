@@ -159,223 +159,224 @@ jobs:
           # https://github.com/actions/cache/blob/main/tips-and-workarounds.md#update-a-cache
           key: ${{ github.job }}-${{ matrix.job-type }}-ccache-${{ github.run_id }}
 
-  windows-native-dll:
-    name: ${{ matrix.job-name }}
-    runs-on: windows-2022
+  # windows-native-dll:
+  #   name: ${{ matrix.job-name }}
+  #   runs-on: windows-2022
 
-    if: ${{ vars.SKIP_BRANCH_PUSH != 'true' || github.event_name == 'pull_request' }}
+  #   if: ${{ vars.SKIP_BRANCH_PUSH != 'true' || github.event_name == 'pull_request' }}
 
-    env:
-      PYTHONUTF8: 1
-      TEST_RUNNER_TIMEOUT_FACTOR: 40
+  #   env:
+  #     PYTHONUTF8: 1
+  #     TEST_RUNNER_TIMEOUT_FACTOR: 40
 
-    strategy:
-      fail-fast: false
-      matrix:
-        job-type: [standard, fuzz]
-        include:
-          - job-type: standard
-            generate-options: '-DWITH_ZMQ=ON -DWERROR=ON'
-            job-name: 'Windows native, VS 2022'
-          - job-type: fuzz
-            generate-options: '-DVCPKG_MANIFEST_NO_DEFAULT_FEATURES=ON -DVCPKG_MANIFEST_FEATURES="wallet" -DBUILD_FOR_FUZZING=ON -DWERROR=ON'
-            job-name: 'Windows native, fuzz, VS 2022'
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       job-type: [standard, fuzz]
+  #       include:
+  #         - job-type: standard
+  #           generate-options: '-DWITH_ZMQ=ON -DWERROR=ON'
+  #           job-name: 'Windows native, VS 2022'
+  #         - job-type: fuzz
+  #           generate-options: '-DVCPKG_MANIFEST_NO_DEFAULT_FEATURES=ON -DVCPKG_MANIFEST_FEATURES="wallet" -DBUILD_FOR_FUZZING=ON -DWERROR=ON'
+  #           job-name: 'Windows native, fuzz, VS 2022'
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v5
 
-      - name: Configure Developer Command Prompt for Microsoft Visual C++
-        # Using microsoft/setup-msbuild is not enough.
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
+  #     - name: Configure Developer Command Prompt for Microsoft Visual C++
+  #       # Using microsoft/setup-msbuild is not enough.
+  #       uses: ilammy/msvc-dev-cmd@v1
+  #       with:
+  #         arch: x64
 
-      - name: Get tool information
-        shell: pwsh
-        run: |
-          cmake -version | Tee-Object -FilePath "cmake_version"
-          Write-Output "---"
-          msbuild -version | Tee-Object -FilePath "msbuild_version"
-          $env:VCToolsVersion | Tee-Object -FilePath "toolset_version"
-          py -3 --version
-          Write-Host "PowerShell version $($PSVersionTable.PSVersion.ToString())"
-          bash --version
+  #     - name: Get tool information
+  #       shell: pwsh
+  #       run: |
+  #         cmake -version | Tee-Object -FilePath "cmake_version"
+  #         Write-Output "---"
+  #         msbuild -version | Tee-Object -FilePath "msbuild_version"
+  #         $env:VCToolsVersion | Tee-Object -FilePath "toolset_version"
+  #         py -3 --version
+  #         Write-Host "PowerShell version $($PSVersionTable.PSVersion.ToString())"
+  #         bash --version
 
-      - name: Using vcpkg with MSBuild
-        run: |
-          echo "set(VCPKG_BUILD_TYPE release)" >> "${VCPKG_INSTALLATION_ROOT}/triplets/x64-windows.cmake"
-          # Workaround for libevent, which requires CMake 3.1 but is incompatible with CMake >= 4.0.
-          sed -i '1s/^/set(ENV{CMAKE_POLICY_VERSION_MINIMUM} 3.5)\n/' "${VCPKG_INSTALLATION_ROOT}/scripts/ports.cmake"
+  #     - name: Using vcpkg with MSBuild
+  #       run: |
+  #         echo "set(VCPKG_BUILD_TYPE release)" >> "${VCPKG_INSTALLATION_ROOT}/triplets/x64-windows.cmake"
+  #         # Workaround for libevent, which requires CMake 3.1 but is incompatible with CMake >= 4.0.
+  #         sed -i '1s/^/set(ENV{CMAKE_POLICY_VERSION_MINIMUM} 3.5)\n/' "${VCPKG_INSTALLATION_ROOT}/scripts/ports.cmake"
 
-      - name: vcpkg tools cache
-        uses: actions/cache@v4
-        with:
-          path: C:/vcpkg/downloads/tools
-          key: ${{ github.job }}-vcpkg-tools
+  #     - name: vcpkg tools cache
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: C:/vcpkg/downloads/tools
+  #         key: ${{ github.job }}-vcpkg-tools
 
-      - name: Restore vcpkg binary cache
-        uses: actions/cache/restore@v4
-        id: vcpkg-binary-cache
-        with:
-          path: ~/AppData/Local/vcpkg/archives
-          key: ${{ github.job }}-vcpkg-binary-${{ hashFiles('cmake_version', 'msbuild_version', 'toolset_version', 'vcpkg.json') }}
+  #     - name: Restore vcpkg binary cache
+  #       uses: actions/cache/restore@v4
+  #       id: vcpkg-binary-cache
+  #       with:
+  #         path: ~/AppData/Local/vcpkg/archives
+  #         key: ${{ github.job }}-vcpkg-binary-${{ hashFiles('cmake_version', 'msbuild_version', 'toolset_version', 'vcpkg.json') }}
 
-      - name: Generate build system
-        run: |
-          cmake -B build -Werror=dev --preset vs2022 -DCMAKE_TOOLCHAIN_FILE="${VCPKG_INSTALLATION_ROOT}/scripts/buildsystems/vcpkg.cmake" ${{ matrix.generate-options }}
+  #     - name: Generate build system
+  #       run: |
+  #         cmake -B build -Werror=dev --preset vs2022 -DCMAKE_TOOLCHAIN_FILE="${VCPKG_INSTALLATION_ROOT}/scripts/buildsystems/vcpkg.cmake" ${{ matrix.generate-options }}
 
-      - name: Save vcpkg binary cache
-        uses: actions/cache/save@v4
-        if: github.event_name != 'pull_request' && steps.vcpkg-binary-cache.outputs.cache-hit != 'true' && matrix.job-type == 'standard'
-        with:
-          path: ~/AppData/Local/vcpkg/archives
-          key: ${{ github.job }}-vcpkg-binary-${{ hashFiles('cmake_version', 'msbuild_version', 'toolset_version', 'vcpkg.json') }}
+  #     - name: Save vcpkg binary cache
+  #       uses: actions/cache/save@v4
+  #       if: github.event_name != 'pull_request' && steps.vcpkg-binary-cache.outputs.cache-hit != 'true' && matrix.job-type == 'standard'
+  #       with:
+  #         path: ~/AppData/Local/vcpkg/archives
+  #         key: ${{ github.job }}-vcpkg-binary-${{ hashFiles('cmake_version', 'msbuild_version', 'toolset_version', 'vcpkg.json') }}
 
-      - name: Build
-        working-directory: build
-        run: |
-          cmake --build . -j $NUMBER_OF_PROCESSORS --config Release
+  #     - name: Build
+  #       working-directory: build
+  #       run: |
+  #         cmake --build . -j $NUMBER_OF_PROCESSORS --config Release
 
-      - name: Get bitcoind manifest
-        if: matrix.job-type == 'standard'
-        working-directory: build
-        run: |
-          mt.exe -nologo -inputresource:bin/Release/bitcoind.exe -out:bitcoind.manifest
-          cat bitcoind.manifest
-          echo
-          mt.exe -nologo -inputresource:bin/Release/bitcoind.exe -validate_manifest
+  #     - name: Get bitcoind manifest
+  #       if: matrix.job-type == 'standard'
+  #       working-directory: build
+  #       run: |
+  #         mt.exe -nologo -inputresource:bin/Release/bitcoind.exe -out:bitcoind.manifest
+  #         cat bitcoind.manifest
+  #         echo
+  #         mt.exe -nologo -inputresource:bin/Release/bitcoind.exe -validate_manifest
 
-      - name: Run test suite
-        if: matrix.job-type == 'standard'
-        working-directory: build
-        run: |
-          ctest --output-on-failure --stop-on-failure -j $NUMBER_OF_PROCESSORS -C Release
+  #     - name: Run test suite
+  #       if: matrix.job-type == 'standard'
+  #       working-directory: build
+  #       run: |
+  #         ctest --output-on-failure --stop-on-failure -j $NUMBER_OF_PROCESSORS -C Release
 
-      - name: Clone corpora
-        if: matrix.job-type == 'fuzz'
-        run: |
-          git clone --depth=1 https://github.com/bitcoin-core/qa-assets "${RUNNER_TEMP}/qa-assets"
-          cd "${RUNNER_TEMP}/qa-assets"
-          echo "Using qa-assets repo from commit ..."
-          git log -1
+  #     - name: Clone corpora
+  #       if: matrix.job-type == 'fuzz'
+  #       run: |
+  #         git clone --depth=1 https://github.com/bitcoin-core/qa-assets "${RUNNER_TEMP}/qa-assets"
+  #         cd "${RUNNER_TEMP}/qa-assets"
+  #         echo "Using qa-assets repo from commit ..."
+  #         git log -1
 
-      - name: Run fuzz tests
-        if: matrix.job-type == 'fuzz'
-        working-directory: build
-        env:
-          BITCOINFUZZ: '${{ github.workspace }}\build\bin\Release\fuzz.exe'
-        run: |
-          py -3 test/fuzz/test_runner.py --par $NUMBER_OF_PROCESSORS --loglevel DEBUG "${RUNNER_TEMP}/qa-assets/fuzz_corpora"
+  #     - name: Run fuzz tests
+  #       if: matrix.job-type == 'fuzz'
+  #       working-directory: build
+  #       env:
+  #         BITCOINFUZZ: '${{ github.workspace }}\build\bin\Release\fuzz.exe'
+  #       run: |
+  #         py -3 test/fuzz/test_runner.py --par $NUMBER_OF_PROCESSORS --loglevel DEBUG "${RUNNER_TEMP}/qa-assets/fuzz_corpora"
 
-  windows-cross:
-    name: 'Linux->Windows cross, no tests'
-    runs-on: ubuntu-latest
-    if: ${{ vars.SKIP_BRANCH_PUSH != 'true' || github.event_name == 'pull_request' }}
+  # Disabled pending Windows support
+  # windows-cross:
+  #   name: 'Linux->Windows cross, no tests'
+  #   runs-on: ubuntu-latest
+  #   if: ${{ vars.SKIP_BRANCH_PUSH != 'true' || github.event_name == 'pull_request' }}
 
-    env:
-      FILE_ENV: './ci/test/00_setup_env_win64.sh'
-      DANGER_CI_ON_HOST_FOLDERS: 1
+  #   env:
+  #     FILE_ENV: './ci/test/00_setup_env_win64.sh'
+  #     DANGER_CI_ON_HOST_FOLDERS: 1
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v5
 
-      - name: Set CI directories
-        run: |
-          echo "CCACHE_DIR=${{ runner.temp }}/ccache_dir" >> "$GITHUB_ENV"
-          echo "BASE_ROOT_DIR=${{ runner.temp }}" >> "$GITHUB_ENV"
-          echo "DEPENDS_DIR=${{ runner.temp }}/depends" >> "$GITHUB_ENV"
-          echo "BASE_BUILD_DIR=${{ runner.temp }}/build" >> "$GITHUB_ENV"
+  #     - name: Set CI directories
+  #       run: |
+  #         echo "CCACHE_DIR=${{ runner.temp }}/ccache_dir" >> "$GITHUB_ENV"
+  #         echo "BASE_ROOT_DIR=${{ runner.temp }}" >> "$GITHUB_ENV"
+  #         echo "DEPENDS_DIR=${{ runner.temp }}/depends" >> "$GITHUB_ENV"
+  #         echo "BASE_BUILD_DIR=${{ runner.temp }}/build" >> "$GITHUB_ENV"
 
-      - name: Depends cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.DEPENDS_DIR }}/built
-          key: ${{ github.job }}-depends-${{ hashFiles('depends/**', 'ci/test/00_setup_env_win64.sh') }}
+  #     - name: Depends cache
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ${{ env.DEPENDS_DIR }}/built
+  #         key: ${{ github.job }}-depends-${{ hashFiles('depends/**', 'ci/test/00_setup_env_win64.sh') }}
 
-      - name: Restore Ccache cache
-        id: ccache-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ github.job }}-ccache-${{ github.run_id }}
-          restore-keys: ${{ github.job }}-ccache-
+  #     - name: Restore Ccache cache
+  #       id: ccache-cache
+  #       uses: actions/cache/restore@v4
+  #       with:
+  #         path: ${{ env.CCACHE_DIR }}
+  #         key: ${{ github.job }}-ccache-${{ github.run_id }}
+  #         restore-keys: ${{ github.job }}-ccache-
 
-      - name: CI script
-        run: ./ci/test_run_all.sh
+  #     - name: CI script
+  #       run: ./ci/test_run_all.sh
 
-      - name: Save Ccache cache
-        uses: actions/cache/save@v4
-        if: github.event_name != 'pull_request' && steps.ccache-cache.outputs.cache-hit != 'true'
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ github.job }}-ccache-${{ github.run_id }}
+  #     - name: Save Ccache cache
+  #       uses: actions/cache/save@v4
+  #       if: github.event_name != 'pull_request' && steps.ccache-cache.outputs.cache-hit != 'true'
+  #       with:
+  #         path: ${{ env.CCACHE_DIR }}
+  #         key: ${{ github.job }}-ccache-${{ github.run_id }}
 
-      - name: Upload built executables
-        uses: actions/upload-artifact@v4
-        with:
-          name: x86_64-w64-mingw32-executables-${{ github.run_id }}
-          path: |
-            ${{ env.BASE_BUILD_DIR }}/bin/*.exe
-            ${{ env.BASE_BUILD_DIR }}/src/secp256k1/bin/*.exe
-            ${{ env.BASE_BUILD_DIR }}/src/univalue/*.exe
-            ${{ env.BASE_BUILD_DIR }}/test/config.ini
+  #     - name: Upload built executables
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: x86_64-w64-mingw32-executables-${{ github.run_id }}
+  #         path: |
+  #           ${{ env.BASE_BUILD_DIR }}/bin/*.exe
+  #           ${{ env.BASE_BUILD_DIR }}/src/secp256k1/bin/*.exe
+  #           ${{ env.BASE_BUILD_DIR }}/src/univalue/*.exe
+  #           ${{ env.BASE_BUILD_DIR }}/test/config.ini
 
-  windows-native-test:
-    name: 'Windows, test cross-built'
-    runs-on: windows-2022
-    needs: windows-cross
+  # windows-native-test:
+  #   name: 'Windows, test cross-built'
+  #   runs-on: windows-2022
+  #   needs: windows-cross
 
-    env:
-      PYTHONUTF8: 1
-      TEST_RUNNER_TIMEOUT_FACTOR: 40
+  #   env:
+  #     PYTHONUTF8: 1
+  #     TEST_RUNNER_TIMEOUT_FACTOR: 40
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v5
 
-      - name: Download built executables
-        uses: actions/download-artifact@v4
-        with:
-          name: x86_64-w64-mingw32-executables-${{ github.run_id }}
+  #     - name: Download built executables
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: x86_64-w64-mingw32-executables-${{ github.run_id }}
 
-      - name: Run bitcoind.exe
-        run: ./bin/bitcoind.exe -version
+  #     - name: Run bitcoind.exe
+  #       run: ./bin/bitcoind.exe -version
 
-      - name: Find mt.exe tool
-        shell: pwsh
-        run: |
-          $sdk_dir = (Get-ItemProperty 'HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows Kits\Installed Roots' -Name KitsRoot10).KitsRoot10
-          $sdk_latest = (Get-ChildItem "$sdk_dir\bin" -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object Name -Descending | Select-Object -First 1).Name
-          "MT_EXE=${sdk_dir}bin\${sdk_latest}\x64\mt.exe" >> $env:GITHUB_ENV
+  #     - name: Find mt.exe tool
+  #       shell: pwsh
+  #       run: |
+  #         $sdk_dir = (Get-ItemProperty 'HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows Kits\Installed Roots' -Name KitsRoot10).KitsRoot10
+  #         $sdk_latest = (Get-ChildItem "$sdk_dir\bin" -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object Name -Descending | Select-Object -First 1).Name
+  #         "MT_EXE=${sdk_dir}bin\${sdk_latest}\x64\mt.exe" >> $env:GITHUB_ENV
 
-      - name: Get bitcoind manifest
-        shell: pwsh
-        run: |
-          & $env:MT_EXE -nologo -inputresource:bin\bitcoind.exe -out:bitcoind.manifest
-          Get-Content bitcoind.manifest
-          & $env:MT_EXE -nologo -inputresource:bin\bitcoind.exe -validate_manifest
+  #     - name: Get bitcoind manifest
+  #       shell: pwsh
+  #       run: |
+  #         & $env:MT_EXE -nologo -inputresource:bin\bitcoind.exe -out:bitcoind.manifest
+  #         Get-Content bitcoind.manifest
+  #         & $env:MT_EXE -nologo -inputresource:bin\bitcoind.exe -validate_manifest
 
-      - name: Run unit tests
-        # Can't use ctest here like other jobs as we don't have a CMake build tree.
-        run: |
-          ./bin/test_bitcoin.exe -l test_suite
-          ./src/secp256k1/bin/exhaustive_tests.exe
-          ./src/secp256k1/bin/noverify_tests.exe
-          ./src/secp256k1/bin/tests.exe
-          ./src/univalue/object.exe
-          ./src/univalue/unitester.exe
+  #     - name: Run unit tests
+  #       # Can't use ctest here like other jobs as we don't have a CMake build tree.
+  #       run: |
+  #         ./bin/test_bitcoin.exe -l test_suite
+  #         ./src/secp256k1/bin/exhaustive_tests.exe
+  #         ./src/secp256k1/bin/noverify_tests.exe
+  #         ./src/secp256k1/bin/tests.exe
+  #         ./src/univalue/object.exe
+  #         ./src/univalue/unitester.exe
 
-      - name: Adjust paths in test/config.ini
-        shell: pwsh
-        run: |
-          (Get-Content "test/config.ini") -replace '(?<=^SRCDIR=).*', '${{ github.workspace }}' -replace '(?<=^BUILDDIR=).*', '${{ github.workspace }}' -replace '(?<=^RPCAUTH=).*', '${{ github.workspace }}/share/rpcauth/rpcauth.py' | Set-Content "test/config.ini"
-          Get-Content "test/config.ini"
+  #     - name: Adjust paths in test/config.ini
+  #       shell: pwsh
+  #       run: |
+  #         (Get-Content "test/config.ini") -replace '(?<=^SRCDIR=).*', '${{ github.workspace }}' -replace '(?<=^BUILDDIR=).*', '${{ github.workspace }}' -replace '(?<=^RPCAUTH=).*', '${{ github.workspace }}/share/rpcauth/rpcauth.py' | Set-Content "test/config.ini"
+  #         Get-Content "test/config.ini"
 
-      - name: Set previous release directory
-        run: |
-          echo "PREVIOUS_RELEASES_DIR=${{ runner.temp }}/previous_releases" >> "$GITHUB_ENV"
+  #     - name: Set previous release directory
+  #       run: |
+  #         echo "PREVIOUS_RELEASES_DIR=${{ runner.temp }}/previous_releases" >> "$GITHUB_ENV"
 
   asan-lsan-ubsan-integer-no-depends-usdt:
     name: 'ASan + LSan + UBSan + integer, no depends, USDT'
