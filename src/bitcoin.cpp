@@ -29,7 +29,6 @@ Commands:
   node [ARGS]    Start node, equivalent to running 'bitcoind [ARGS]' or 'bitcoin-node [ARGS]'.
   rpc [ARGS]     Call RPC method, equivalent to running 'bitcoin-cli -named [ARGS]'.
   wallet [ARGS]  Call wallet command, equivalent to running 'bitcoin-wallet [ARGS]'.
-  tx [ARGS]      Manipulate hex-encoded transactions, equivalent to running 'bitcoin-tx [ARGS]'.
   help           Show full help message.
 )";
 
@@ -88,8 +87,6 @@ int main(int argc, char* argv[])
             args.emplace_back("-named");
         } else if (cmd.command == "wallet") {
             args.emplace_back("bitcoin-wallet");
-        } else if (cmd.command == "tx") {
-            args.emplace_back("bitcoin-tx");
         } else if (cmd.command == "chainstate") {
             args.emplace_back("bitcoin-chainstate");
         } else if (cmd.command == "mine") {

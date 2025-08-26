@@ -12,7 +12,6 @@ BINARIES = [
 'bin/bitcoind',
 'bin/bitcoin-cli',
 'bin/bitcoin-mine',
-'bin/bitcoin-tx',
 'bin/bitcoin-util',
 ]
 

@@ -16,7 +16,6 @@ function(create_test_config)
   endmacro()
 
   set_configure_variable(BUILD_CLI BUILD_BITCOIN_CLI)
-  set_configure_variable(BUILD_TX BUILD_BITCOIN_TX)
   set_configure_variable(BUILD_UTIL BUILD_BITCOIN_UTIL)
   set_configure_variable(BUILD_UTIL_CHAINSTATE BUILD_BITCOIN_CHAINSTATE)
   set_configure_variable(BUILD_DAEMON BUILD_BITCOIND)

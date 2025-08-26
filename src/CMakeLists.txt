@@ -365,20 +365,6 @@ if(BUILD_CLI)
 endif()
 
 
-if(BUILD_TX)
-  add_executable(bitcoin-tx bitcoin-tx.cpp)
-  add_windows_resources(bitcoin-tx bitcoin-tx-res.rc)
-  add_windows_application_manifest(bitcoin-tx)
-  target_link_libraries(bitcoin-tx
-    core_interface
-    bitcoin_common
-    bitcoin_util
-    univalue
-  )
-  install_binary_component(bitcoin-tx)
-endif()
-
-
 if(BUILD_UTIL)
   add_executable(bitcoin-util bitcoin-util.cpp)
   add_windows_resources(bitcoin-util bitcoin-util-res.rc)
