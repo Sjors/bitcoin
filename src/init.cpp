@@ -23,9 +23,6 @@
 #include <consensus/consensus.h>
 #include <deploymentstatus.h>
 #include <hash.h>
-#include <index/blockfilterindex.h>
-#include <index/coinstatsindex.h>
-#include <index/txindex.h>
 #include <init/common.h>
 #include <interfaces/chain.h>
 #include <interfaces/init.h>
@@ -263,9 +260,6 @@ void Interrupt(NodeContext& node)
     InterruptMapPort();
     if (node.connman)
         node.connman->Interrupt();
-    for (auto* index : node.indexes) {
-        index->Interrupt();
-    }
 }
 
 void Shutdown(NodeContext& node)
@@ -338,13 +332,6 @@ void Shutdown(NodeContext& node)
     // After there are no more peers/RPC left to give us new data which may generate
     // CValidationInterface callbacks, flush them...
     if (node.validation_signals) node.validation_signals->FlushBackgroundCallbacks();
-
-    // Stop and delete all indexes only after flushing background callbacks.
-    for (auto* index : node.indexes) index->Stop();
-    if (g_txindex) g_txindex.reset();
-    if (g_coin_stats_index) g_coin_stats_index.reset();
-    DestroyAllBlockFilterIndexes();
-    node.indexes.clear(); // all instances are nullptr now
 
     // Any future callbacks will be dropped. This should absolutely be safe - if
     // missing a callback results in an unrecoverable situation, unclean shutdown
@@ -465,7 +452,6 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-fastprune", "Use smaller block files and lower minimum prune height for testing purposes", ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-blockreconstructionextratxn=<n>", strprintf("Extra transactions to keep in memory for compact block reconstructions (default: %u)", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-blocksonly", strprintf("Whether to reject transactions from network peers. Disables automatic broadcast and rebroadcast of transactions, unless the source peer has the 'forcerelay' permission. RPC transactions are not affected. (default: %u)", DEFAULT_BLOCKSONLY), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-coinstatsindex", strprintf("Maintain coinstats index used by the gettxoutsetinfo RPC (default: %u)", DEFAULT_COINSTATSINDEX), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-conf=<file>", strprintf("Specify path to read-only configuration file. Relative paths will be prefixed by datadir location (only useable from command line, not configuration file) (default: %s)", BITCOIN_CONF_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-datadir=<dir>", "Specify data directory", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::OPTIONS);
     argsman.AddArg("-dbbatchsize", strprintf("Maximum database write batch size in bytes (default: %u)", nDefaultDbBatchSize), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::OPTIONS);
@@ -496,12 +482,6 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-startupnotify=<cmd>", "Execute command on startup.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-shutdownnotify=<cmd>", "Execute command immediately before beginning shutdown. The need for shutdown may be urgent, so be careful not to delay it long (if the command doesn't require interaction with the server, consider having it fork into the background).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 #endif
-    argsman.AddArg("-txindex", strprintf("Maintain a full transaction index, used by the getrawtransaction rpc call (default: %u)", DEFAULT_TXINDEX), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-blockfilterindex=<type>",
-                 strprintf("Maintain an index of compact filters by block (default: %s, values: %s).", DEFAULT_BLOCKFILTERINDEX, ListBlockFilterTypes()) +
-                 " If <type> is not supplied or if <type> = 1, indexes for all known types are enabled.",
-                 ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-
     argsman.AddArg("-addnode=<ip>", strprintf("Add a node to connect to and attempt to keep the connection open (see the addnode RPC help for more info). This option can be specified multiple times to add multiple nodes; connections are limited to %u at a time and are counted separately from the -maxconnections limit.", MAX_ADDNODE_CONNECTIONS), ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
     argsman.AddArg("-asmap=<file>", strprintf("Specify asn mapping used for bucketing of the peers (default: %s). Relative paths will be prefixed by the net-specific datadir location.", DEFAULT_ASMAP_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-bantime=<n>", strprintf("Default duration (in seconds) of manually configured bans (default: %u)", DEFAULT_MISBEHAVING_BANTIME), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -856,38 +836,12 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         return InitError(strprintf(_("Specified blocks directory \"%s\" does not exist."), args.GetArg("-blocksdir", "")));
     }
 
-    // parse and validate enabled filter types
-    std::string blockfilterindex_value = args.GetArg("-blockfilterindex", DEFAULT_BLOCKFILTERINDEX);
-    if (blockfilterindex_value == "" || blockfilterindex_value == "1") {
-        g_enabled_filter_types = AllBlockFilterTypes();
-    } else if (blockfilterindex_value != "0") {
-        const std::vector<std::string> names = args.GetArgs("-blockfilterindex");
-        for (const auto& name : names) {
-            BlockFilterType filter_type;
-            if (!BlockFilterTypeByName(name, filter_type)) {
-                return InitError(strprintf(_("Unknown -blockfilterindex value %s."), name));
-            }
-            g_enabled_filter_types.insert(filter_type);
-        }
-    }
-
     // Signal NODE_P2P_V2 if BIP324 v2 transport is enabled.
     if (args.GetBoolArg("-v2transport", DEFAULT_V2_TRANSPORT)) {
         g_local_services = ServiceFlags(g_local_services | NODE_P2P_V2);
     }
 
-    // Signal NODE_COMPACT_FILTERS if peerblockfilters and basic filters index are both enabled.
-    if (args.GetBoolArg("-peerblockfilters", DEFAULT_PEERBLOCKFILTERS)) {
-        if (g_enabled_filter_types.count(BlockFilterType::BASIC) != 1) {
-            return InitError(_("Cannot set -peerblockfilters without -blockfilterindex."));
-        }
-
-        g_local_services = ServiceFlags(g_local_services | NODE_COMPACT_FILTERS);
-    }
-
     if (args.GetIntArg("-prune", 0)) {
-        if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX))
-            return InitError(_("Prune mode is incompatible with -txindex."));
         if (args.GetBoolArg("-reindex-chainstate", false)) {
             return InitError(_("Prune mode is incompatible with -reindex-chainstate. Use full -reindex instead."));
         }
@@ -1206,17 +1160,6 @@ static ChainstateLoadResult InitAndLoadChainstate(
         if (!node.chainman->m_blockman.IsPruneMode()) {
             LogInfo("[snapshot] re-enabling NODE_NETWORK services");
             node.connman->AddLocalServices(NODE_NETWORK);
-        }
-        LogInfo("[snapshot] restarting indexes");
-        // Drain the validation interface queue to ensure that the old indexes
-        // don't have any pending work.
-        Assert(node.validation_signals)->SyncWithValidationInterfaceQueue();
-        for (auto* index : node.indexes) {
-            index->Interrupt();
-            index->Stop();
-            if (!(index->Init() && index->StartBackgroundSync())) {
-                LogPrintf("[snapshot] WARNING failed to restart index %s on snapshot chain\n", index->GetName());
-            }
         }
     };
     node::ChainstateLoadOptions options;
@@ -1572,13 +1515,6 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     LogInfo("Cache configuration:");
     LogInfo("* Using %.1f MiB for block index database", kernel_cache_sizes.block_tree_db * (1.0 / 1024 / 1024));
-    if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
-        LogInfo("* Using %.1f MiB for transaction index database", index_cache_sizes.tx_index * (1.0 / 1024 / 1024));
-    }
-    for (BlockFilterType filter_type : g_enabled_filter_types) {
-        LogInfo("* Using %.1f MiB for %s block filter index database",
-                  index_cache_sizes.filter_index * (1.0 / 1024 / 1024), BlockFilterTypeName(filter_type));
-    }
     LogInfo("* Using %.1f MiB for chain state database", kernel_cache_sizes.coins_db * (1.0 / 1024 / 1024));
 
     assert(!node.mempool);
@@ -1631,26 +1567,6 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                                      *node.mempool, *node.warnings,
                                      peerman_opts);
     validation_signals.RegisterValidationInterface(node.peerman.get());
-
-    // ********************************************************* Step 8: start indexers
-
-    if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
-        g_txindex = std::make_unique<TxIndex>(interfaces::MakeChain(node), index_cache_sizes.tx_index, false, do_reindex);
-        node.indexes.emplace_back(g_txindex.get());
-    }
-
-    for (const auto& filter_type : g_enabled_filter_types) {
-        InitBlockFilterIndex([&]{ return interfaces::MakeChain(node); }, filter_type, index_cache_sizes.filter_index, false, do_reindex);
-        node.indexes.emplace_back(GetBlockFilterIndex(filter_type));
-    }
-
-    if (args.GetBoolArg("-coinstatsindex", DEFAULT_COINSTATSINDEX)) {
-        g_coin_stats_index = std::make_unique<CoinStatsIndex>(interfaces::MakeChain(node), /*cache_size=*/0, false, do_reindex);
-        node.indexes.emplace_back(g_coin_stats_index.get());
-    }
-
-    // Init indexes
-    for (auto index : node.indexes) if (!index->Init()) return false;
 
     // ********************************************************* Step 9: load wallet
     for (const auto& client : node.chain_clients) {
@@ -1749,12 +1665,6 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
             return;
         }
 
-        // Start indexes initial sync
-        if (!StartIndexBackgroundSync(node)) {
-            bilingual_str err_str = _("Failed to start indexes, shutting down…");
-            chainman.GetNotifications().fatalError(err_str);
-            return;
-        }
         // Load mempool from disk
         if (auto* pool{chainman.ActiveChainstate().GetMempool()}) {
             LoadMempool(*pool, ShouldPersistMempool(args) ? MempoolPath(args) : fs::path{}, chainman.ActiveChainstate(), {});
@@ -1961,47 +1871,3 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     return true;
 }
 
-bool StartIndexBackgroundSync(NodeContext& node)
-{
-    // Find the oldest block among all indexes.
-    // This block is used to verify that we have the required blocks' data stored on disk,
-    // starting from that point up to the current tip.
-    // indexes_start_block='nullptr' means "start from height 0".
-    std::optional<const CBlockIndex*> indexes_start_block;
-    std::string older_index_name;
-    ChainstateManager& chainman = *Assert(node.chainman);
-    const Chainstate& chainstate = WITH_LOCK(::cs_main, return chainman.GetChainstateForIndexing());
-    const CChain& index_chain = chainstate.m_chain;
-
-    for (auto index : node.indexes) {
-        const IndexSummary& summary = index->GetSummary();
-        if (summary.synced) continue;
-
-        // Get the last common block between the index best block and the active chain
-        LOCK(::cs_main);
-        const CBlockIndex* pindex = chainman.m_blockman.LookupBlockIndex(summary.best_block_hash);
-        if (!index_chain.Contains(pindex)) {
-            pindex = index_chain.FindFork(pindex);
-        }
-
-        if (!indexes_start_block || !pindex || pindex->nHeight < indexes_start_block.value()->nHeight) {
-            indexes_start_block = pindex;
-            older_index_name = summary.name;
-            if (!pindex) break; // Starting from genesis so no need to look for earlier block.
-        }
-    };
-
-    // Verify all blocks needed to sync to current tip are present.
-    if (indexes_start_block) {
-        LOCK(::cs_main);
-        const CBlockIndex* start_block = *indexes_start_block;
-        if (!start_block) start_block = chainman.ActiveChain().Genesis();
-        if (!chainman.m_blockman.CheckBlockDataAvailability(*index_chain.Tip(), *Assert(start_block))) {
-            return InitError(Untranslated(strprintf("%s best block of the index goes beyond pruned data. Please disable the index or reindex (which will download the whole blockchain again)", older_index_name)));
-        }
-    }
-
-    // Start threads
-    for (auto index : node.indexes) if (!index->StartBackgroundSync()) return false;
-    return true;
-}

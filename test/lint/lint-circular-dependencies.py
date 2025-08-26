@@ -17,9 +17,6 @@ EXPECTED_CIRCULAR_DEPENDENCIES = (
     "node/utxo_snapshot -> validation -> node/utxo_snapshot",
     "kernel/coinstats -> validation -> kernel/coinstats",
     "versionbits -> versionbits_impl -> versionbits",
-
-    # Temporary, removed in followup https://github.com/bitcoin/bitcoin/pull/24230
-    "index/base -> node/context -> net_processing -> index/blockfilterindex -> index/base",
 )
 
 CODE_DIR = "src"

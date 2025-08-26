@@ -144,13 +144,6 @@ public:
     //! or one of its ancestors.
     virtual std::optional<int> findLocatorFork(const CBlockLocator& locator) = 0;
 
-    //! Returns whether a block filter index is available.
-    virtual bool hasBlockFilterIndex(BlockFilterType filter_type) = 0;
-
-    //! Returns whether any of the elements match the block via a BIP 157 block filter
-    //! or std::nullopt if the block filter for this block couldn't be found.
-    virtual std::optional<bool> blockFilterMatchesAny(BlockFilterType filter_type, const uint256& block_hash, const GCSFilter::ElementSet& filter_set) = 0;
-
     //! Return whether node has the block and optionally return block metadata
     //! or contents.
     virtual bool findBlock(const uint256& hash, const FoundBlock& block={}) = 0;

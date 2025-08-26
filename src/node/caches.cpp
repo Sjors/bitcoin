@@ -5,7 +5,6 @@
 #include <node/caches.h>
 
 #include <common/args.h>
-#include <index/txindex.h>
 #include <kernel/caches.h>
 #include <logging.h>
 #include <util/byte_units.h>
@@ -15,10 +14,6 @@
 
 // Unlike for the UTXO database, for the txindex scenario the leveldb cache make
 // a meaningful difference: https://github.com/bitcoin/bitcoin/pull/8273#issuecomment-229601991
-//! Max memory allocated to tx index DB specific cache in bytes.
-static constexpr size_t MAX_TX_INDEX_CACHE{1024_MiB};
-//! Max memory allocated to all block filter index caches combined in bytes.
-static constexpr size_t MAX_FILTER_INDEX_CACHE{1024_MiB};
 //! Maximum dbcache size on 32-bit systems.
 static constexpr size_t MAX_32BIT_DBCACHE{1024_MiB};
 
@@ -35,13 +30,6 @@ CacheSizes CalculateCacheSizes(const ArgsManager& args, size_t n_indexes)
     }
 
     IndexCacheSizes index_sizes;
-    index_sizes.tx_index = std::min(total_cache / 8, args.GetBoolArg("-txindex", DEFAULT_TXINDEX) ? MAX_TX_INDEX_CACHE : 0);
-    total_cache -= index_sizes.tx_index;
-    if (n_indexes > 0) {
-        size_t max_cache = std::min(total_cache / 8, MAX_FILTER_INDEX_CACHE);
-        index_sizes.filter_index = max_cache / n_indexes;
-        total_cache -= index_sizes.filter_index * n_indexes;
-    }
     return {index_sizes, kernel::CacheSizes{total_cache}};
 }
 } // namespace node

@@ -161,10 +161,6 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   deploymentstatus.cpp
   flatfile.cpp
   headerssync.cpp
-  index/base.cpp
-  index/blockfilterindex.cpp
-  index/coinstatsindex.cpp
-  index/txindex.cpp
   init.cpp
   kernel/chain.cpp
   kernel/checks.cpp
