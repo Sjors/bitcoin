@@ -4,8 +4,6 @@
 
 #include <test/util/setup_common.h>
 
-#include <addrman.h>
-#include <banman.h>
 #include <chainparams.h>
 #include <common/system.h>
 #include <consensus/consensus.h>
@@ -18,14 +16,12 @@
 #include <kernel/mempool_entry.h>
 #include <logging.h>
 #include <net.h>
-#include <net_processing.h>
 #include <node/blockstorage.h>
 #include <node/chainstate.h>
 #include <node/context.h>
 #include <node/kernel_notifications.h>
 #include <node/mempool_args.h>
 #include <node/miner.h>
-#include <node/peerman_args.h>
 #include <node/warnings.h>
 #include <noui.h>
 #include <policy/fees.h>
@@ -93,12 +89,6 @@ struct NetworkSetup
 };
 static NetworkSetup g_networksetup_instance;
 
-void SetupCommonTestArgs(ArgsManager& argsman)
-{
-    argsman.AddArg("-testdatadir", strprintf("Custom data directory (default: %s<random_string>)", fs::PathToString(fs::temp_directory_path() / TEST_DIR_PATH_ELEMENT / "")),
-                   ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
-}
-
 /** Test setup failure */
 static void ExitFailure(std::string_view str_err)
 {
@@ -117,7 +107,6 @@ BasicTestingSetup::BasicTestingSetup(const ChainType chainType, TestOpts opts)
     fDiscover = true;
     fListen = true;
     g_reachable_nets.Reset();
-    ClearLocal();
 
     m_node.shutdown_signal = &m_interrupt;
     m_node.shutdown_request = [this]{ return m_interrupt(); };
@@ -141,7 +130,6 @@ BasicTestingSetup::BasicTestingSetup(const ChainType chainType, TestOpts opts)
     gArgs.ClearPathCache();
     {
         SetupServerArgs(*m_node.args);
-        SetupCommonTestArgs(*m_node.args);
         std::string error;
         if (!m_node.args->ParseParameters(arguments.size(), arguments.data(), error)) {
             m_node.args->ClearArgs();
@@ -288,10 +276,6 @@ ChainTestingSetup::~ChainTestingSetup()
 {
     if (m_node.scheduler) m_node.scheduler->stop();
     if (m_node.validation_signals) m_node.validation_signals->FlushBackgroundCallbacks();
-    m_node.connman.reset();
-    m_node.banman.reset();
-    m_node.addrman.reset();
-    m_node.netgroupman.reset();
     m_node.args = nullptr;
     m_node.mempool.reset();
     Assert(!m_node.fee_estimator); // Each test must create a local object, if they wish to use the fee_estimator
@@ -334,26 +318,6 @@ TestingSetup::TestingSetup(
     LoadVerifyActivateChainstate();
 
     if (!opts.setup_net) return;
-
-    m_node.netgroupman = std::make_unique<NetGroupManager>(/*asmap=*/std::vector<bool>());
-    m_node.addrman = std::make_unique<AddrMan>(*m_node.netgroupman,
-                                               /*deterministic=*/false,
-                                               m_node.args->GetIntArg("-checkaddrman", 0));
-    m_node.banman = std::make_unique<BanMan>(m_args.GetDataDirBase() / "banlist", DEFAULT_MISBEHAVING_BANTIME);
-    m_node.connman = std::make_unique<ConnmanTestMsg>(0x1337, 0x1337, *m_node.addrman, *m_node.netgroupman, Params()); // Deterministic randomness for tests.
-    PeerManager::Options peerman_opts;
-    ApplyArgsManOptions(*m_node.args, peerman_opts);
-    peerman_opts.deterministic_rng = true;
-    m_node.peerman = PeerManager::make(*m_node.connman, *m_node.addrman,
-                                       m_node.banman.get(), *m_node.chainman,
-                                       *m_node.mempool, *m_node.warnings,
-                                       peerman_opts);
-
-    {
-        CConnman::Options options;
-        options.m_msgproc = m_node.peerman.get();
-        m_node.connman->Init(options);
-    }
 }
 
 TestChain100Setup::TestChain100Setup(

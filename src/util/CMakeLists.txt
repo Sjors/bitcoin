@@ -3,7 +3,6 @@
 # file COPYING or https://opensource.org/license/mit/.
 
 add_library(bitcoin_util STATIC EXCLUDE_FROM_ALL
-  asmap.cpp
   batchpriority.cpp
   bip32.cpp
   bytevectorhash.cpp

@@ -13,24 +13,19 @@
 #include <vector>
 
 class ArgsManager;
-class AddrMan;
 class BanMan;
 class CBlockPolicyEstimator;
-class CConnman;
 class ValidationSignals;
 class CScheduler;
 class CTxMemPool;
 class ChainstateManager;
 class ECC_Context;
-class NetGroupManager;
-class PeerManager;
 class Sv2TemplateProvider;
 namespace interfaces {
 class Chain;
 class ChainClient;
 class Mining;
 class Init;
-class WalletLoader;
 } // namespace interfaces
 namespace kernel {
 struct Context;
@@ -63,14 +58,9 @@ struct NodeContext {
     std::function<bool()> shutdown_request;
     //! Interrupt object used to track whether node shutdown was requested.
     util::SignalInterrupt* shutdown_signal{nullptr};
-    std::unique_ptr<AddrMan> addrman;
-    std::unique_ptr<CConnman> connman;
     std::unique_ptr<CTxMemPool> mempool;
-    std::unique_ptr<const NetGroupManager> netgroupman;
     std::unique_ptr<CBlockPolicyEstimator> fee_estimator;
-    std::unique_ptr<PeerManager> peerman;
     std::unique_ptr<ChainstateManager> chainman;
-    std::unique_ptr<BanMan> banman;
     ArgsManager* args{nullptr}; // Currently a raw pointer because the memory is not managed by this struct
     std::unique_ptr<interfaces::Chain> chain;
     //! List of all chain clients (wallet processes or other client) connected to node.
@@ -78,7 +68,6 @@ struct NodeContext {
     //! Reference to chain client that should used to load or create wallets
     //! opened by the gui.
     std::unique_ptr<interfaces::Mining> mining;
-    interfaces::WalletLoader* wallet_loader{nullptr};
     std::unique_ptr<CScheduler> scheduler;
     std::function<void()> rpc_interruption_point = [] {};
     //! Issues blocking calls about sync status, errors and warnings

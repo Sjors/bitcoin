@@ -2,8 +2,6 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <addrdb.h>
-#include <banman.h>
 #include <blockfilter.h>
 #include <chain.h>
 #include <chainparams.h>
@@ -21,9 +19,7 @@
 #include <kernel/context.h>
 #include <kernel/mempool_entry.h>
 #include <logging.h>
-#include <mapport.h>
 #include <net.h>
-#include <net_processing.h>
 #include <netaddress.h>
 #include <netbase.h>
 #include <node/blockstorage.h>
@@ -72,7 +68,6 @@ using interfaces::Handler;
 using interfaces::MakeSignalHandler;
 using interfaces::Mining;
 using interfaces::Node;
-using interfaces::WalletLoader;
 using node::BlockAssembler;
 using node::BlockWaitOptions;
 using util::Join;
@@ -166,83 +161,37 @@ public:
         });
         args().WriteSettingsFile();
     }
-    void mapPort(bool enable) override { StartMapPort(enable); }
     bool getProxy(Network net, Proxy& proxy_info) override { return GetProxy(net, proxy_info); }
     size_t getNodeCount(ConnectionDirection flags) override
     {
-        return m_context->connman ? m_context->connman->GetNodeCount(flags) : 0;
-    }
-    bool getNodesStats(NodesStats& stats) override
-    {
-        stats.clear();
-
-        if (m_context->connman) {
-            std::vector<CNodeStats> stats_temp;
-            m_context->connman->GetNodeStats(stats_temp);
-
-            stats.reserve(stats_temp.size());
-            for (auto& node_stats_temp : stats_temp) {
-                stats.emplace_back(std::move(node_stats_temp), false, CNodeStateStats());
-            }
-
-            // Try to retrieve the CNodeStateStats for each node.
-            if (m_context->peerman) {
-                TRY_LOCK(::cs_main, lockMain);
-                if (lockMain) {
-                    for (auto& node_stats : stats) {
-                        std::get<1>(node_stats) =
-                            m_context->peerman->GetNodeStateStats(std::get<0>(node_stats).nodeid, std::get<2>(node_stats));
-                    }
-                }
-            }
-            return true;
-        }
-        return false;
+        return 0;
     }
     bool getBanned(banmap_t& banmap) override
     {
-        if (m_context->banman) {
-            m_context->banman->GetBanned(banmap);
-            return true;
-        }
         return false;
     }
     bool ban(const CNetAddr& net_addr, int64_t ban_time_offset) override
     {
-        if (m_context->banman) {
-            m_context->banman->Ban(net_addr, ban_time_offset);
-            return true;
-        }
         return false;
     }
     bool unban(const CSubNet& ip) override
     {
-        if (m_context->banman) {
-            m_context->banman->Unban(ip);
-            return true;
-        }
         return false;
     }
     bool disconnectByAddress(const CNetAddr& net_addr) override
     {
-        if (m_context->connman) {
-            return m_context->connman->DisconnectNode(net_addr);
-        }
         return false;
     }
     bool disconnectById(NodeId id) override
     {
-        if (m_context->connman) {
-            return m_context->connman->DisconnectNode(id);
-        }
         return false;
     }
     std::vector<std::unique_ptr<interfaces::ExternalSigner>> listExternalSigners() override
     {
         return {};
     }
-    int64_t getTotalBytesRecv() override { return m_context->connman ? m_context->connman->GetTotalBytesRecv() : 0; }
-    int64_t getTotalBytesSent() override { return m_context->connman ? m_context->connman->GetTotalBytesSent() : 0; }
+    int64_t getTotalBytesRecv() override { return 0; }
+    int64_t getTotalBytesSent() override { return 0; }
     size_t getMempoolSize() override { return m_context->mempool ? m_context->mempool->size() : 0; }
     size_t getMempoolDynamicUsage() override { return m_context->mempool ? m_context->mempool->DynamicMemoryUsage() : 0; }
     size_t getMempoolMaxUsage() override { return m_context->mempool ? m_context->mempool->m_opts.max_size_bytes : 0; }
@@ -259,10 +208,7 @@ public:
     }
     std::map<CNetAddr, LocalServiceInfo> getNetLocalAddresses() override
     {
-        if (m_context->connman)
-            return m_context->connman->getNetLocalAddresses();
-        else
-            return {};
+        return {};
     }
     int getNumBlocks() override
     {
@@ -292,13 +238,8 @@ public:
         return chainman().IsInitialBlockDownload();
     }
     bool isLoadingBlocks() override { return chainman().m_blockman.LoadingBlocks(); }
-    void setNetworkActive(bool active) override
-    {
-        if (m_context->connman) {
-            m_context->connman->SetNetworkActive(active);
-        }
-    }
-    bool getNetworkActive() override { return m_context->connman && m_context->connman->GetNetworkActive(); }
+    void setNetworkActive(bool active) override {}
+    bool getNetworkActive() override { return false; }
     CFeeRate getDustRelayFee() override
     {
         if (!m_context->mempool) return CFeeRate{DUST_RELAY_TX_FEE};
@@ -312,10 +253,6 @@ public:
     TransactionError broadcastTransaction(CTransactionRef tx, CAmount max_tx_fee, std::string& err_string) override
     {
         return BroadcastTransaction(*m_context, std::move(tx), err_string, max_tx_fee, /*relay=*/ true, /*wait_callback=*/ false);
-    }
-    WalletLoader& walletLoader() override
-    {
-        return *Assert(m_context->wallet_loader);
     }
     std::unique_ptr<Handler> handleInitMessage(InitMessageFn fn) override
     {

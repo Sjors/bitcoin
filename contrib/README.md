@@ -8,9 +8,6 @@ Additional tools, including the `github-merge.py` script, are available in the [
 ### [Verify-Commits](/contrib/verify-commits) ###
 Tool to verify that every merge commit was signed by a developer using the `github-merge.py` script.
 
-### [Seeds](/contrib/seeds) ###
-Utility to generate the pnSeed[] array that is compiled into the client.
-
 Build Tools and Keys
 ---------------------
 

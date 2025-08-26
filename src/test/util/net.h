@@ -8,11 +8,8 @@
 #include <compat/compat.h>
 #include <netmessagemaker.h>
 #include <net.h>
-#include <net_permissions.h>
-#include <net_processing.h>
 #include <netaddress.h>
 #include <node/connection_types.h>
-#include <node/eviction.h>
 #include <span.h>
 #include <sync.h>
 #include <util/sock.h>
@@ -32,69 +29,6 @@
 
 class FastRandomContext;
 
-struct ConnmanTestMsg : public CConnman {
-    using CConnman::CConnman;
-
-    void SetMsgProc(NetEventsInterface* msgproc)
-    {
-        m_msgproc = msgproc;
-    }
-
-    void SetPeerConnectTimeout(std::chrono::seconds timeout)
-    {
-        m_peer_connect_timeout = timeout;
-    }
-
-    void ResetAddrCache();
-    void ResetMaxOutboundCycle();
-
-    std::vector<CNode*> TestNodes()
-    {
-        LOCK(m_nodes_mutex);
-        return m_nodes;
-    }
-
-    void AddTestNode(CNode& node)
-    {
-        LOCK(m_nodes_mutex);
-        m_nodes.push_back(&node);
-
-        if (node.IsManualOrFullOutboundConn()) ++m_network_conn_counts[node.addr.GetNetwork()];
-    }
-
-    void ClearTestNodes()
-    {
-        LOCK(m_nodes_mutex);
-        for (CNode* node : m_nodes) {
-            delete node;
-        }
-        m_nodes.clear();
-    }
-
-    void Handshake(CNode& node,
-                   bool successfully_connected,
-                   ServiceFlags remote_services,
-                   ServiceFlags local_services,
-                   int32_t version,
-                   bool relay_txs)
-        EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex);
-
-    bool ProcessMessagesOnce(CNode& node) EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex)
-    {
-        return m_msgproc->ProcessMessages(&node, flagInterruptMsgProc);
-    }
-
-    void NodeReceiveMsgBytes(CNode& node, std::span<const uint8_t> msg_bytes, bool& complete) const;
-
-    bool ReceiveMsgFrom(CNode& node, CSerializedNetMsg&& ser_msg) const;
-    void FlushSendBuffer(CNode& node) const;
-
-    bool AlreadyConnectedPublic(const CAddress& addr) { return AlreadyConnectedToAddress(addr); };
-
-    CNode* ConnectNodePublic(PeerManager& peerman, const char* pszDest, ConnectionType conn_type)
-        EXCLUSIVE_LOCKS_REQUIRED(!m_unused_i2p_sessions_mutex);
-};
-
 constexpr ServiceFlags ALL_SERVICE_FLAGS[]{
     NODE_NONE,
     NODE_NETWORK,
@@ -103,19 +37,6 @@ constexpr ServiceFlags ALL_SERVICE_FLAGS[]{
     NODE_COMPACT_FILTERS,
     NODE_NETWORK_LIMITED,
     NODE_P2P_V2,
-};
-
-constexpr NetPermissionFlags ALL_NET_PERMISSION_FLAGS[]{
-    NetPermissionFlags::None,
-    NetPermissionFlags::BloomFilter,
-    NetPermissionFlags::Relay,
-    NetPermissionFlags::ForceRelay,
-    NetPermissionFlags::NoBan,
-    NetPermissionFlags::Mempool,
-    NetPermissionFlags::Addr,
-    NetPermissionFlags::Download,
-    NetPermissionFlags::Implicit,
-    NetPermissionFlags::All,
 };
 
 constexpr ConnectionType ALL_CONNECTION_TYPES[]{
@@ -322,7 +243,5 @@ private:
     std::shared_ptr<Pipes> m_pipes;
     std::shared_ptr<Queue> m_accept_sockets;
 };
-
-std::vector<NodeEvictionCandidate> GetRandomNodeEvictionCandidates(int n_candidates, FastRandomContext& random_context);
 
 #endif // BITCOIN_TEST_UTIL_NET_H

@@ -5,7 +5,6 @@
 
 #include <consensus/validation.h>
 #include <net.h>
-#include <net_processing.h>
 #include <node/blockstorage.h>
 #include <node/context.h>
 #include <node/types.h>
@@ -37,7 +36,6 @@ TransactionError BroadcastTransaction(NodeContext& node, const CTransactionRef t
     // and reset after the RPC sever and wallet are stopped.
     assert(node.chainman);
     assert(node.mempool);
-    assert(node.peerman);
 
     std::promise<void> promise;
     Txid txid = tx->GetHash();
@@ -113,10 +111,6 @@ TransactionError BroadcastTransaction(NodeContext& node, const CTransactionRef t
         // Wait until Validation Interface clients have been notified of the
         // transaction entering the mempool.
         promise.get_future().wait();
-    }
-
-    if (relay) {
-        node.peerman->RelayTransaction(txid, wtxid);
     }
 
     return TransactionError::OK;

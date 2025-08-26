@@ -98,7 +98,6 @@ add_library(bitcoin_common STATIC EXCLUDE_FROM_ALL
   common/interfaces.cpp
   common/messages.cpp
   common/netif.cpp
-  common/pcp.cpp
   common/settings.cpp
   common/signmessage.cpp
   common/sockman.cpp
@@ -114,7 +113,6 @@ add_library(bitcoin_common STATIC EXCLUDE_FROM_ALL
   key_io.cpp
   merkleblock.cpp
   musig.cpp
-  net_permissions.cpp
   net_types.cpp
   netaddress.cpp
   netbase.cpp
@@ -150,9 +148,6 @@ include(InstallBinaryComponent)
 
 # Only used by the tests
 add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
-  addrdb.cpp
-  addrman.cpp
-  banman.cpp
   bip324.cpp
   blockencodings.cpp
   blockfilter.cpp
@@ -169,10 +164,7 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   kernel/cs_main.cpp
   kernel/disconnected_transactions.cpp
   kernel/mempool_removal_reason.cpp
-  mapport.cpp
   net.cpp
-  net_processing.cpp
-  netgroup.cpp
   node/abort.cpp
   node/blockmanager_args.cpp
   node/blockstorage.cpp
@@ -184,7 +176,6 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/connection_types.cpp
   node/context.cpp
   node/database_args.cpp
-  node/eviction.cpp
   node/interfaces.cpp
   node/kernel_notifications.cpp
   node/mempool_args.cpp
@@ -193,7 +184,6 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/miner.cpp
   node/mini_miner.cpp
   node/minisketchwrapper.cpp
-  node/peerman_args.cpp
   node/psbt.cpp
   node/timeoffsets.cpp
   node/transaction.cpp

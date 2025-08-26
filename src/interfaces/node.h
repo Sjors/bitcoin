@@ -25,12 +25,10 @@
 
 class BanMan;
 class CFeeRate;
-class CNodeStats;
 class Coin;
 class UniValue;
 class Proxy;
 enum class SynchronizationState;
-struct CNodeStateStats;
 struct bilingual_str;
 namespace node {
 enum class TransactionError;
@@ -42,7 +40,6 @@ class CCoinControl;
 
 namespace interfaces {
 class Handler;
-class WalletLoader;
 struct BlockTip;
 
 //! Block and header tip information
@@ -119,18 +116,11 @@ public:
     //! previous settings in <datadir>/settings.json.bak.
     virtual void resetSettings() = 0;
 
-    //! Map port.
-    virtual void mapPort(bool enable) = 0;
-
     //! Get proxy.
     virtual bool getProxy(Network net, Proxy& proxy_info) = 0;
 
     //! Get number of connections.
     virtual size_t getNodeCount(ConnectionDirection flags) = 0;
-
-    //! Get stats for connected nodes.
-    using NodesStats = std::vector<std::tuple<CNodeStats, bool, CNodeStateStats>>;
-    virtual bool getNodesStats(NodesStats& stats) = 0;
 
     //! Get ban map entries.
     virtual bool getBanned(banmap_t& banmap) = 0;
@@ -203,9 +193,6 @@ public:
 
     //! Broadcast transaction.
     virtual node::TransactionError broadcastTransaction(CTransactionRef tx, CAmount max_tx_fee, std::string& err_string) = 0;
-
-    //! Get wallet loader.
-    virtual WalletLoader& walletLoader() = 0;
 
     //! Register handler for init messages.
     using InitMessageFn = std::function<void(const std::string& message)>;

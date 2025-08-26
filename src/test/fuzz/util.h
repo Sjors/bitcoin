@@ -29,8 +29,6 @@
 #include <string>
 #include <vector>
 
-class PeerManager;
-
 template <typename... Callables>
 size_t CallOneOf(FuzzedDataProvider& fuzzed_data_provider, Callables... callables)
 {
