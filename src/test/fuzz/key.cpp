@@ -8,7 +8,6 @@
 #include <outputtype.h>
 #include <policy/policy.h>
 #include <pubkey.h>
-#include <rpc/util.h>
 #include <script/keyorigin.h>
 #include <script/script.h>
 #include <script/sign.h>
