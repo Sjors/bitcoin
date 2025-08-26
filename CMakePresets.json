@@ -61,14 +61,9 @@
       "binaryDir": "${sourceDir}/build_dev_mode",
       "errors": {"dev": true},
       "cacheVariables": {
-        "BUILD_CLI": "ON",
-        "BUILD_DAEMON": "ON",
         "BUILD_FUZZ_BINARY": "ON",
-        "BUILD_KERNEL_LIB": "ON",
         "BUILD_SHARED_LIBS": "ON",
         "BUILD_TESTS": "ON",
-        "BUILD_UTIL": "ON",
-        "BUILD_UTIL_CHAINSTATE": "ON",
         "ENABLE_EXTERNAL_SIGNER": "ON",
         "ENABLE_IPC": "ON",
         "WITH_USDT": "ON"

@@ -8,7 +8,7 @@ function(generate_setup_nsi)
   set(CLIENT_URL ${PROJECT_HOMEPAGE_URL})
   set(CLIENT_TARNAME "bitcoin")
   set(BITCOIN_WRAPPER_NAME "bitcoin")
-  # TODO: add bitcoin-node and bitcoin-miner
+  # TODO: add bitcoin-mine
   set(EXEEXT ${CMAKE_EXECUTABLE_SUFFIX})
   configure_file(${PROJECT_SOURCE_DIR}/share/setup.nsi.in ${PROJECT_BINARY_DIR}/bitcoin-win64-setup.nsi USE_SOURCE_PERMISSIONS @ONLY)
 endfunction()

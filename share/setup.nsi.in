@@ -79,7 +79,7 @@ Section -Main SEC0000
     SetOutPath $INSTDIR\share\rpcauth
     File @abs_top_srcdir@/share/rpcauth/*.*
     SetOutPath $INSTDIR\daemon
-    # TODO: add bitcoin-node and bitcoin-miner
+    # TODO: add bitcoin-node and bitcoin-mine
     SetOutPath $INSTDIR
     WriteRegStr HKCU "${REGKEY}\Components" Main 1
 SectionEnd

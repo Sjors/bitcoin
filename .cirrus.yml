@@ -181,15 +181,6 @@ task:
     FILE_ENV: "./ci/test/00_setup_env_i686.sh"
 
 task:
-  name: 'libbitcoinkernel'
-  << : *GLOBAL_TASK_TEMPLATE
-  persistent_worker:
-    labels:
-      type: small
-  env:
-    FILE_ENV: "./ci/test/00_setup_env_native_libbitcoinkernel.sh"
-
-task:
   name: 'macOS-cross, no tests'
   << : *GLOBAL_TASK_TEMPLATE
   persistent_worker:

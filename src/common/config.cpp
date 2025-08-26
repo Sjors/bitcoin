@@ -147,39 +147,10 @@ bool ArgsManager::ReadConfigFiles(std::string& error, bool ignore_invalid_keys)
         if (!ReadConfigStream(stream, fs::PathToString(conf_path), error, ignore_invalid_keys)) {
             return false;
         }
-        // `-includeconf` cannot be included in the command line arguments except
-        // as `-noincludeconf` (which indicates that no included conf file should be used).
         bool use_conf_file{true};
-        {
-            LOCK(cs_args);
-            if (auto* includes = common::FindKey(m_settings.command_line_options, "includeconf")) {
-                // ParseParameters() fails if a non-negated -includeconf is passed on the command-line
-                assert(common::SettingsSpan(*includes).last_negated());
-                use_conf_file = false;
-            }
-        }
         if (use_conf_file) {
             std::string chain_id = GetChainTypeString();
             std::vector<std::string> conf_file_names;
-
-            auto add_includes = [&](const std::string& network, size_t skip = 0) {
-                size_t num_values = 0;
-                LOCK(cs_args);
-                if (auto* section = common::FindKey(m_settings.ro_config, network)) {
-                    if (auto* values = common::FindKey(*section, "includeconf")) {
-                        for (size_t i = std::max(skip, common::SettingsSpan(*values).negated()); i < values->size(); ++i) {
-                            conf_file_names.push_back((*values)[i].get_str());
-                        }
-                        num_values = values->size();
-                    }
-                }
-                return num_values;
-            };
-
-            // We haven't set m_network yet (that happens in SelectParams()), so manually check
-            // for network.includeconf args.
-            const size_t chain_includes = add_includes(chain_id);
-            const size_t default_includes = add_includes({});
 
             for (const std::string& conf_file_name : conf_file_names) {
                 const auto include_conf_path{AbsPathForConfigVal(*this, fs::PathFromString(conf_file_name), /*net_specific=*/false)};
@@ -197,19 +168,6 @@ bool ArgsManager::ReadConfigFiles(std::string& error, bool ignore_invalid_keys)
                     error = "Failed to include configuration file " + conf_file_name;
                     return false;
                 }
-            }
-
-            // Warn about recursive -includeconf
-            conf_file_names.clear();
-            add_includes(chain_id, /* skip= */ chain_includes);
-            add_includes({}, /* skip= */ default_includes);
-            std::string chain_id_final = GetChainTypeString();
-            if (chain_id_final != chain_id) {
-                // Also warn about recursive includeconf for the chain that was specified in one of the includeconfs
-                add_includes(chain_id_final);
-            }
-            for (const std::string& conf_file_name : conf_file_names) {
-                tfm::format(std::cerr, "warning: -includeconf cannot be used from included files; ignoring -includeconf=%s\n", conf_file_name);
             }
         }
     }

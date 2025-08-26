@@ -2,7 +2,6 @@
 
 | Name                     | Description |
 |--------------------------|-------------|
-| *libbitcoin_cli*         | RPC client functionality used by *bitcoin-cli* executable |
 | *libbitcoin_common*      | Home for common functionality shared by different executables and libraries. Similar to *libbitcoin_util*, but higher-level (see [Dependencies](#dependencies)). |
 | *libbitcoin_consensus*   | Consensus functionality used by *libbitcoin_node* |
 | *libbitcoin_crypto*      | Hardware-optimized functions for data encryption, hashing, message authentication, and key derivation. |
@@ -18,7 +17,6 @@
 
 - Generally each library should have a corresponding source directory and namespace. Source code organization is a work in progress, so it is true that some namespaces are applied inconsistently, and if you look at [`add_library(bitcoin_* ...)`](../../src/CMakeLists.txt) lists you can see that many libraries pull in files from outside their source directory. But when working with libraries, it is good to follow a consistent pattern like:
 
-  - *libbitcoin_node* code lives in `src/node/` in the `node::` namespace
   - *libbitcoin_ipc* code lives in `src/ipc/` in the `ipc::` namespace
   - *libbitcoin_util* code lives in `src/util/` in the `util::` namespace
   - *libbitcoin_consensus* code lives in `src/consensus/` in the `Consensus::` namespace
@@ -35,13 +33,6 @@
 
 graph TD;
 
-bitcoin-cli[bitcoin-cli]-->libbitcoin_cli;
-
-bitcoind[bitcoind]-->libbitcoin_node;
-
-libbitcoin_cli-->libbitcoin_util;
-libbitcoin_cli-->libbitcoin_common;
-
 bitcoin-mine-->libbitcoin_sv2;
 bitcoin-mine-->libbitcoin_common;
 bitcoin-mine-->libbitcoin_ipc;
@@ -55,12 +46,6 @@ libbitcoin_common-->libbitcoin_util;
 libbitcoin_kernel-->libbitcoin_consensus;
 libbitcoin_kernel-->libbitcoin_crypto;
 libbitcoin_kernel-->libbitcoin_util;
-
-libbitcoin_node-->libbitcoin_consensus;
-libbitcoin_node-->libbitcoin_crypto;
-libbitcoin_node-->libbitcoin_kernel;
-libbitcoin_node-->libbitcoin_common;
-libbitcoin_node-->libbitcoin_util;
 
 libbitcoin_util-->libbitcoin_crypto;
 
@@ -92,6 +77,3 @@ class bitcoind,bitcoin-cli,bitcoin-mine bold
 
 - Node, and wallet code internal implementations should all be independent of each other, and the *libbitcoin_node*, *libbitcoin_wallet* libraries should never reference each other's symbols. They should only call each other through [`src/interfaces/`](../../src/interfaces/) abstract interfaces.
 
-## Work in progress
-
-- Validation code is moving from *libbitcoin_node* to *libbitcoin_kernel* as part of [The libbitcoinkernel Project #27587](https://github.com/bitcoin/bitcoin/issues/27587)

@@ -58,16 +58,8 @@ This table describes the files installed by Bitcoin Core across different platfo
 |------------------------------------------------------------|-----------------------------------------------------------------------------|
 | [README.md](README.md) or [readme.txt](README_windows.txt) | Project information and instructions                                        |
 | bitcoin.conf                                               | [Generated](../contrib/devtools/gen-bitcoin-conf.sh) configuration file     |
-| bin/bitcoin                                                | Command-line tool for interacting with Bitcoin. Calls other binaries below. |
-| bin/bitcoin-cli                                            | Tool for making node and wallet RPC calls.                                  |
-| bin/bitcoin-util                                           | Miscellaneous utilities                                                     |
-| bin/bitcoind                                               | Bitcoin node            |
-| *lib/libbitcoinkernel.so*                                  | Shared library containing core consensus and validation code                |
-| *lib/pkgconfig/libbitcoinkernel.pc*                        | Pkg-config metadata for linking to `libbitcoinkernel`                       |
-| *libexec/bitcoin-chainstate*                               | Tool to validate and connect blocks                                         |
-| libexec/bitcoin-node                                       | IPC-enabled alternative to `bitcoind`                                       |
 | libexec/test_bitcoin                                       | Unit test binary                                                            |
-| share/man/man1/                                            | Man pages for command-line tools like `bitcoin-cli`, `bitcoind`, and others |
+| share/man/man1/                                            | Man pages for command-line tools like `bitcoin-mine`                        |
 | share/rpcauth/                                             | Documentation and scripts for RPC authentication setup                      |
 
 ### Notes

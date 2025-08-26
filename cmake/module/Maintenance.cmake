@@ -23,7 +23,7 @@ function(add_maintenance_targets)
     return()
   endif()
 
-  foreach(target IN ITEMS bitcoin bitcoind bitcoin-node bitcoin-cli bitcoin-util test_bitcoin bitcoin-mine)
+  foreach(target IN ITEMS test_bitcoin bitcoin-mine)
     if(TARGET ${target})
       list(APPEND executables $<TARGET_FILE:${target}>)
     endif()
@@ -43,8 +43,7 @@ function(add_maintenance_targets)
 endfunction()
 
 function(add_windows_deploy_target)
-  # TODO: add TARGET bitcoin-node TARGET bitcoin-mine
-  if(MINGW AND TARGET bitcoin)
+  if(MINGW AND TARGET bitcoin-mine)
     find_program(MAKENSIS_EXECUTABLE makensis)
     if(NOT MAKENSIS_EXECUTABLE)
       add_custom_target(deploy
