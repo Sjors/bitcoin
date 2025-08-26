@@ -73,6 +73,14 @@ unset OBJCPLUS_INCLUDE_PATH
 build_CC="${NATIVE_GCC}/bin/gcc -isystem ${NATIVE_GCC}/include"
 build_CXX="${NATIVE_GCC}/bin/g++ -isystem ${NATIVE_GCC}/include/c++ -isystem ${NATIVE_GCC}/include"
 
+case "$HOST" in
+    *mingw*) export LIBRARY_PATH="${NATIVE_GCC}/lib" ;;
+    *)
+        NATIVE_GCC_STATIC="$(store_path gcc-toolchain static)"
+        export LIBRARY_PATH="${NATIVE_GCC}/lib:${NATIVE_GCC_STATIC}/lib"
+        ;;
+esac
+
 # Set environment variables to point the CROSS toolchain to the right
 # includes/libs for $HOST
 case "$HOST" in
