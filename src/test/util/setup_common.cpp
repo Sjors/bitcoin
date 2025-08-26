@@ -58,7 +58,6 @@
 #include <stdexcept>
 
 using namespace util::hex_literals;
-using node::ApplyArgsManOptions;
 using node::BlockAssembler;
 using node::BlockManager;
 using node::KernelNotifications;

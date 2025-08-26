@@ -75,9 +75,6 @@
 #include <tuple>
 #include <utility>
 
-using kernel::CCoinsStats;
-using kernel::CoinStatsHashType;
-using kernel::ComputeUTXOStats;
 using kernel::Notifications;
 
 using fsbridge::FopenFn;

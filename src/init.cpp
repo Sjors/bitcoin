@@ -95,9 +95,6 @@
 #include <boost/signals2/signal.hpp>
 
 using common::AmountErrMsg;
-using common::InvalidPortErrMsg;
-using common::ResolveErrMsg;
-
 using node::ApplyArgsManOptions;
 using node::BlockManager;
 using node::CalculateCacheSizes;
@@ -116,7 +113,6 @@ using node::NodeContext;
 using node::ShouldPersistMempool;
 using node::VerifyLoadedChainstate;
 using util::Join;
-using util::ReplaceAll;
 using util::ToString;
 
 static constexpr bool DEFAULT_STOPAFTERBLOCKIMPORT{false};
