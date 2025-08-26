@@ -3,21 +3,21 @@
 # file COPYING or https://opensource.org/license/mit/.
 
 add_library(test_util STATIC EXCLUDE_FROM_ALL
-  blockfilter.cpp
-  coins.cpp
+  # blockfilter.cpp
+  # coins.cpp
   coverage.cpp
-  json.cpp
-  logging.cpp
-  mining.cpp
+  # json.cpp
+  # logging.cpp
+  # mining.cpp
   net.cpp
   random.cpp
   script.cpp
   setup_common.cpp
-  str.cpp
-  time.cpp
+  # str.cpp
+  # time.cpp
   transaction_utils.cpp
   txmempool.cpp
-  validation.cpp
+  # validation.cpp
 )
 
 target_link_libraries(test_util

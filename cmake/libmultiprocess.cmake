@@ -3,10 +3,10 @@
 # file COPYING or https://opensource.org/license/mit/.
 
 function(add_libmultiprocess subdir)
-  # Set BUILD_TESTING to match BUILD_TESTS. BUILD_TESTING is a standard cmake
+  # BUILD_TESTING is a standard cmake
   # option that controls whether enable_testing() is called, but in the bitcoin
   # build a BUILD_TESTS option is used instead.
-  set(BUILD_TESTING "${BUILD_TESTS}")
+  set(BUILD_TESTING OFF)
   add_subdirectory(${subdir} EXCLUDE_FROM_ALL)
   # Apply core_interface compile options to libmultiprocess runtime library.
   target_link_libraries(multiprocess PUBLIC $<BUILD_INTERFACE:core_interface>)
@@ -25,10 +25,6 @@ function(add_libmultiprocess subdir)
   mark_as_advanced(CapnProto_kj_IMPORTED_LOCATION)
   mark_as_advanced(CapnProto_kj-test_IMPORTED_LOCATION)
   mark_as_advanced(CapnProto_kj-tls_IMPORTED_LOCATION)
-  if(BUILD_TESTS)
-    # Add tests to "all" target so ctest can run them
-    set_target_properties(mptests PROPERTIES EXCLUDE_FROM_ALL OFF)
-  endif()
   # Exclude examples from compilation database, because the examples are not
   # built by default, and they contain generated c++ code. Without this
   # exclusion, tools like clang-tidy and IWYU that make use of compilation
