@@ -110,7 +110,6 @@ struct AddedNodeInfo {
 };
 
 class CNodeStats;
-class CClientUIInterface;
 
 /**
  * Look up IP addresses from all interfaces on the machine and add them to the
@@ -880,7 +879,6 @@ public:
     {
         ServiceFlags m_local_services = NODE_NONE;
         int m_max_automatic_connections = 0;
-        CClientUIInterface* uiInterface = nullptr;
         NetEventsInterface* m_msgproc = nullptr;
         BanMan* m_banman = nullptr;
         unsigned int nSendBufferMaxSize = 0;
@@ -914,7 +912,6 @@ public:
         m_max_automatic_outbound = m_max_outbound_full_relay + m_max_outbound_block_relay + m_max_feeler;
         m_max_inbound = std::max(0, m_max_automatic_connections - m_max_automatic_outbound);
         m_use_addrman_outgoing = connOptions.m_use_addrman_outgoing;
-        m_client_interface = connOptions.uiInterface;
         m_banman = connOptions.m_banman;
         m_msgproc = connOptions.m_msgproc;
         nSendBufferMaxSize = connOptions.nSendBufferMaxSize;
@@ -1353,7 +1350,6 @@ private:
     int m_max_inbound;
 
     bool m_use_addrman_outgoing;
-    CClientUIInterface* m_client_interface;
     NetEventsInterface* m_msgproc;
     /** Pointer to this node's banman. May be nullptr - check existence before dereferencing. */
     BanMan* m_banman;

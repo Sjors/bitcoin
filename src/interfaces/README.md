@@ -8,8 +8,6 @@ The following interfaces are defined here:
 
 * [`Node`](node.h) — used by GUI to start & stop bitcoin node. Added in [#10244](https://github.com/bitcoin/bitcoin/pull/10244).
 
-* [`Wallet`](wallet.h) — used by GUI to access wallets. Added in [#10244](https://github.com/bitcoin/bitcoin/pull/10244).
-
 * [`Handler`](handler.h) — returned by `handleEvent` methods on interfaces above and used to manage lifetimes of event handlers.
 
 * [`Init`](init.h) — used by multiprocess code to access interfaces above on startup. Added in [#19160](https://github.com/bitcoin/bitcoin/pull/19160).

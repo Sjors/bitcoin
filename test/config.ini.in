@@ -15,6 +15,5 @@ EXEEXT=@EXEEXT@
 [components]
 # Which components are enabled. These are commented out by cmake if they were disabled during configuration.
 @ENABLE_FUZZ_BINARY_TRUE@ENABLE_FUZZ_BINARY=true
-@ENABLE_EXTERNAL_SIGNER_TRUE@ENABLE_EXTERNAL_SIGNER=true
 @ENABLE_USDT_TRACEPOINTS_TRUE@ENABLE_USDT_TRACEPOINTS=true
 @ENABLE_IPC_TRUE@ENABLE_IPC=true

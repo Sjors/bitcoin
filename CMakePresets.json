@@ -64,7 +64,6 @@
         "BUILD_FUZZ_BINARY": "ON",
         "BUILD_SHARED_LIBS": "ON",
         "BUILD_TESTS": "ON",
-        "ENABLE_EXTERNAL_SIGNER": "ON",
         "ENABLE_IPC": "ON",
         "WITH_USDT": "ON"
       }

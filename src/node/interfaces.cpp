@@ -11,7 +11,6 @@
 #include <consensus/merkle.h>
 #include <consensus/validation.h>
 #include <deploymentstatus.h>
-#include <external_signer.h>
 #include <index/blockfilterindex.h>
 #include <init.h>
 #include <interfaces/chain.h>
@@ -19,7 +18,6 @@
 #include <interfaces/mining.h>
 #include <interfaces/node.h>
 #include <interfaces/types.h>
-#include <interfaces/wallet.h>
 #include <kernel/chain.h>
 #include <kernel/context.h>
 #include <kernel/mempool_entry.h>
@@ -59,8 +57,6 @@
 #include <validation.h>
 #include <validationinterface.h>
 
-#include <bitcoin-build-config.h> // IWYU pragma: keep
-
 #include <any>
 #include <memory>
 #include <optional>
@@ -86,15 +82,6 @@ namespace node {
 // All members of the classes in this namespace are intentionally public, as the
 // classes themselves are private.
 namespace {
-#ifdef ENABLE_EXTERNAL_SIGNER
-class ExternalSignerImpl : public interfaces::ExternalSigner
-{
-public:
-    // ExternalSignerImpl(::ExternalSigner signer) : m_signer(std::move(signer)) {}
-    std::string getName() override { return m_signer.m_name; }
-    ::ExternalSigner m_signer;
-};
-#endif
 
 class NodeImpl : public Node
 {

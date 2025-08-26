@@ -23,7 +23,6 @@
 #include <netaddress.h>
 #include <netbase.h>
 #include <node/eviction.h>
-#include <node/interface_ui.h>
 #include <protocol.h>
 #include <random.h>
 #include <scheduler.h>
@@ -1941,9 +1940,6 @@ void CConnman::NotifyNumConnectionsChanged()
     }
     if(nodes_size != nPrevNodeCount) {
         nPrevNodeCount = nodes_size;
-        if (m_client_interface) {
-            m_client_interface->NotifyNumConnectionsChanged(nodes_size);
-        }
     }
 }
 
@@ -3113,10 +3109,6 @@ void CConnman::SetNetworkActive(bool active)
     }
 
     fNetworkActive = active;
-
-    if (m_client_interface) {
-        m_client_interface->NotifyNetworkActiveChanged(fNetworkActive);
-    }
 }
 
 CConnman::CConnman(uint64_t nSeed0In, uint64_t nSeed1In, AddrMan& addrman_in,
@@ -3156,9 +3148,6 @@ bool CConnman::Bind(const CService& addr_, unsigned int flags, NetPermissionFlag
 
     bilingual_str strError;
     if (!BindListenPort(addr, strError, permissions)) {
-        if ((flags & BF_REPORT_ERROR) && m_client_interface) {
-            m_client_interface->ThreadSafeMessageBox(strError, "", CClientUIInterface::MSG_ERROR);
-        }
         return false;
     }
 
@@ -3209,11 +3198,6 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
     Init(connOptions);
 
     if (fListen && !InitBinds(connOptions)) {
-        if (m_client_interface) {
-            m_client_interface->ThreadSafeMessageBox(
-                _("Failed to listen on any port. Use -listen=0 if you want this."),
-                "", CClientUIInterface::MSG_ERROR);
-        }
         return false;
     }
 
@@ -3230,10 +3214,6 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
             m_anchors.resize(MAX_BLOCK_RELAY_ONLY_ANCHORS);
         }
         LogPrintf("%i block-relay-only anchors will be tried for connections.\n", m_anchors.size());
-    }
-
-    if (m_client_interface) {
-        m_client_interface->InitMessage(_("Starting network threads…"));
     }
 
     fAddressesInitialized = true;
@@ -3271,11 +3251,6 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
     threadOpenAddedConnections = std::thread(&util::TraceThread, "addcon", [this] { ThreadOpenAddedConnections(); });
 
     if (connOptions.m_use_addrman_outgoing && !connOptions.m_specified_outgoing.empty()) {
-        if (m_client_interface) {
-            m_client_interface->ThreadSafeMessageBox(
-                _("Cannot provide specific connections and have addrman find outgoing connections at the same time."),
-                "", CClientUIInterface::MSG_ERROR);
-        }
         return false;
     }
     if (connOptions.m_use_addrman_outgoing || !connOptions.m_specified_outgoing.empty()) {

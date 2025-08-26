@@ -1203,114 +1203,6 @@ Release notes should be added to a PR-specific release note file at
 `/doc/release-notes-<PR number>.md` to avoid conflicts between multiple PRs.
 All `release-notes*` files are merged into a single `release-notes-<version>.md` file prior to the release.
 
-## RPC interface guidelines
-
-A few guidelines for introducing and reviewing new RPC interfaces:
-
-- Method naming: use consecutive lower-case names such as `getrawtransaction` and `submitblock`.
-
-  - *Rationale*: Consistency with the existing interface.
-
-- Argument and field naming: please consider whether there is already a naming
-  style or spelling convention in the API for the type of object in question
-  (`blockhash`, for example), and if so, try to use that. If not, use snake case
-  `fee_delta` (and not, e.g. `feedelta` or camel case `feeDelta`).
-
-  - *Rationale*: Consistency with the existing interface.
-
-- Use the JSON parser for parsing, don't manually parse integers or strings from
-  arguments unless absolutely necessary.
-
-  - *Rationale*: Introduces hand-rolled string manipulation code at both the caller and callee sites,
-    which is error-prone, and it is easy to get things such as escaping wrong.
-    JSON already supports nested data structures, no need to re-invent the wheel.
-
-  - *Exception*: AmountFromValue can parse amounts as string. This was introduced because many JSON
-    parsers and formatters hard-code handling decimal numbers as floating-point
-    values, resulting in potential loss of precision. This is unacceptable for
-    monetary values. **Always** use `AmountFromValue` and `ValueFromAmount` when
-    inputting or outputting monetary values. The only exceptions to this are
-    `prioritisetransaction` and `getblocktemplate` because their interface
-    is specified as-is in BIP22.
-
-- Missing arguments and 'null' should be treated the same: as default values. If there is no
-  default value, both cases should fail in the same way. The easiest way to follow this
-  guideline is to detect unspecified arguments with `params[x].isNull()` instead of
-  `params.size() <= x`. The former returns true if the argument is either null or missing,
-  while the latter returns true if is missing, and false if it is null.
-
-  - *Rationale*: Avoids surprises when switching to name-based arguments. Missing name-based arguments
-  are passed as 'null'.
-
-- Try not to overload methods on argument type. E.g. don't make `getblock(true)` and `getblock("hash")`
-  do different things.
-
-  - *Rationale*: This is impossible to use with `bitcoin-cli`, and can be surprising to users.
-
-  - *Exception*: Some RPC calls can take both an `int` and `bool`, most notably when a bool was switched
-    to a multi-value, or due to other historical reasons. **Always** have false map to 0 and
-    true to 1 in this case.
-
-- For new RPC methods, if implementing a `verbosity` argument, use integer verbosity rather than boolean.
-  Disallow usage of boolean verbosity (see `ParseVerbosity()` in [util.h](/src/rpc/util.h)).
-
-  - *Rationale*: Integer verbosity allows for multiple values. Undocumented boolean verbosity is deprecated
-    and new RPC methods should prevent its use.
-
-- Add every non-string RPC argument `(method, idx, name)` to the table `vRPCConvertParams` in `rpc/client.cpp`.
-
-  - *Rationale*: `bitcoin-cli` and the GUI debug console use this table to determine how to
-    convert a plaintext command line to JSON. If the types don't match, the method can be unusable
-    from there.
-
-- A RPC method must either be a wallet method or a non-wallet method. Do not
-  introduce new methods that differ in behavior based on the presence of a wallet.
-
-  - *Rationale*: As well as complicating the implementation and interfering
-    with the introduction of multi-wallet, wallet and non-wallet code should be
-    separated to avoid introducing circular dependencies between code units.
-
-- Try to make the RPC response a JSON object.
-
-  - *Rationale*: If a RPC response is not a JSON object, then it is harder to avoid API breakage if
-    new data in the response is needed.
-
-- Wallet RPCs call BlockUntilSyncedToCurrentChain to maintain consistency with
-  `getblockchaininfo`'s state immediately prior to the call's execution. Wallet
-  RPCs whose behavior does *not* depend on the current chainstate may omit this
-  call.
-
-  - *Rationale*: In previous versions of Bitcoin Core, the wallet was always
-    in-sync with the chainstate (by virtue of them all being updated in the
-    same cs_main lock). In order to maintain the behavior that wallet RPCs
-    return results as of at least the highest best-known block an RPC
-    client may be aware of prior to entering a wallet RPC call, we must block
-    until the wallet is caught up to the chainstate as of the RPC call's entry.
-    This also makes the API much easier for RPC clients to reason about.
-
-- Use *invalid* bech32 addresses (e.g. in the constant array `EXAMPLE_ADDRESS`) for
-  `RPCExamples` help documentation.
-
-  - *Rationale*: Prevent accidental transactions by users and encourage the use
-    of bech32 addresses by default.
-
-- Use the `UNIX_EPOCH_TIME` constant when describing UNIX epoch time or
-  timestamps in the documentation.
-
-  - *Rationale*: User-facing consistency.
-
-- Use `fs::path::u8string()`/`fs::path::utf8string()` and `fs::u8path()` functions when converting path
-  to JSON strings, not `fs::PathToString` and `fs::PathFromString`
-
-  - *Rationale*: JSON strings are Unicode strings, not byte strings, and
-    RFC8259 requires JSON to be encoded as UTF-8.
-
-A few guidelines for modifying existing RPC interfaces:
-
-- It's preferable to avoid changing an RPC in a backward-incompatible manner, but in that case, add an associated `-deprecatedrpc=` option to retain previous RPC behavior during the deprecation period. Backward-incompatible changes include: data type changes (e.g. from `{"warnings":""}` to `{"warnings":[]}`, changing a value from a string to a number, etc.), logical meaning changes of a value, or key name changes (e.g. `{"warning":""}` to `{"warnings":""}`). Adding a key to an object is generally considered backward-compatible. Include a release note that refers the user to the RPC help for details of feature deprecation and re-enabling previous behavior. [Example RPC help](https://github.com/bitcoin/bitcoin/blob/94f0adcc/src/rpc/blockchain.cpp#L1316-L1323).
-
-  - *Rationale*: Changes in RPC JSON structure can break downstream application compatibility. Implementation of `deprecatedrpc` provides a grace period for downstream applications to migrate. Release notes provide notification to downstream users.
-
 ## Internal interface guidelines
 
 Internal interfaces between parts of the codebase that are meant to be
@@ -1319,8 +1211,7 @@ independent (node, wallet, GUI), are defined in
 there are [`interfaces::Chain`](../src/interfaces/chain.h), used by wallet to
 access the node's latest chain state,
 [`interfaces::Node`](../src/interfaces/node.h), used by the GUI to control the
-node, [`interfaces::Wallet`](../src/interfaces/wallet.h), used by the GUI
-to control an individual wallet and [`interfaces::Mining`](../src/interfaces/mining.h),
+node and [`interfaces::Mining`](../src/interfaces/mining.h),
 used by RPC to generate block templates. There are also more specialized interface
 types like [`interfaces::Handler`](../src/interfaces/handler.h)
 [`interfaces::ChainClient`](../src/interfaces/chain.h) passed to and from

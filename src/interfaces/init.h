@@ -9,7 +9,6 @@
 #include <interfaces/echo.h>
 #include <interfaces/mining.h>
 #include <interfaces/node.h>
-#include <interfaces/wallet.h>
 
 #include <memory>
 

@@ -16,7 +16,6 @@ function(create_test_config)
   endmacro()
 
   set_configure_variable(BUILD_FUZZ_BINARY ENABLE_FUZZ_BINARY)
-  set_configure_variable(ENABLE_EXTERNAL_SIGNER ENABLE_EXTERNAL_SIGNER)
   set_configure_variable(WITH_USDT ENABLE_USDT_TRACEPOINTS)
   set_configure_variable(ENABLE_IPC ENABLE_IPC)
 

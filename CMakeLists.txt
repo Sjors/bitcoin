@@ -106,8 +106,6 @@ if(WITH_USDT)
   find_package(USDT MODULE REQUIRED)
 endif()
 
-option(ENABLE_EXTERNAL_SIGNER "Enable external signer support." OFF)
-
 cmake_dependent_option(ENABLE_IPC "Build multiprocess bitcoin-node executable in addition to monolithic bitcoind executable." ON "NOT WIN32" OFF)
 cmake_dependent_option(WITH_EXTERNAL_LIBMULTIPROCESS "Build with external libmultiprocess library instead of with local git subtree when ENABLE_IPC is enabled. This is not normally recommended, but can be useful for developing libmultiprocess itself." OFF "ENABLE_IPC" OFF)
 if(ENABLE_IPC AND WITH_EXTERNAL_LIBMULTIPROCESS)
@@ -155,7 +153,6 @@ target_link_libraries(core_interface INTERFACE
 if(BUILD_FOR_FUZZING)
   message(WARNING "BUILD_FOR_FUZZING=ON will disable all other targets and force BUILD_FUZZ_BINARY=ON.")
   set(BUILD_MINE OFF)
-  set(ENABLE_EXTERNAL_SIGNER OFF)
   set(BUILD_TESTS OFF)
   set(BUILD_FUZZ_BINARY ON)
 

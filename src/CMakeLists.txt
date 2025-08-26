@@ -99,7 +99,6 @@ add_library(bitcoin_common STATIC EXCLUDE_FROM_ALL
   common/messages.cpp
   common/netif.cpp
   common/pcp.cpp
-  common/run_command.cpp
   common/settings.cpp
   common/signmessage.cpp
   common/sockman.cpp
@@ -109,7 +108,6 @@ add_library(bitcoin_common STATIC EXCLUDE_FROM_ALL
   core_read.cpp
   core_write.cpp
   deploymentinfo.cpp
-  external_signer.cpp
   init/common.cpp
   kernel/chainparams.cpp
   key.cpp
@@ -225,7 +223,6 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   validation.cpp
   validationinterface.cpp
   versionbits.cpp
-  dummywallet.cpp
 )
 target_link_libraries(bitcoin_node
   PRIVATE
