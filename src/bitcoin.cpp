@@ -35,7 +35,6 @@ Commands:
 
 static constexpr auto HELP_FULL = R"(
 Additional less commonly used commands:
-  bench [ARGS]      Run bench command, equivalent to running 'bench_bitcoin [ARGS]'.
   chainstate [ARGS] Run bitcoin kernel chainstate util, equivalent to running 'bitcoin-chainstate [ARGS]'.
   mine [ARGS]       Run client for IPC mining interface, equivalent to running 'bitcoin-mine [ARGS]'.
   test [ARGS]       Run unit tests, equivalent to running 'test_bitcoin [ARGS]'.
@@ -91,8 +90,6 @@ int main(int argc, char* argv[])
             args.emplace_back("bitcoin-wallet");
         } else if (cmd.command == "tx") {
             args.emplace_back("bitcoin-tx");
-        } else if (cmd.command == "bench") {
-            args.emplace_back("bench_bitcoin");
         } else if (cmd.command == "chainstate") {
             args.emplace_back("bitcoin-chainstate");
         } else if (cmd.command == "mine") {

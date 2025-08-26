@@ -37,7 +37,6 @@ def main():
         "-DAPPEND_CFLAGS='-O3 -g2'",
         "-DCMAKE_BUILD_TYPE=Debug",
         "-DWERROR=ON",
-        "-DBUILD_BENCH=ON",
         "-DBUILD_FUZZ_BINARY=ON",
         "-DCMAKE_CXX_FLAGS=-Wno-error=unused-member-function",
     ])

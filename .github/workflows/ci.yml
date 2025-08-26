@@ -175,7 +175,7 @@ jobs:
         job-type: [standard, fuzz]
         include:
           - job-type: standard
-            generate-options: '-DWITH_ZMQ=ON -DBUILD_BENCH=ON -DWERROR=ON'
+            generate-options: '-DWITH_ZMQ=ON -DWERROR=ON'
             job-name: 'Windows native, VS 2022'
           - job-type: fuzz
             generate-options: '-DVCPKG_MANIFEST_NO_DEFAULT_FEATURES=ON -DVCPKG_MANIFEST_FEATURES="wallet" -DBUILD_FOR_FUZZING=ON -DWERROR=ON'
@@ -366,9 +366,6 @@ jobs:
           ./src/secp256k1/bin/tests.exe
           ./src/univalue/object.exe
           ./src/univalue/unitester.exe
-
-      - name: Run benchmarks
-        run: ./bin/bench_bitcoin.exe -sanity-check
 
       - name: Adjust paths in test/config.ini
         shell: pwsh

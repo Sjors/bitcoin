@@ -145,7 +145,6 @@ cmake_dependent_option(WITH_SV2 "Enable Stratum v2 functionality." ON "NOT WIN32
 
 cmake_dependent_option(BUILD_MINE "Build experimental bitcoin-mine executable." ON "ENABLE_IPC;WITH_SV2" OFF)
 
-option(BUILD_BENCH "Build bench_bitcoin executable." OFF)
 option(BUILD_FUZZ_BINARY "Build fuzz binary." OFF)
 option(BUILD_FOR_FUZZING "Build for fuzzing. Enabling this will disable all other targets and override BUILD_FUZZ_BINARY." OFF)
 
@@ -191,7 +190,6 @@ if(BUILD_FOR_FUZZING)
   set(ENABLE_EXTERNAL_SIGNER OFF)
   set(WITH_ZMQ OFF)
   set(BUILD_TESTS OFF)
-  set(BUILD_BENCH OFF)
   set(BUILD_FUZZ_BINARY ON)
 
   target_compile_definitions(core_interface INTERFACE
@@ -387,7 +385,7 @@ endif()
 include(AddBoostIfNeeded)
 add_boost_if_needed()
 
-if(BUILD_DAEMON OR BUILD_CLI OR BUILD_TESTS OR BUILD_BENCH OR BUILD_FUZZ_BINARY)
+if(BUILD_DAEMON OR BUILD_CLI OR BUILD_TESTS OR BUILD_FUZZ_BINARY)
   find_package(Libevent 2.1.8 MODULE REQUIRED)
 endif()
 
@@ -659,7 +657,6 @@ message("  Stratum v2 .......................... ${WITH_SV2}")
 message("  bitcoin-mine (multiprocess) ......... ${BUILD_MINE}")
 message("Tests:")
 message("  test_bitcoin ........................ ${BUILD_TESTS}")
-message("  bench_bitcoin ....................... ${BUILD_BENCH}")
 message("  fuzz binary ......................... ${BUILD_FUZZ_BINARY}")
 message("")
 if(CMAKE_CROSSCOMPILING)

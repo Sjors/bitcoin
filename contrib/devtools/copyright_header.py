@@ -20,7 +20,6 @@ EXCLUDE = [
     # other external copyrights:
     'src/test/fuzz/FuzzedDataProvider.h',
     'src/tinyformat.h',
-    'src/bench/nanobench.h',
     # python init:
     '*__init__.py',
 ]

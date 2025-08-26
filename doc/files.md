@@ -74,7 +74,6 @@ This table describes the files installed by Bitcoin Core across different platfo
 | bin/bitcoind                                               | Bitcoin node and wallet daemon                                              |
 | *lib/libbitcoinkernel.so*                                  | Shared library containing core consensus and validation code                |
 | *lib/pkgconfig/libbitcoinkernel.pc*                        | Pkg-config metadata for linking to `libbitcoinkernel`                       |
-| *libexec/bench_bitcoin*                                    | Benchmarking tool for measuring node performance                            |
 | *libexec/bitcoin-chainstate*                               | Tool to validate and connect blocks                                         |
 | libexec/bitcoin-node                                       | IPC-enabled alternative to `bitcoind`                                       |
 | libexec/test_bitcoin                                       | Unit test binary                                                            |

@@ -19,7 +19,6 @@ export RUN_TIDY=true
 export GOAL="install"
 # Wallet support is kept, because check-deps assumes it
 export BITCOIN_CONFIG="\
- -DBUILD_BENCH=ON \
  -DWITH_USDT=ON \
  -DCMAKE_C_COMPILER=clang-${TIDY_LLVM_V} \
  -DCMAKE_CXX_COMPILER=clang++-${TIDY_LLVM_V} \
