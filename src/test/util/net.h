@@ -29,16 +29,6 @@
 
 class FastRandomContext;
 
-constexpr ServiceFlags ALL_SERVICE_FLAGS[]{
-    NODE_NONE,
-    NODE_NETWORK,
-    NODE_BLOOM,
-    NODE_WITNESS,
-    NODE_COMPACT_FILTERS,
-    NODE_NETWORK_LIMITED,
-    NODE_P2P_V2,
-};
-
 constexpr ConnectionType ALL_CONNECTION_TYPES[]{
     ConnectionType::INBOUND,
     ConnectionType::OUTBOUND_FULL_RELAY,

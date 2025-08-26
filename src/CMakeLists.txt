@@ -17,7 +17,6 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 # not overridden.
 include(../cmake/crc32c.cmake)
 include(../cmake/leveldb.cmake)
-include(../cmake/minisketch.cmake)
 add_subdirectory(univalue)
 if (ENABLE_IPC AND NOT WITH_EXTERNAL_LIBMULTIPROCESS)
   include(../cmake/libmultiprocess.cmake)
@@ -119,7 +118,6 @@ add_library(bitcoin_common STATIC EXCLUDE_FROM_ALL
   policy/feerate.cpp
   policy/policy.cpp
   pow.cpp
-  protocol.cpp
   scheduler.cpp
   script/descriptor.cpp
   script/miniscript.cpp
@@ -180,10 +178,8 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/mempool_persist_args.cpp
   node/miner.cpp
   node/mini_miner.cpp
-  node/minisketchwrapper.cpp
   node/timeoffsets.cpp
   node/transaction.cpp
-  node/txreconciliation.cpp
   node/warnings.cpp
   noui.cpp
   policy/ephemeral_policy.cpp
@@ -209,7 +205,6 @@ target_link_libraries(bitcoin_node
     bitcoin_common
     bitcoin_util
     leveldb
-    minisketch
     univalue
     Boost::headers
     $<TARGET_NAME_IF_EXISTS:USDT::headers>

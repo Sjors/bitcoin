@@ -67,7 +67,7 @@ def main():
         '*.sh',
     ]
     files = get_files(files_cmd)
-    reg = re.compile(r'src/[leveldb,secp256k1,minisketch]')
+    reg = re.compile(r'src/[leveldb,secp256k1,ipc/libmultiprocess]')
 
     def should_exclude(fname: str) -> bool:
         return bool(reg.match(fname))

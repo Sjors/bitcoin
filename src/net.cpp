@@ -16,7 +16,6 @@
 #include <memusage.h>
 #include <netaddress.h>
 #include <netbase.h>
-#include <protocol.h>
 #include <random.h>
 #include <scheduler.h>
 #include <util/fs.h>
@@ -93,46 +92,3 @@ public:
     }
 };
 static CNetCleanup instance_of_cnetcleanup;
-
-// Dump binary message to file, with timestamp.
-static void CaptureMessageToFile(const CAddress& addr,
-                                 const std::string& msg_type,
-                                 std::span<const unsigned char> data,
-                                 bool is_incoming)
-{
-    // Note: This function captures the message at the time of processing,
-    // not at socket receive/send time.
-    // This ensures that the messages are always in order from an application
-    // layer (processing) perspective.
-    auto now = GetTime<std::chrono::microseconds>();
-
-    // Windows folder names cannot include a colon
-    std::string clean_addr = addr.ToStringAddrPort();
-    std::replace(clean_addr.begin(), clean_addr.end(), ':', '_');
-
-    fs::path base_path = gArgs.GetDataDirNet() / "message_capture" / fs::u8path(clean_addr);
-    fs::create_directories(base_path);
-
-    fs::path path = base_path / (is_incoming ? "msgs_recv.dat" : "msgs_sent.dat");
-    AutoFile f{fsbridge::fopen(path, "ab")};
-
-    ser_writedata64(f, now.count());
-    f << std::span{msg_type};
-    for (auto i = msg_type.length(); i < CMessageHeader::MESSAGE_TYPE_SIZE; ++i) {
-        f << uint8_t{'\0'};
-    }
-    uint32_t size = data.size();
-    ser_writedata32(f, size);
-    f << data;
-
-    if (f.fclose() != 0) {
-        throw std::ios_base::failure(
-            strprintf("Error closing %s after write, file contents are likely incomplete", fs::PathToString(path)));
-    }
-}
-
-std::function<void(const CAddress& addr,
-                   const std::string& msg_type,
-                   std::span<const unsigned char> data,
-                   bool is_incoming)>
-    CaptureMessage = CaptureMessageToFile;

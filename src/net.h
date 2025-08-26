@@ -20,7 +20,6 @@
 #include <node/connection_types.h>
 #include <node/protocol_version.h>
 #include <policy/feerate.h>
-#include <protocol.h>
 #include <random.h>
 #include <semaphore_grant.h>
 #include <span.h>
@@ -131,15 +130,5 @@ extern std::map<CNetAddr, LocalServiceInfo> mapLocalHost GUARDED_BY(g_maplocalho
 
 extern const std::string NET_MESSAGE_TYPE_OTHER;
 using mapMsgTypeSize = std::map</* message type */ std::string, /* total bytes */ uint64_t>;
-
-/**
- * Interface for message handling
- */
-/** Defaults to `CaptureMessageToFile()`, but can be overridden by unit tests. */
-extern std::function<void(const CAddress& addr,
-                          const std::string& msg_type,
-                          std::span<const unsigned char> data,
-                          bool is_incoming)>
-    CaptureMessage;
 
 #endif // BITCOIN_NET_H

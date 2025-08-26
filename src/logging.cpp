@@ -196,7 +196,6 @@ static const std::map<std::string, BCLog::LogFlags, std::less<>> LOG_CATEGORIES_
     {"lock", BCLog::LOCK},
 #endif
     {"blockstorage", BCLog::BLOCKSTORAGE},
-    {"txreconciliation", BCLog::TXRECONCILIATION},
     {"scan", BCLog::SCAN},
     {"sv2", BCLog::SV2},
     {"txpackages", BCLog::TXPACKAGES},

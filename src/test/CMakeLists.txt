@@ -15,7 +15,6 @@ target_link_libraries(test_bitcoin
   test_util
   bitcoin_node
   bitcoin_consensus
-  minisketch
   secp256k1
   Boost::headers
 )

@@ -89,7 +89,6 @@ namespace BCLog {
         LOCK        = (CategoryMask{1} << 24),
 #endif
         BLOCKSTORAGE = (CategoryMask{1} << 25),
-        TXRECONCILIATION = (CategoryMask{1} << 26),
         SCAN        = (CategoryMask{1} << 27),
         TXPACKAGES  = (CategoryMask{1} << 28),
         SV2         = (CategoryMask{1} << 29),

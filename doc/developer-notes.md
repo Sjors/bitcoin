@@ -495,7 +495,7 @@ llvm-cov show \
     --object=build/bin/bitcoind \
     -Xdemangler=llvm-cxxfilt \
     --instr-profile=build/coverage.profdata \
-    --ignore-filename-regex="src/crc32c/|src/leveldb/|src/minisketch/|src/secp256k1/|src/test/" \
+    --ignore-filename-regex="src/crc32c/|src/leveldb/|src/secp256k1/|src/test/" \
     --format=html \
     --show-instantiation-summary \
     --show-line-counts-or-regions \
@@ -539,7 +539,7 @@ llvm-cov show \
     --object=build/bin/fuzz \
     -Xdemangler=llvm-cxxfilt \
     --instr-profile=build/coverage.profdata \
-    --ignore-filename-regex="src/crc32c/|src/leveldb/|src/minisketch/|src/secp256k1/|src/test/" \
+    --ignore-filename-regex="src/crc32c/|src/leveldb/|src/secp256k1/|src/test/" \
     --format=html \
     --show-instantiation-summary \
     --show-line-counts-or-regions \

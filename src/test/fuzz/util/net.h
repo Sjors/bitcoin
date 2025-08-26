@@ -8,7 +8,6 @@
 #include <net.h>
 #include <netaddress.h>
 #include <node/connection_types.h>
-#include <protocol.h>
 #include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/util.h>
 #include <test/util/net.h>
@@ -110,7 +109,5 @@ inline CService ConsumeService(FuzzedDataProvider& fuzzed_data_provider) noexcep
 {
     return {ConsumeNetAddr(fuzzed_data_provider), fuzzed_data_provider.ConsumeIntegral<uint16_t>()};
 }
-
-CAddress ConsumeAddress(FuzzedDataProvider& fuzzed_data_provider) noexcept;
 
 #endif // BITCOIN_TEST_FUZZ_UTIL_NET_H

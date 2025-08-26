@@ -24,7 +24,6 @@ def main():
     check_vulture_install()
 
     files = check_output(FILES_ARGS).decode("utf-8").splitlines()
-    files = [e for e in files if "minisketch" not in e]
 
     # --min-confidence 100 will only report code that is guaranteed to be unused within the analyzed files.
     # Any value below 100 introduces the risk of false positives, which would create an unacceptable maintenance burden.
