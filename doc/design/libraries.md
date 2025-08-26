@@ -42,6 +42,10 @@ bitcoind[bitcoind]-->libbitcoin_node;
 libbitcoin_cli-->libbitcoin_util;
 libbitcoin_cli-->libbitcoin_common;
 
+bitcoin-mine-->libbitcoin_sv2;
+bitcoin-mine-->libbitcoin_common;
+bitcoin-mine-->libbitcoin_ipc;
+
 libbitcoin_consensus-->libbitcoin_crypto;
 
 libbitcoin_common-->libbitcoin_consensus;
@@ -60,8 +64,11 @@ libbitcoin_node-->libbitcoin_util;
 
 libbitcoin_util-->libbitcoin_crypto;
 
+libbitcoin_sv2-->libbitcoin_common;
+libbitcoin_sv2-->libbitcoin_crypto;
+
 classDef bold stroke-width:2px, font-weight:bold, font-size: smaller;
-class bitcoind,bitcoin-cli bold
+class bitcoind,bitcoin-cli,bitcoin-mine bold
 ```
 </td></tr><tr><td>
 
