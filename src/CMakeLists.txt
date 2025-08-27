@@ -207,19 +207,19 @@ target_link_libraries(bitcoin_node
 )
 
 if(BUILD_MINE)
-  add_executable(bitcoin-mine
-    bitcoin-mine.cpp
+  add_executable(sv2-tp
+    sv2-tp.cpp
     init/basic.cpp
   )
-  add_windows_resources(bitcoin-mine bitcoin-mine-res.rc)
-  add_windows_application_manifest(bitcoin-mine)
-  target_link_libraries(bitcoin-mine
+  add_windows_resources(sv2-tp sv2-tp-res.rc)
+  add_windows_application_manifest(sv2-tp)
+  target_link_libraries(sv2-tp
     core_interface
     bitcoin_common
     bitcoin_ipc
     bitcoin_sv2
   )
-  install_binary_component(bitcoin-mine HAS_MANPAGE)
+  install_binary_component(sv2-tp HAS_MANPAGE)
 endif()
 
 if(BUILD_KERNEL_LIB)

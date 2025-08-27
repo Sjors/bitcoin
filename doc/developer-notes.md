@@ -412,9 +412,9 @@ which includes known Valgrind warnings in our dependencies that cannot be fixed
 in-tree. Example use:
 
 ```shell
-$ valgrind --suppressions=contrib/valgrind.supp build/bin/test_bitcoin
+$ valgrind --suppressions=contrib/valgrind.supp build/bin/test_sv2
 $ valgrind --suppressions=contrib/valgrind.supp --leak-check=full \
-      --show-leak-kinds=all build/bin/test_bitcoin --log_level=test_suite
+      --show-leak-kinds=all build/bin/test_sv2 --log_level=test_suite
 $ valgrind -v --leak-check=full build/bin/bitcoind -printtoconsole
 $ ./build/test/functional/test_runner.py --valgrind
 ```
@@ -434,7 +434,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Coverage
 cmake --build build
 cmake -P build/Coverage.cmake
 
-# A coverage report will now be accessible at `./build/test_bitcoin.coverage/index.html`,
+# A coverage report will now be accessible at `./build/test_sv2.coverage/index.html`,
 # which covers unit tests, and `./build/total.coverage/index.html`, which covers
 # unit and functional tests.
 ```
@@ -491,7 +491,7 @@ Generating the coverage report:
 
 ```shell
 llvm-cov show \
-    --object=build/bin/test_bitcoin \
+    --object=build/bin/test_sv2 \
     --object=build/bin/bitcoind \
     -Xdemangler=llvm-cxxfilt \
     --instr-profile=build/coverage.profdata \

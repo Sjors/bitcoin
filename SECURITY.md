@@ -1,20 +1,11 @@
 # Security Policy
 
-## Supported Versions
+The code for this project is originally from Bitcoin Core. The application also requires connecting to a running Bitcoin Core node. Issues related to the original code, such as bugs in IPC, as best reported upstream: https://github.com/bitcoin/bitcoin/blob/master/SECURITY.md
 
-See our website for versions of Bitcoin Core that are currently supported with
-security updates: https://bitcoincore.org/en/lifecycle/#schedule
+The Template Provider is still considered experimental and should not be exposed to the internet. Most security issues can therefore safely be reported by simply opening an Github issue on this repository.
 
-## Reporting a Vulnerability
-
-To report security issues send an email to security@bitcoincore.org (not for support).
-
-The following keys may be used to communicate sensitive information to developers:
+When in doubt you can also send an email to (address in the commit messages):
 
 | Name | Fingerprint |
 |------|-------------|
-| Pieter Wuille | 133E AC17 9436 F14A 5CF1  B794 860F EB80 4E66 9320 |
-| Michael Ford | E777 299F C265 DD04 7930  70EB 944D 35F9 AC3D B76A |
-| Ava Chow | 1528 1230 0785 C964 44D3  334D 1756 5732 E08E 5E41 |
-
-You can import a key by running the following command with that individual’s fingerprint: `gpg --keyserver hkps://keys.openpgp.org --recv-keys "<fingerprint>"` Ensure that you put quotes around fingerprints containing spaces.
+| Sjors Provoost | ED9B DF7A D6A5 5E23 2E84  5242 57FF 9BDB CC30 1009 |

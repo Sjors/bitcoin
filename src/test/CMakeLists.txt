@@ -4,13 +4,13 @@
 
 # Do not use generator expressions in test sources because the
 # SOURCES property is processed to gather test suite macros.
-add_executable(test_bitcoin
+add_executable(test_sv2
   main.cpp
 )
 
-add_windows_application_manifest(test_bitcoin)
+add_windows_application_manifest(test_sv2)
 
-target_link_libraries(test_bitcoin
+target_link_libraries(test_sv2
   core_interface
   test_util
   bitcoin_node
@@ -19,7 +19,7 @@ target_link_libraries(test_bitcoin
   Boost::headers
 )
 
-target_sources(test_bitcoin
+target_sources(test_sv2
 PRIVATE
   sv2_connman_tests.cpp
   sv2_noise_tests.cpp
@@ -27,7 +27,7 @@ PRIVATE
   sv2_messages_tests.cpp
   sv2_template_provider_tests.cpp
 )
-target_link_libraries(test_bitcoin bitcoin_sv2)
+target_link_libraries(test_sv2 bitcoin_sv2)
 
 function(add_boost_test source_file)
   if(NOT EXISTS ${source_file})
@@ -44,7 +44,7 @@ function(add_boost_test source_file)
   )
   foreach(test_suite_name IN LISTS test_suite_macro)
     add_test(NAME ${test_suite_name}
-      COMMAND test_bitcoin --run_test=${test_suite_name} --catch_system_error=no --log_level=test_suite -- DEBUG_LOG_OUT
+      COMMAND test_sv2 --run_test=${test_suite_name} --catch_system_error=no --log_level=test_suite -- DEBUG_LOG_OUT
     )
     set_property(TEST ${test_suite_name} PROPERTY
       SKIP_REGULAR_EXPRESSION "no test cases matching filter" "skipping script_assets_test"
@@ -53,8 +53,8 @@ function(add_boost_test source_file)
 endfunction()
 
 function(add_all_test_targets)
-  get_target_property(test_source_dir test_bitcoin SOURCE_DIR)
-  get_target_property(test_sources test_bitcoin SOURCES)
+  get_target_property(test_source_dir test_sv2 SOURCE_DIR)
+  get_target_property(test_sources test_sv2 SOURCES)
   foreach(test_source ${test_sources})
     cmake_path(IS_RELATIVE test_source result)
     if(result)
@@ -66,4 +66,4 @@ endfunction()
 
 add_all_test_targets()
 
-install_binary_component(test_bitcoin INTERNAL)
+install_binary_component(test_sv2)

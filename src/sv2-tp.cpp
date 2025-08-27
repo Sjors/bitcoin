@@ -23,22 +23,23 @@
 #endif
 
 static const char* const HELP_USAGE{R"(
-bitcoin-mine is a test program for interacting with bitcoin-node via IPC.
+sv2-tp implements the Stratum v2 Template Provider role. It connects to Bitcoin
+Core via IPC.
 
 Usage:
-  bitcoin-mine [options]
+  sv2-tp [options]
 )"};
 
 static const char* HELP_EXAMPLES{R"(
 Examples:
-  # Start separate bitcoin-node that bitcoin-mine can connect to.
-  bitcoin-node -regtest -ipcbind=unix
+  # Start separate bitcoin node that sv2-tp can connect to.
+  bitcoin -m node -testnet4 -ipcbind=unix
 
-  # Connect to bitcoin-node and print tip block hash.
-  bitcoin-mine -regtest
+  # Connect to the node:
+  sv2-tp -testnet4 -debug=sv2 -loglevel=sv2:trace
 
-  # Run with debug output.
-  bitcoin-mine -regtest -debug=sv2 -loglevel=sv2:trace
+  # Now start the SRI Job Declarator Client of Pool role, you should see
+  # it connect in the logs.
 )"};
 
 const TranslateFn G_TRANSLATION_FUN{nullptr};
@@ -55,7 +56,7 @@ static void AddArgs(ArgsManager& args)
     const auto regtestBaseParams = CreateBaseChainParams(ChainType::REGTEST);
 
     args.AddArg("-version", "Print version and exit", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    args.AddArg("-datadir=<dir>", "Specify data directory", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    args.AddArg("-datadir=<dir>", "Specify non-default Bitcoin Core data directory", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     args.AddArg("-ipcconnect=<address>", "Connect to bitcoin-node process in the background to perform online operations. Valid <address> values are 'unix' to connect to the default socket, 'unix:<socket path>' to connect to a socket at a nonstandard path. Default value: unix", ArgsManager::ALLOW_ANY, OptionsCategory::IPC);
     args.AddArg("-sv2bind=<addr>[:<port>]", strprintf("Bind to given address and always listen on it (default: 127.0.0.1). Use [host]:port notation for IPv6."), ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
     args.AddArg("-sv2port=<port>", strprintf("Listen for Stratum v2 connections on <port> (default: %u, testnet3: %u, testnet4: %u, signet: %u, regtest: %u).", defaultBaseParams->Sv2Port(), testnetBaseParams->Sv2Port(), testnet4BaseParams->Sv2Port(), signetBaseParams->Sv2Port(), regtestBaseParams->Sv2Port()), ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::CONNECTION);
@@ -96,7 +97,7 @@ MAIN_FUNCTION
         return EXIT_FAILURE;
     }
     if (HelpRequested(args) || args.IsArgSet("-version")) {
-        std::string output{strprintf("%s bitcoin-mine version", CLIENT_NAME) + " " + FormatFullVersion() + "\n"};
+        std::string output{strprintf("%s sv2-tp version", CLIENT_NAME) + " " + FormatFullVersion() + "\n"};
         if (args.IsArgSet("-version")) {
             output += FormatParagraph(LicenseInfo());
         } else {
@@ -160,7 +161,7 @@ MAIN_FUNCTION
     }
 
     // Connect to existing bitcoin-node process or spawn new one.
-    std::unique_ptr<interfaces::Init> mine_init{interfaces::MakeBasicInit("bitcoin-mine", argc > 0 ? argv[0] : "")};
+    std::unique_ptr<interfaces::Init> mine_init{interfaces::MakeBasicInit("sv2-tp", argc > 0 ? argv[0] : "")};
     assert(mine_init);
     std::unique_ptr<interfaces::Init> node_init;
     try {

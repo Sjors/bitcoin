@@ -14,7 +14,7 @@ execute_process(
   COMMAND_ERROR_IS_FATAL ANY
 )
 execute_process(
-  COMMAND ${LCOV_COMMAND} --capture --directory src --test-name test_bitcoin --output-file test_bitcoin.info
+  COMMAND ${LCOV_COMMAND} --capture --directory src --test-name test_sv2 --output-file test_sv2.info
   WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
   COMMAND_ERROR_IS_FATAL ANY
 )
@@ -24,22 +24,22 @@ execute_process(
   COMMAND_ERROR_IS_FATAL ANY
 )
 execute_process(
-  COMMAND ${LCOV_FILTER_COMMAND} test_bitcoin.info test_bitcoin_filtered.info
+  COMMAND ${LCOV_FILTER_COMMAND} test_sv2.info test_sv2_filtered.info
   WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
   COMMAND_ERROR_IS_FATAL ANY
 )
 execute_process(
-  COMMAND ${LCOV_COMMAND} --add-tracefile test_bitcoin_filtered.info --output-file test_bitcoin_filtered.info
+  COMMAND ${LCOV_COMMAND} --add-tracefile test_sv2_filtered.info --output-file test_sv2_filtered.info
   WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
   COMMAND_ERROR_IS_FATAL ANY
 )
 execute_process(
-  COMMAND ${LCOV_COMMAND} --add-tracefile baseline_filtered.info --add-tracefile test_bitcoin_filtered.info --output-file test_bitcoin_coverage.info
+  COMMAND ${LCOV_COMMAND} --add-tracefile baseline_filtered.info --add-tracefile test_sv2_filtered.info --output-file test_sv2_coverage.info
   WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
   COMMAND_ERROR_IS_FATAL ANY
 )
 execute_process(
-  COMMAND ${GENHTML_COMMAND} test_bitcoin_coverage.info --output-directory test_bitcoin.coverage
+  COMMAND ${GENHTML_COMMAND} test_sv2_coverage.info --output-directory test_sv2.coverage
   WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
   COMMAND_ERROR_IS_FATAL ANY
 )
@@ -49,7 +49,7 @@ execute_process(
   COMMAND_ERROR_IS_FATAL ANY
 )
 execute_process(
-  COMMAND ${LCOV_COMMAND} --add-tracefile baseline_filtered.info --add-tracefile test_bitcoin_filtered.info --output-file total_coverage.info
+  COMMAND ${LCOV_COMMAND} --add-tracefile baseline_filtered.info --add-tracefile test_sv2_filtered.info --output-file total_coverage.info
   COMMAND ${GREP_EXECUTABLE} "%"
   COMMAND ${AWK_EXECUTABLE} "{ print substr($3,2,50) \"/\" $5 }"
   OUTPUT_FILE coverage_percent.txt

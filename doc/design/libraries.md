@@ -33,9 +33,9 @@
 
 graph TD;
 
-bitcoin-mine-->libbitcoin_sv2;
-bitcoin-mine-->libbitcoin_common;
-bitcoin-mine-->libbitcoin_ipc;
+sv2-tp-->libbitcoin_sv2;
+sv2-tp-->libbitcoin_common;
+sv2-tp-->libbitcoin_ipc;
 
 libbitcoin_consensus-->libbitcoin_crypto;
 
@@ -53,7 +53,7 @@ libbitcoin_sv2-->libbitcoin_common;
 libbitcoin_sv2-->libbitcoin_crypto;
 
 classDef bold stroke-width:2px, font-weight:bold, font-size: smaller;
-class bitcoind,bitcoin-cli,bitcoin-mine bold
+class bitcoind,bitcoin-cli,sv2-tp bold
 ```
 </td></tr><tr><td>
 

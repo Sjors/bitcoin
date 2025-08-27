@@ -1,62 +1,64 @@
-Bitcoin Core integration/staging tree
+Stratum v2 Template Provider (c++)
 =====================================
 
-https://bitcoincore.org
+For an immediately usable, binary version of this software, see
+releases.
 
-For an immediately usable, binary version of the Bitcoin Core software, see
-https://bitcoincore.org/en/download/.
+Windows support is coming soon(tm). See https://github.com/bitcoin/bitcoin/pull/32387
 
-What is Bitcoin Core?
----------------------
+Compile
+------------------------
 
-Bitcoin Core connects to the Bitcoin peer-to-peer network to download and fully
-validate blocks and transactions. It also includes a wallet and graphical user
-interface, which can be optionally built.
+```sh
+cmake -B build
+cmake --build build
+ctest --test-dir build
+```
 
-Further information about Bitcoin Core is available in the [doc folder](/doc).
+See `doc/build*` for detailed instructions per platform, including
+dependencies.
 
-License
--------
+Usage
+------------------------
+Download or compile Bitcoin Core v30.0 or later. Start it with:
 
-Bitcoin Core is released under the terms of the MIT license. See [COPYING](COPYING) for more
-information or see https://opensource.org/license/MIT.
+ ```sh
+ bitcoin -m node -ipcbind=unix
+ ```
 
-Development Process
--------------------
+Then start the Template Provider, thorough logging is recommended:
 
-The `master` branch is regularly built (see `doc/build-*.md` for instructions) and tested, but it is not guaranteed to be
-completely stable. [Tags](https://github.com/bitcoin/bitcoin/tags) are created
-regularly from release branches to indicate new official, stable release versions of Bitcoin Core.
+```sh
+build/bin/sv2-tp -debug=sv2 -loglevel=sv2:trace
+```
 
-The https://github.com/bitcoin-core/gui repository is used exclusively for the
-development of the GUI. Its master branch is identical in all monotree
-repositories. Release branches and tags do not exist, so please do not fork
-that repository unless it is for development reasons.
+(for the installed version you don't need `build/bin/`)
 
-The contribution workflow is described in [CONTRIBUTING.md](CONTRIBUTING.md)
-and useful hints for developers can be found in [doc/developer-notes.md](doc/developer-notes.md).
 
-Testing
--------
+Relation to Bitcoin Core
+------------------------
 
-Testing and code review is the bottleneck for development; we get more pull
-requests than we can review and test on short notice. Please be patient and help out by testing
-other people's pull requests, and remember this is a security-critical project where any mistake might cost people
-lots of money.
+The code for this project is originally based on Bitcoin Core, for historical
+reasons described [here](https://github.com/bitcoin/bitcoin/pull/31802). The
+code is expected to diverge over time, with unused code being removed.
 
-### Automated Testing
+There is no test coverage for code that is identical to the upstream project
+and bugs there should be fixed upstream, with a pull request here if they're
+important.
 
-Developers are strongly encouraged to write [unit tests](src/test/README.md) for new code, and to
-submit new unit tests for old code. Unit tests can be compiled and run
-(assuming they weren't disabled during the generation of the build system) with: `ctest`. Further details on running
-and extending unit tests can be found in [/src/test/README.md](/src/test/README.md).
+There's still many places where text will simply refer to "Bitcoin Core". Only
+replace this text if the rest of the file differs from upstream.
 
-The CI (Continuous Integration) systems make sure that every pull request is tested on Windows, Linux, and macOS.
-The CI must pass on all commits before merge to avoid unrelated CI failures on new pull requests.
+Where's the main code?
+----------------------
 
-### Manual Quality Assurance (QA) Testing
+- `src/sv2`: Stratum v2 noise protocol, transport, network and template provider
+- `test/sv2*`: test coverage
 
-Changes should be tested by somebody other than the developer who wrote the
-code. This is especially important for large or high-risk changes. It is useful
-to add a test plan to the pull request description if testing the changes is
-not straightforward.
+The rest is original Bitcoin Core code, albeit stripped down. E.g. the functional
+testwork has been removed, as has the wallet, GUI, RPC, ZMQ and most p2p code.
+
+Pull requests to strip out additional unused code are welcome. The main barrier
+to that is that `sv2_template_provider_tests` requires real node functionality.
+This should be replaced with a mock, after which the `libbitcoin_node` target
+can be dropped and many other things.

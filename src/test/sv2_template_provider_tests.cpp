@@ -14,7 +14,7 @@
 #include <memory>
 
 // For verbose debugging use:
-// build/src/test/test_bitcoin --run_test=sv2_template_provider_tests --log_level=all -- -debug=sv2 -loglevel=sv2:trace -printtoconsole=1 | grep -v disabled
+// build/src/test/test_sv2 --run_test=sv2_template_provider_tests --log_level=all -- -debug=sv2 -loglevel=sv2:trace -printtoconsole=1 | grep -v disabled
 
 BOOST_FIXTURE_TEST_SUITE(sv2_template_provider_tests, TestChain100Setup)
 

@@ -15,13 +15,13 @@ BEGIN
         BLOCK "040904E4" // U.S. English - multilingual (hex)
         BEGIN
             VALUE "CompanyName",        CLIENT_NAME " project"
-            VALUE "FileDescription",    "bitcoin-mine (Client for " CLIENT_NAME " IPC mining interface)"
+            VALUE "FileDescription",    "sv2-tp (Client for " CLIENT_NAME " IPC mining interface)"
             VALUE "FileVersion",        CLIENT_VERSION_STRING
-            VALUE "InternalName",       "bitcoin-mine"
+            VALUE "InternalName",       "sv2-tp"
             VALUE "LegalCopyright",     COPYRIGHT_STR
             VALUE "LegalTrademarks1",   "Distributed under the MIT software license, see the accompanying file COPYING or http://www.opensource.org/licenses/mit-license.php."
-            VALUE "OriginalFilename",   "bitcoin-mine.exe"
-            VALUE "ProductName",        "bitcoin-mine"
+            VALUE "OriginalFilename",   "sv2-tp.exe"
+            VALUE "ProductName",        "sv2-tp"
             VALUE "ProductVersion",     CLIENT_VERSION_STRING
         END
     END

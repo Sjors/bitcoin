@@ -58,8 +58,8 @@ This table describes the files installed by Bitcoin Core across different platfo
 |------------------------------------------------------------|-----------------------------------------------------------------------------|
 | [README.md](README.md) or [readme.txt](README_windows.txt) | Project information and instructions                                        |
 | bitcoin.conf                                               | [Generated](../contrib/devtools/gen-bitcoin-conf.sh) configuration file     |
-| libexec/test_bitcoin                                       | Unit test binary                                                            |
-| share/man/man1/                                            | Man pages for command-line tools like `bitcoin-mine`                        |
+| test_sv2                                                   | Unit test binary                                                            |
+| share/man/man1/                                            | Man pages for command-line tools like `sv2-tp`                              |
 | share/rpcauth/                                             | Documentation and scripts for RPC authentication setup                      |
 
 ### Notes

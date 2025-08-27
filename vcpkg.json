@@ -11,7 +11,7 @@
   ],
   "features": {
     "tests": {
-      "description": "Build test_bitcoin.exe executable",
+      "description": "Build test_sv2.exe executable",
       "dependencies": [
         "boost-test"
       ]
