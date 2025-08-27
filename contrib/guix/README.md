@@ -76,8 +76,8 @@ crucial differences:
 1. Since only Windows and macOS build outputs require codesigning, the `HOSTS`
    environment variable will have a sane default value of `x86_64-w64-mingw32
    x86_64-apple-darwin arm64-apple-darwin` instead of all the platforms.
-2. The `guix-codesign` command ***requires*** a `DETACHED_SIGS_REPO` flag.
-    * _**DETACHED_SIGS_REPO**_
+2. The `guix-codesign` command ***requires*** a `DETACHED_SIGS_REPO_SV2_TP` flag.
+    * _**DETACHED_SIGS_REPO_SV2_TP**_
 
       Set the directory where detached codesignatures can be found for the current
       Bitcoin Core version being built.
@@ -87,7 +87,7 @@ crucial differences:
 An invocation with all default options would look like:
 
 ```
-env DETACHED_SIGS_REPO=<path/to/bitcoin-detached-sigs> ./contrib/guix/guix-codesign
+env DETACHED_SIGS_REPO_SV2_TP=<path/to/sv2-tp-detached-sigs> ./contrib/guix/guix-codesign
 ```
 
 ## Cleaning intermediate work directories
@@ -106,15 +106,14 @@ worktree to save disk space:
 
 ## Attesting to build outputs
 
-Much like how Gitian build outputs are attested to in a `gitian.sigs`
-repository, Guix build outputs are attested to in the [`guix.sigs`
-repository](https://github.com/bitcoin-core/guix.sigs).
+Guix build outputs are attested to in the [`sv2-tp-guix.sigs`
+repository](https://github.com/sjors/sv2-tp-guix.sigs).
 
-After you've cloned the `guix.sigs` repository, to attest to the current
+After you've cloned the `sv2-tp-guix.sigs` repository, to attest to the current
 worktree's commit/tag:
 
 ```
-env GUIX_SIGS_REPO=<path/to/guix.sigs> SIGNER=<gpg-key-name> ./contrib/guix/guix-attest
+env GUIX_SIGS_REPO_SV2_TP=<path/to/sv2-tp-guix.sigs> SIGNER=<gpg-key-name> ./contrib/guix/guix-attest
 ```
 
 See `./contrib/guix/guix-attest --help` for more information on the various ways
@@ -127,7 +126,7 @@ repository:
 
 ```
 git -C <path/to/guix.sigs> pull
-env GUIX_SIGS_REPO=<path/to/guix.sigs> ./contrib/guix/guix-verify
+env GUIX_SIGS_REPO_SV2_TP=<path/to/guix.sigs> ./contrib/guix/guix-verify
 ```
 
 

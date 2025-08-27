@@ -39,26 +39,26 @@ cmd_usage() {
 cat <<EOF
 Synopsis:
 
-    env GUIX_SIGS_REPO=<path/to/guix.sigs> \\
+    env GUIX_SIGS_REPO_SV2_TP=<path/to/guix.sigs> \\
         SIGNER=GPG_KEY_NAME[=SIGNER_NAME] \\
         [ NO_SIGN=1 ]
       ./contrib/guix/guix-attest
 
 Example w/o overriding signing name:
 
-    env GUIX_SIGS_REPO=/home/achow101/guix.sigs \\
+    env GUIX_SIGS_REPO_SV2_TP=/home/achow101/guix.sigs \\
         SIGNER=achow101 \\
       ./contrib/guix/guix-attest
 
 Example overriding signing name:
 
-    env GUIX_SIGS_REPO=/home/dongcarl/guix.sigs \\
+    env GUIX_SIGS_REPO_SV2_TP=/home/dongcarl/guix.sigs \\
         SIGNER=0x96AB007F1A7ED999=dongcarl \\
       ./contrib/guix/guix-attest
 
 Example w/o signing, just creating SHA256SUMS:
 
-    env GUIX_SIGS_REPO=/home/achow101/guix.sigs \\
+    env GUIX_SIGS_REPO_SV2_TP=/home/achow101/guix.sigs \\
         SIGNER=achow101 \\
         NO_SIGN=1 \\
       ./contrib/guix/guix-attest
@@ -66,23 +66,23 @@ Example w/o signing, just creating SHA256SUMS:
 EOF
 }
 
-if [ -z "$GUIX_SIGS_REPO" ] || [ -z "$SIGNER" ]; then
+if [ -z "$GUIX_SIGS_REPO_SV2_TP" ] || [ -z "$SIGNER" ]; then
     cmd_usage
     exit 1
 fi
 
 ################
-# GUIX_SIGS_REPO should exist as a directory
+# GUIX_SIGS_REPO_SV2_TP should exist as a directory
 ################
 
-if [ ! -d "$GUIX_SIGS_REPO" ]; then
+if [ ! -d "$GUIX_SIGS_REPO_SV2_TP" ]; then
 cat << EOF
-ERR: The specified GUIX_SIGS_REPO is not an existent directory:
+ERR: The specified GUIX_SIGS_REPO_SV2_TP is not an existent directory:
 
-    '$GUIX_SIGS_REPO'
+    '$GUIX_SIGS_REPO_SV2_TP'
 
 Hint: Please clone the guix.sigs repository and point to it with the
-      GUIX_SIGS_REPO environment variable.
+      GUIX_SIGS_REPO_SV2_TP environment variable.
 
 EOF
 cmd_usage
@@ -182,7 +182,7 @@ basenameify_SHA256SUMS() {
     sed -E 's@(^[[:xdigit:]]{64}[[:space:]]+).+/([^/]+$)@\1\2@'
 }
 
-outsigdir="$GUIX_SIGS_REPO/$VERSION/$signer_name"
+outsigdir="$GUIX_SIGS_REPO_SV2_TP/$VERSION/$signer_name"
 mkdir -p "$outsigdir"
 (
     cd "$outsigdir"

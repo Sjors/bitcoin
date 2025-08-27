@@ -28,32 +28,32 @@ cmd_usage() {
 cat <<EOF
 Synopsis:
 
-    env GUIX_SIGS_REPO=<path/to/guix.sigs> [ SIGNER=<signer> ] ./contrib/guix/guix-verify
+    env GUIX_SIGS_REPO_SV2_TP=<path/to/guix.sigs> [ SIGNER=<signer> ] ./contrib/guix/guix-verify
 
 Example overriding signer's manifest to use as base
 
-    env GUIX_SIGS_REPO=/home/dongcarl/guix.sigs SIGNER=achow101 ./contrib/guix/guix-verify
+    env GUIX_SIGS_REPO_SV2_TP=/home/dongcarl/guix.sigs SIGNER=achow101 ./contrib/guix/guix-verify
 
 EOF
 }
 
-if [ -z "$GUIX_SIGS_REPO" ]; then
+if [ -z "$GUIX_SIGS_REPO_SV2_TP" ]; then
     cmd_usage
     exit 1
 fi
 
 ################
-# GUIX_SIGS_REPO should exist as a directory
+# GUIX_SIGS_REPO_SV2_TP should exist as a directory
 ################
 
-if [ ! -d "$GUIX_SIGS_REPO" ]; then
+if [ ! -d "$GUIX_SIGS_REPO_SV2_TP" ]; then
 cat << EOF
-ERR: The specified GUIX_SIGS_REPO is not an existent directory:
+ERR: The specified GUIX_SIGS_REPO_SV2_TP is not an existent directory:
 
-    '$GUIX_SIGS_REPO'
+    '$GUIX_SIGS_REPO_SV2_TP'
 
 Hint: Please clone the guix.sigs repository and point to it with the
-      GUIX_SIGS_REPO environment variable.
+      GUIX_SIGS_REPO_SV2_TP environment variable.
 
 EOF
 cmd_usage
@@ -64,7 +64,7 @@ fi
 ##  Verify  ##
 ##############
 
-OUTSIGDIR_BASE="${GUIX_SIGS_REPO}/${VERSION}"
+OUTSIGDIR_BASE="${GUIX_SIGS_REPO_SV2_TP}/${VERSION}"
 echo "Looking for signature directories in '${OUTSIGDIR_BASE}'"
 echo ""
 

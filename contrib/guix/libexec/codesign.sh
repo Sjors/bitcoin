@@ -31,7 +31,7 @@ fi
 cat << EOF
 Required environment variables as seen inside the container:
     CODESIGNING_TARBALL: ${CODESIGNING_TARBALL:?not set}
-    DETACHED_SIGS_REPO: ${DETACHED_SIGS_REPO:?not set}
+    DETACHED_SIGS_REPO_SV2_TP: ${DETACHED_SIGS_REPO_SV2_TP:?not set}
     DIST_ARCHIVE_BASE: ${DIST_ARCHIVE_BASE:?not set}
     DISTNAME: ${DISTNAME:?not set}
     HOST: ${HOST:?not set}
@@ -52,12 +52,12 @@ git_head_version() {
     fi
 }
 
-CODESIGNATURE_GIT_ARCHIVE="${DIST_ARCHIVE_BASE}/${DISTNAME}-codesignatures-$(git_head_version "$DETACHED_SIGS_REPO").tar.gz"
+CODESIGNATURE_GIT_ARCHIVE="${DIST_ARCHIVE_BASE}/${DISTNAME}-codesignatures-$(git_head_version "$DETACHED_SIGS_REPO_SV2_TP").tar.gz"
 
 # Create the codesignature tarball if not already there
 if [ ! -e "$CODESIGNATURE_GIT_ARCHIVE" ]; then
     mkdir -p "$(dirname "$CODESIGNATURE_GIT_ARCHIVE")"
-    git -C "$DETACHED_SIGS_REPO" archive --output="$CODESIGNATURE_GIT_ARCHIVE" HEAD
+    git -C "$DETACHED_SIGS_REPO_SV2_TP" archive --output="$CODESIGNATURE_GIT_ARCHIVE" HEAD
 fi
 
 mkdir -p "$OUTDIR"

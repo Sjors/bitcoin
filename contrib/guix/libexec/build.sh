@@ -251,7 +251,7 @@ mkdir -p "$DISTSRC"
     case "$HOST" in
         *mingw*)
             cmake --build build -j "$JOBS" -t deploy ${V:+--verbose}
-            mv build/bitcoin-win64-setup.exe "${OUTDIR}/${DISTNAME}-win64-setup-unsigned.exe"
+            mv build/sv2-tp-win64-setup.exe "${OUTDIR}/${DISTNAME}-win64-setup-unsigned.exe"
             ;;
     esac
 
@@ -295,12 +295,6 @@ mkdir -p "$DISTSRC"
                 cp "${DISTSRC}/README.md" "${DISTNAME}/"
                 ;;
         esac
-
-        # copy over the example bitcoin.conf file. if contrib/devtools/gen-bitcoin-conf.sh
-        # has not been run before buildling, this file will be a stub
-        cp "${DISTSRC}/share/examples/bitcoin.conf" "${DISTNAME}/"
-
-        cp -r "${DISTSRC}/share/rpcauth" "${DISTNAME}/share/"
 
         # Deterministically produce {non-,}debug binary tarballs ready
         # for release
