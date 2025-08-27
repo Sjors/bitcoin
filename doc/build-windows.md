@@ -38,7 +38,7 @@ If you want to build the Windows installer using the `deploy` build target, you 
 
 Acquire the source in the usual way:
 
-    git clone https://github.com/bitcoin/bitcoin.git
+    git clone https://github.com/sjors/sv2-tp.git
     cd bitcoin
 
 Note that for WSL the Bitcoin Core source path MUST be somewhere in the default mount file system, for

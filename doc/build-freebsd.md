@@ -24,7 +24,7 @@ See [dependencies.md](dependencies.md) for a complete overview.
 ### 2. Clone Bitcoin Repo
 Now that `git` and all the required dependencies are installed, let's clone the Bitcoin Core repository to a directory. All build scripts and commands will run from this directory.
 ```bash
-git clone https://github.com/bitcoin/bitcoin.git
+git clone https://github.com/sjors/sv2-tp.git
 ```
 
 ## Building Bitcoin Core

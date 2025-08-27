@@ -72,20 +72,14 @@ std::string FormatSubVersion(const std::string& name, int nClientVersion, const 
 std::string CopyrightHolders(const std::string& strPrefix)
 {
     const auto copyright_devs = strprintf(_(COPYRIGHT_HOLDERS), COPYRIGHT_HOLDERS_SUBSTITUTION).translated;
-    std::string strCopyrightHolders = strPrefix + copyright_devs;
-
-    // Make sure Bitcoin Core copyright is not removed by accident
-    if (copyright_devs.find("Bitcoin Core") == std::string::npos) {
-        strCopyrightHolders += "\n" + strPrefix + "The Bitcoin Core developers";
-    }
-    return strCopyrightHolders;
+    return "Copyright (C) 2009-2025 The Bitcoin Core developers\n" + strPrefix + copyright_devs;
 }
 
 std::string LicenseInfo()
 {
-    const std::string URL_SOURCE_CODE = "<https://github.com/bitcoin/bitcoin>";
+    const std::string URL_SOURCE_CODE = "<https://github.com/sjors/sv2-tp>";
 
-    return CopyrightHolders(strprintf(_("Copyright (C) %i-%i"), 2009, COPYRIGHT_YEAR).translated + " ") + "\n" +
+    return CopyrightHolders(strprintf(_("Copyright (C) %i-%i"), 2025, COPYRIGHT_YEAR).translated + " ") + "\n" +
            "\n" +
            strprintf(_("Please contribute if you find %s useful. "
                        "Visit %s for further information about the software."),

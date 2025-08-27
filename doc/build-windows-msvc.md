@@ -25,7 +25,7 @@ Download and install [Git for Windows](https://git-scm.com/downloads/win). Once 
 
 Clone the Bitcoin Core repository to a directory. All build scripts and commands will run from this directory.
 ```
-git clone https://github.com/bitcoin/bitcoin.git
+git clone https://github.com/sjors/sv2-tp.git
 ```
 
 
