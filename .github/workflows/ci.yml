@@ -140,7 +140,7 @@ jobs:
         run: |
           git clone https://github.com/capnproto/pycapnp
           cd pycapnp
-          pip install . -C force-bundled-libcapnp=True --break-system-packages
+          pip3 install . -C force-bundled-libcapnp=True --break-system-packages
           cd ..
 
       - name: Set Ccache directory
