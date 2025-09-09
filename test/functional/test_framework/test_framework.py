@@ -15,7 +15,6 @@ import platform
 import pdb
 import random
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -103,20 +102,21 @@ class Binaries:
 
     def _argv(self, command, bin_path, need_ipc=False):
         """Return argv array that should be used to invoke the command. It
-        either uses the bitcoin wrapper executable (if BITCOIN_CMD is set or
-        need_ipc is True), or the direct binary path (bitcoind, etc). When
-        bin_dir is set (by tests calling binaries from previous releases) it
-        always uses the direct path."""
+        uses the bitcoin wrapper executable need_ipc is True or any command
+        other than 'node' (e.g. 'rpc'). Otherwise it uses bitcoind.
+        When bin_dir is set (by tests calling binaries from previous releases)
+        it always uses the direct binary path (bitcoind, etc)."""
         if self.bin_dir is not None:
             return [os.path.join(self.bin_dir, os.path.basename(bin_path))]
-        elif self.paths.bitcoin_cmd is not None or need_ipc:
+        elif need_ipc or command != "node":
             # If the current test needs IPC functionality, use the bitcoin
-            # wrapper binary and append -m so it calls multiprocess binaries.
-            bitcoin_cmd = self.paths.bitcoin_cmd or [self.paths.bitcoin_bin]
-            return bitcoin_cmd + (["-m"] if need_ipc else []) + [command]
+            # wrapper binary. It will decide based on arguments whether to
+            # launch the bitcoind or bitcoin-node binary.
+            # The wrapper binary is also used for RPC calls (bitcoin-cli).
+            return [self.paths.bitcoin_bin, command]
         else:
-            return [bin_path]
-
+            # Use bitcoind otherwise to retain coverage.
+            return [self.paths.bitcoind]
 
 class BitcoinTestMetaClass(type):
     """Metaclass for BitcoinTestFramework.
@@ -299,9 +299,6 @@ class BitcoinTestFramework(metaclass=BitcoinTestMetaClass):
                 binary + self.config["environment"]["EXEEXT"],
             )
             setattr(paths, env_variable_name.lower(), os.getenv(env_variable_name, default=default_filename))
-        # BITCOIN_CMD environment variable can be specified to invoke bitcoin
-        # wrapper binary instead of other executables.
-        paths.bitcoin_cmd = shlex.split(os.getenv("BITCOIN_CMD", "")) or None
         return paths
 
     def get_binaries(self, bin_dir=None):
