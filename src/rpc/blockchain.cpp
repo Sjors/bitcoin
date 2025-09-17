@@ -20,6 +20,7 @@
 #include <deploymentstatus.h>
 #include <flatfile.h>
 #include <hash.h>
+#include <index/bip352.h>
 #include <index/blockfilterindex.h>
 #include <index/coinstatsindex.h>
 #include <interfaces/mining.h>
@@ -736,6 +737,73 @@ const RPCResult getblock_vin{
         }},
     }
 };
+
+static RPCHelpMan getsilentpaymentblockdata()
+{
+    return RPCHelpMan{"getsilentpaymentblockdata",
+                "Returns an array of hex-encoded strings data for the tweaked public key sum of candidate silent transaction inputs in each transaction.\n",
+                {
+                    {"block_hash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The block hash"},
+                    {"dust", RPCArg::Type::AMOUNT, RPCArg::Default{CAmount(0)}, strprintf("Dust threshold in satoshi (max %d): all outputs must be greater or equal. This filter has limited precision.", BIP352Index::max_dust_threshold)},
+                },
+                {
+                    RPCResult{
+                        RPCResult::Type::OBJ, "", "",
+                        {
+                            {RPCResult::Type::ARR, "bip352_tweaks", "The tweaked public key for each transaction that could be a silent payment",
+                                {{RPCResult::Type::STR_HEX, "tweak", "Hex-encoded data for the public key sum of candidate silent transaction inputs in the transaction"}}
+                            }
+                        }},
+                },
+                RPCExamples{
+                    HelpExampleCli("getsilentpaymentblockdata", "\"00000000000000000002cbdf64ae445b53b545ba1e960f9e83787130d1530484\"")
+            + HelpExampleRpc("getsilentpaymentblockdata", "\"00000000000000000002cbdf64ae445b53b545ba1e960f9e83787130d1530484\"")
+                },
+        [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
+{
+    // TODO: add cut-through argument, check which index to use here
+    if (!g_bip352_index) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Requires bip352index");
+    }
+
+    uint256 block_hash(ParseHashV(request.params[0], "block_hash"));
+    {
+        ChainstateManager& chainman = EnsureAnyChainman(request.context);
+        const CBlockIndex* block_index;
+        LOCK(cs_main);
+        block_index = chainman.m_blockman.LookupBlockIndex(block_hash);
+        if (!block_index) {
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
+        }
+    }
+
+    CAmount dust_threshold{0};
+    if (!request.params[1].isNull()) {
+        dust_threshold = AmountFromValue(request.params[1], 0);
+        if (dust_threshold > BIP352Index::max_dust_threshold) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("dust argument must be <= %d", BIP352Index::max_dust_threshold));
+        }
+    }
+
+    BIP352Index::tweak_index_entry tweak_index_entry;
+    if (!g_bip352_index->FindSilentPayment(block_hash, tweak_index_entry)) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Block has not been indexed yet");
+    }
+
+    UniValue ret(UniValue::VOBJ);
+    UniValue tweaks_res(UniValue::VARR);
+
+    for (const auto& entry : tweak_index_entry) {
+        if ((CAmount(entry.second) << BIP352Index::dust_shift) >= dust_threshold) {
+            tweaks_res.push_back(HexStr(entry.first));
+        }
+    }
+
+    ret.pushKV("bip352_tweaks", tweaks_res);
+    return ret;
+},
+    };
+}
 
 static RPCHelpMan getblock()
 {
@@ -3457,6 +3525,7 @@ void RegisterBlockchainRPCCommands(CRPCTable& t)
         {"blockchain", &getblockfrompeer},
         {"blockchain", &getblockhash},
         {"blockchain", &getblockheader},
+        {"blockchain", &getsilentpaymentblockdata},
         {"blockchain", &getchaintips},
         {"blockchain", &getdifficulty},
         {"blockchain", &getdeploymentinfo},

@@ -27,6 +27,7 @@
 #include <index/blockfilterindex.h>
 #include <index/coinstatsindex.h>
 #include <index/txindex.h>
+#include <index/bip352.h>
 #include <init/common.h>
 #include <interfaces/chain.h>
 #include <interfaces/init.h>
@@ -361,6 +362,8 @@ void Shutdown(NodeContext& node)
     for (auto* index : node.indexes) index->Stop();
     if (g_txindex) g_txindex.reset();
     if (g_coin_stats_index) g_coin_stats_index.reset();
+    if (g_bip352_index) g_bip352_index.reset();
+    if (g_bip352_ct_index) g_bip352_ct_index.reset();
     DestroyAllBlockFilterIndexes();
     node.indexes.clear(); // all instances are nullptr now
 
@@ -526,6 +529,12 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-shutdownnotify=<cmd>", "Execute command immediately before beginning shutdown. The need for shutdown may be urgent, so be careful not to delay it long (if the command doesn't require interaction with the server, consider having it fork into the background).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 #endif
     argsman.AddArg("-txindex", strprintf("Maintain a full transaction index, used by the getrawtransaction rpc call (default: %u)", DEFAULT_TXINDEX), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-bip352index",
+                 strprintf("Maintain an index of BIP352 v0 tweaked public keys. (default: %s)", DEFAULT_BIP352_INDEX),
+                 ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-bip352ctindex",
+                 strprintf("Maintain an index of BIP352 v0 tweaked public keys with transaction cut-through. (default: %s)", DEFAULT_BIP352_CT_INDEX),
+                 ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-blockfilterindex=<type>",
                  strprintf("Maintain an index of compact filters by block (default: %s, values: %s).", DEFAULT_BLOCKFILTERINDEX, ListBlockFilterTypes()) +
                  " If <type> is not supplied or if <type> = 1, indexes for all known types are enabled.",
@@ -979,6 +988,10 @@ bool AppInitParameterInteraction(const ArgsManager& args)
     if (args.GetIntArg("-prune", 0)) {
         if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX))
             return InitError(_("Prune mode is incompatible with -txindex."));
+        if (args.GetBoolArg("-bip352index", DEFAULT_BIP352_INDEX))
+            return InitError(_("Prune mode is incompatible with -bip352index."));
+        if (args.GetBoolArg("-bip352index", DEFAULT_BIP352_CT_INDEX))
+            return InitError(_("Prune mode is incompatible with -bip352ctindex."));
         if (args.GetBoolArg("-reindex-chainstate", false)) {
             return InitError(_("Prune mode is incompatible with -reindex-chainstate. Use full -reindex instead."));
         }
@@ -1740,6 +1753,12 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
         LogInfo("* Using %.1f MiB for transaction index database", index_cache_sizes.tx_index * (1.0 / 1024 / 1024));
     }
+    if (args.GetBoolArg("-bip352index", DEFAULT_BIP352_INDEX)) {
+        LogPrintf("* Using %.1f MiB for BIP352 index database\n", index_cache_sizes.bip352_index * (1.0 / 1024 / 1024));
+    }
+    if (args.GetBoolArg("-bip352ctindex", DEFAULT_BIP352_CT_INDEX)) {
+        LogPrintf("* Using %.1f MiB for BIP352 cut-through index database\n", index_cache_sizes.bip352_ct_index * (1.0 / 1024 / 1024));
+    }
     for (BlockFilterType filter_type : g_enabled_filter_types) {
         LogInfo("* Using %.1f MiB for %s block filter index database",
                   index_cache_sizes.filter_index * (1.0 / 1024 / 1024), BlockFilterTypeName(filter_type));
@@ -1816,6 +1835,15 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     if (args.GetBoolArg("-coinstatsindex", DEFAULT_COINSTATSINDEX)) {
         g_coin_stats_index = std::make_unique<CoinStatsIndex>(interfaces::MakeChain(node), /*cache_size=*/0, false, do_reindex);
         node.indexes.emplace_back(g_coin_stats_index.get());
+    }
+
+    if (args.GetBoolArg("-bip352index", DEFAULT_BIP352_INDEX)) {
+        g_bip352_index = std::make_unique<BIP352Index>(/*cut_through=*/false, interfaces::MakeChain(node), index_cache_sizes.bip352_index, false, do_reindex);
+        node.indexes.emplace_back(g_bip352_index.get());
+    }
+    if (args.GetBoolArg("-bip352ctindex", DEFAULT_BIP352_CT_INDEX)) {
+        g_bip352_ct_index = std::make_unique<BIP352Index>(/*cut_through=*/true, interfaces::MakeChain(node), index_cache_sizes.bip352_ct_index, false, do_reindex);
+        node.indexes.emplace_back(g_bip352_ct_index.get());
     }
 
     // Init indexes
