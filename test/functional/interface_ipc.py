@@ -8,6 +8,7 @@ from io import BytesIO
 from pathlib import Path
 import shutil
 from test_framework.messages import (CBlock, CTransaction, ser_uint256, COIN)
+from test_framework.script import (CScript, CScriptNum)
 from test_framework.test_framework import (BitcoinTestFramework, assert_equal)
 from test_framework.wallet import MiniWallet
 
@@ -150,6 +151,12 @@ class IPCInterfaceTest(BitcoinTestFramework):
             coinbase = CTransaction()
             coinbase.deserialize(coinbase_data)
             assert_equal(coinbase.vin[0].prevout.hash, 0)
+
+            # No dummy extraNonce in the coinbase scriptSig
+            current_block_height = self.nodes[0].getchaintips()[0]["height"]
+            expected_scriptsig = CScript([CScriptNum(current_block_height + 1)])
+            assert_equal(coinbase.vin[0].scriptSig.hex(), expected_scriptsig.hex())
+
             self.log.debug("Wait for a new template")
             waitoptions = self.capnp_modules['mining'].BlockWaitOptions()
             waitoptions.timeout = timeout
