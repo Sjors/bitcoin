@@ -221,7 +221,7 @@ class IPCInterfaceTest(BitcoinTestFramework):
             opts.useMempool = True
             opts.blockReservedWeight = 4000
             opts.coinbaseOutputMaxAdditionalSigops = 0
-            template = mining.result.createNewBlock(opts)
+            template = mining.result.createNewBlock(ctx, opts)
             self.log.debug("Test some inspectors of Template")
             header = await template.result.getBlockHeader(ctx)
             assert_equal(len(header.result), block_header_size)
@@ -290,7 +290,7 @@ class IPCInterfaceTest(BitcoinTestFramework):
 
             current_block_height = self.nodes[0].getchaintips()[0]["height"]
             check_opts = self.capnp_modules['mining'].BlockCheckOptions()
-            template = await mining.result.createNewBlock(opts)
+            template = await mining.result.createNewBlock(ctx, opts)
             block = await self.parse_and_deserialize_block(template, ctx)
 
             coinbase = await self.build_coinbase_test(template, ctx, miniwallet)
@@ -305,7 +305,7 @@ class IPCInterfaceTest(BitcoinTestFramework):
             self.log.debug("Submit a block with a bad version")
             block.nVersion = 0
             block.solve()
-            res = await mining.result.checkBlock(block.serialize(), check_opts)
+            res = await mining.result.checkBlock(ctx, block.serialize(), check_opts)
             assert_equal(res.result, False)
             assert_equal(res.reason, "bad-version(0x00000000)")
             res = await template.result.submitSolution(ctx, block.nVersion, block.nTime, block.nNonce, coinbase.serialize())
@@ -315,7 +315,7 @@ class IPCInterfaceTest(BitcoinTestFramework):
             block.solve()
 
             self.log.debug("First call checkBlock()")
-            res = await mining.result.checkBlock(block.serialize(), check_opts)
+            res = await mining.result.checkBlock(ctx, block.serialize(), check_opts)
             assert_equal(res.result, True)
 
             # The remote template block will be mutated, capture the original:
@@ -345,7 +345,7 @@ class IPCInterfaceTest(BitcoinTestFramework):
             miniwallet.rescan_utxos()
             assert_equal(miniwallet.get_balance(), balance + 1)
             self.log.debug("Check block should fail now, since it is a duplicate")
-            res = await mining.result.checkBlock(block.serialize(), check_opts)
+            res = await mining.result.checkBlock(ctx, block.serialize(), check_opts)
             assert_equal(res.result, False)
             assert_equal(res.reason, "inconclusive-not-best-prevblk")
 
