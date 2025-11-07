@@ -17,8 +17,8 @@ interface Mining $Proxy.wrap("interfaces::Mining") {
     isInitialBlockDownload @1 (context :Proxy.Context) -> (result: Bool);
     getTip @2 (context :Proxy.Context) -> (result: Common.BlockRef, hasResult: Bool);
     waitTipChanged @3 (context :Proxy.Context, currentTip: Data, timeout: Float64) -> (result: Common.BlockRef);
-    createNewBlock @4 (options: BlockCreateOptions) -> (result: BlockTemplate);
-    checkBlock @5 (block: Data, options: BlockCheckOptions) -> (reason: Text, debug: Text, result: Bool);
+    createNewBlock @4 (context :Proxy.Context, options: BlockCreateOptions) -> (result: BlockTemplate);
+    checkBlock @5 (context :Proxy.Context, block: Data, options: BlockCheckOptions) -> (reason: Text, debug: Text, result: Bool);
 }
 
 interface BlockTemplate $Proxy.wrap("interfaces::BlockTemplate") {
@@ -39,6 +39,7 @@ struct BlockCreateOptions $Proxy.wrap("node::BlockCreateOptions") {
     useMempool @0 :Bool $Proxy.name("use_mempool");
     blockReservedWeight @1 :UInt64 $Proxy.name("block_reserved_weight");
     coinbaseOutputMaxAdditionalSigops @2 :UInt64 $Proxy.name("coinbase_output_max_additional_sigops");
+    alwaysAddCoinbaseCommitment @3 :Bool $Proxy.name("always_add_coinbase_commitment");
 }
 
 struct BlockWaitOptions $Proxy.wrap("node::BlockWaitOptions") {

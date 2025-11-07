@@ -135,13 +135,14 @@ class IPCInterfaceTest(BitcoinTestFramework):
             opts.useMempool = True
             opts.blockReservedWeight = 4000
             opts.coinbaseOutputMaxAdditionalSigops = 0
-            template = mining.result.createNewBlock(opts)
+            template = mining.result.createNewBlock(ctx, opts)
             self.log.debug("Test some inspectors of Template")
             header = await template.result.getBlockHeader(ctx)
             assert_equal(len(header.result), block_header_size)
             block = await self.parse_and_deserialize_block(template, ctx)
             assert_equal(ser_uint256(block.hashPrevBlock), newblockref.result.hash)
-            assert len(block.vtx) >= 1
+            # Template block.vtx only contains a (dummy) coinbase
+            assert_equal(len(block.vtx), 1)
             txfees = await template.result.getTxFees(ctx)
             assert_equal(len(txfees.result), 0)
             txsigops = await template.result.getTxSigops(ctx)
@@ -150,6 +151,19 @@ class IPCInterfaceTest(BitcoinTestFramework):
             coinbase = CTransaction()
             coinbase.deserialize(coinbase_data)
             assert_equal(coinbase.vin[0].prevout.hash, 0)
+            # Check that coinbase for an empty block doesn't have a witness
+            assert(coinbase.wit.is_null())
+            # Inspect coinbase template returned by getCoinbase()
+            # coinbase_template = (await template.result.getCoinbase(ctx)).result
+            # assert(not coinbase_template._has('witness'))
+
+            # Unless requested otherwise
+            opts.alwaysAddCoinbaseCommitment = True
+            template = mining.result.createNewBlock(ctx, opts)
+            coinbase_data = BytesIO((await template.result.getCoinbaseTx(ctx)).result)
+            coinbase.deserialize(coinbase_data)
+            assert(not coinbase.wit.is_null())
+
             self.log.debug("Wait for a new template")
             waitoptions = self.capnp_modules['mining'].BlockWaitOptions()
             waitoptions.timeout = timeout
@@ -180,13 +194,15 @@ class IPCInterfaceTest(BitcoinTestFramework):
             template6 = await waitnext
             block4 = await self.parse_and_deserialize_block(template6, ctx)
             assert_equal(len(block4.vtx), 3)
+            # Check that coinbase for non-empty block has a witness")
+            assert(not block4.vtx[0].wit.is_null())
             self.log.debug("Wait for another, but time out, since the fee threshold is set now")
             template7 = await template6.result.waitNext(ctx, waitoptions)
             assert_equal(template7.to_dict(), {})
 
             current_block_height = self.nodes[0].getchaintips()[0]["height"]
             check_opts = self.capnp_modules['mining'].BlockCheckOptions()
-            template = await mining.result.createNewBlock(opts)
+            template = await mining.result.createNewBlock(ctx, opts)
             block = await self.parse_and_deserialize_block(template, ctx)
             coinbase = await self.parse_and_deserialize_coinbase_tx(template, ctx)
             balance = miniwallet.get_balance()
@@ -198,7 +214,7 @@ class IPCInterfaceTest(BitcoinTestFramework):
             self.log.debug("Submit a block with a bad version")
             block.nVersion = 0
             block.solve()
-            res = await mining.result.checkBlock(block.serialize(), check_opts)
+            res = await mining.result.checkBlock(ctx, block.serialize(), check_opts)
             assert_equal(res.result, False)
             assert_equal(res.reason, "bad-version(0x00000000)")
             res = await template.result.submitSolution(ctx, block.nVersion, block.nTime, block.nNonce, coinbase.serialize())
@@ -206,7 +222,7 @@ class IPCInterfaceTest(BitcoinTestFramework):
             self.log.debug("Submit a valid block")
             block.nVersion = original_version
             block.solve()
-            res = await mining.result.checkBlock(block.serialize(), check_opts)
+            res = await mining.result.checkBlock(ctx, block.serialize(), check_opts)
             assert_equal(res.result, True)
             res = await template.result.submitSolution(ctx, block.nVersion, block.nTime, block.nNonce, coinbase.serialize())
             assert_equal(res.result, True)
@@ -214,7 +230,7 @@ class IPCInterfaceTest(BitcoinTestFramework):
             miniwallet.rescan_utxos()
             assert_equal(miniwallet.get_balance(), balance + 1)
             self.log.debug("Check block should fail now, since it is a duplicate")
-            res = await mining.result.checkBlock(block.serialize(), check_opts)
+            res = await mining.result.checkBlock(ctx, block.serialize(), check_opts)
             assert_equal(res.result, False)
             assert_equal(res.reason, "inconclusive-not-best-prevblk")
 

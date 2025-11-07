@@ -45,6 +45,7 @@ FUZZ_TARGET(utxo_total_supply)
     };
     BlockAssembler::Options options;
     options.coinbase_output_script = CScript() << OP_FALSE;
+    options.always_add_coinbase_commitment = true;
     const auto PrepareNextBlock = [&]() {
         // Use OP_FALSE to avoid BIP30 check from hitting early
         auto block = PrepareBlock(node, options);
