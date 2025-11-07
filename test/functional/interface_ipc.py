@@ -141,7 +141,8 @@ class IPCInterfaceTest(BitcoinTestFramework):
             assert_equal(len(header.result), block_header_size)
             block = await self.parse_and_deserialize_block(template, ctx)
             assert_equal(ser_uint256(block.hashPrevBlock), newblockref.result.hash)
-            assert len(block.vtx) >= 1
+            # Template block.vtx only contains a (dummy) coinbase
+            assert_equal(len(block.vtx), 1)
             txfees = await template.result.getTxFees(ctx)
             assert_equal(len(txfees.result), 0)
             txsigops = await template.result.getTxSigops(ctx)
@@ -150,6 +151,19 @@ class IPCInterfaceTest(BitcoinTestFramework):
             coinbase = CTransaction()
             coinbase.deserialize(coinbase_data)
             assert_equal(coinbase.vin[0].prevout.hash, 0)
+            # Check that coinbase for an empty block doesn't have a witness
+            assert(coinbase.wit.is_null())
+            # Inspect coinbase template returned by getCoinbase()
+            # coinbase_template = (await template.result.getCoinbase(ctx)).result
+            # assert(not coinbase_template._has('witness'))
+
+            # Unless requested otherwise
+            opts.alwaysAddCoinbaseCommitment = True
+            template = mining.result.createNewBlock(ctx, opts)
+            coinbase_data = BytesIO((await template.result.getCoinbaseTx(ctx)).result)
+            coinbase.deserialize(coinbase_data)
+            assert(not coinbase.wit.is_null())
+
             self.log.debug("Wait for a new template")
             waitoptions = self.capnp_modules['mining'].BlockWaitOptions()
             waitoptions.timeout = timeout
@@ -180,6 +194,8 @@ class IPCInterfaceTest(BitcoinTestFramework):
             template6 = await waitnext
             block4 = await self.parse_and_deserialize_block(template6, ctx)
             assert_equal(len(block4.vtx), 3)
+            # Check that coinbase for non-empty block has a witness")
+            assert(not block4.vtx[0].wit.is_null())
             self.log.debug("Wait for another, but time out, since the fee threshold is set now")
             template7 = await template6.result.waitNext(ctx, waitoptions)
             assert_equal(template7.to_dict(), {})
