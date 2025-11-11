@@ -586,4 +586,43 @@ std::optional<BlockRef> WaitTipChanged(ChainstateManager& chainman, KernelNotifi
     // avoid deadlocks.
     return GetTip(chainman);
 }
+
+node::CoinbaseTemplate ExtractCoinbaseTemplate(const CTransactionRef coinbase_tx)
+{
+    node::CoinbaseTemplate coinbase;
+
+    coinbase.version = coinbase_tx->CURRENT_VERSION;
+    coinbase.script_sig_prefix = coinbase_tx->vin[0].scriptSig;
+    // The CoinbaseTemplate interface guarantees a size limit. Raising it (e.g.
+    // if a future softfork needs to commit more than BIP34) is a
+    // breaking change for clients.
+    Assume(coinbase.script_sig_prefix.size() <= 8);
+
+    if (coinbase_tx->HasWitness()) {
+        const auto& witness_stack{coinbase_tx->vin[0].scriptWitness.stack};
+        // Consensus requires the coinbase witness stack to have exactly one
+        // element of 32 bytes.
+        Assert(witness_stack.size() == 1 || witness_stack[0].size() == 32);
+        coinbase.witness = uint256(witness_stack[0]);
+    }
+
+    coinbase.input_sequence = coinbase_tx->vin[0].nSequence;
+
+    // The first dummy coinbase output produced by CreateBlock() has an nValue
+    // set to nFee + the Block Subsidy
+    coinbase.value_remaining = coinbase_tx->vout[0].nValue;
+
+    // Extract only OP_RETURN coinbase outputs (witness commitment, merge
+    // mining, etc). BlockAssembler::CreateNewBlock adds a dummy output with
+    // the full reward that we must exclude.
+    for (const auto& output : coinbase_tx->vout) {
+        if (!output.scriptPubKey.empty() && output.scriptPubKey[0] == OP_RETURN) {
+            coinbase.outputs.push_back(output);
+        }
+    }
+
+    coinbase.lock_time = coinbase_tx->nLockTime;
+
+    return coinbase;
+}
 } // namespace node

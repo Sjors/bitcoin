@@ -83,6 +83,7 @@ using interfaces::Node;
 using interfaces::WalletLoader;
 using node::BlockAssembler;
 using node::BlockWaitOptions;
+using node::CoinbaseTemplate;
 using util::Join;
 
 namespace node {
@@ -893,6 +894,11 @@ public:
     std::vector<int64_t> getTxSigops() override
     {
         return m_block_template->vTxSigOpsCost;
+    }
+
+    CoinbaseTemplate getCoinbase() override
+    {
+        return ExtractCoinbaseTemplate(m_block_template->block.vtx[0]);
     }
 
     CTransactionRef getCoinbaseTx() override
