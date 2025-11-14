@@ -869,6 +869,12 @@ public:
                                                     m_node(node)
     {
         assert(m_block_template);
+
+        if (m_assemble_options.clear_coinbase) {
+            // Clear dummy coinbase so it's not exposed to callers of getBlock()
+            CMutableTransaction empty_tx;
+            m_block_template->block.vtx[0] = MakeTransactionRef(std::move(empty_tx));
+        }
     }
 
     CBlockHeader getBlockHeader() override

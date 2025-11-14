@@ -67,6 +67,14 @@ struct BlockCreateOptions {
      * coinbase_max_additional_weight and coinbase_output_max_additional_sigops.
      */
     CScript coinbase_output_script{CScript() << OP_TRUE};
+    /**
+     * Whether to clear the dummy coinbase from the block template.
+     *
+     * IPC clients are expected to call getCoinbase() rather than use the dummy
+     * transaction directly. It's cleared by default, but RPC and test code
+     * can opt-in to keeping it.
+     */
+    bool clear_coinbase{true};
 };
 
 struct BlockWaitOptions {

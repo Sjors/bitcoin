@@ -165,7 +165,10 @@ static UniValue generateBlocks(ChainstateManager& chainman, Mining& miner, const
 {
     UniValue blockHashes(UniValue::VARR);
     while (nGenerate > 0 && !chainman.m_interrupt) {
-        std::unique_ptr<BlockTemplate> block_template(miner.createNewBlock({ .coinbase_output_script = coinbase_output_script }));
+        std::unique_ptr<BlockTemplate> block_template(miner.createNewBlock({
+            .coinbase_output_script = coinbase_output_script,
+            .clear_coinbase = false
+        }));
         CHECK_NONFATAL(block_template);
 
         std::shared_ptr<const CBlock> block_out;
@@ -376,7 +379,11 @@ static RPCHelpMan generateblock()
     {
         LOCK(chainman.GetMutex());
         {
-            std::unique_ptr<BlockTemplate> block_template{miner.createNewBlock({.use_mempool = false, .coinbase_output_script = coinbase_output_script})};
+            std::unique_ptr<BlockTemplate> block_template{miner.createNewBlock({
+                .use_mempool = false,
+                .coinbase_output_script = coinbase_output_script,
+                .clear_coinbase = false
+            })};
             CHECK_NONFATAL(block_template);
 
             block = block_template->getBlock();
@@ -871,7 +878,7 @@ static RPCHelpMan getblocktemplate()
         time_start = GetTime();
 
         // Create new block
-        block_template = miner.createNewBlock();
+        block_template = miner.createNewBlock({.clear_coinbase = false});
         CHECK_NONFATAL(block_template);
 
 
