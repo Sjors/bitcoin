@@ -67,6 +67,7 @@ struct BlockCreateOptions {
      * coinbase_max_additional_weight and coinbase_output_max_additional_sigops.
      */
     CScript coinbase_output_script{CScript() << OP_TRUE};
+
     /**
      * Whether to clear the dummy coinbase from the block template.
      *
@@ -75,6 +76,14 @@ struct BlockCreateOptions {
      * can opt-in to keeping it.
      */
     bool clear_coinbase{true};
+
+    /*
+     * Whether blocks without SegWit transactions (e.g. empty blocks) should
+     * have a SegWit commitment, i.e. the coinbase witness and OP_RETURN.
+     *
+     * @note IPC clients should omit this field for compatibility with v30.0
+     */
+    bool always_add_coinbase_commitment{false};
 };
 
 struct BlockWaitOptions {

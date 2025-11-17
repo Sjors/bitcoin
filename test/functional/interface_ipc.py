@@ -146,8 +146,10 @@ class IPCInterfaceTest(BitcoinTestFramework):
             echo.destroy(ctx)
         asyncio.run(capnp.run(async_routine()))
 
-    async def build_coinbase_test(self, template, ctx, miniwallet):
-        self.log.debug("Build coinbase transaction using getCoinbase()")
+    async def build_coinbase_test(self, template, ctx, miniwallet, *, expect_witness: bool):
+        self.log.debug("Build coinbase transaction using getCoinbase() " +
+                       ("with" if expect_witness else "without") + " a witness")
+
         coinbase_template = await self.parse_and_deserialize_coinbase(template, ctx)
         coinbase = CTransaction()
         coinbase.version = coinbase_template.version
@@ -168,8 +170,7 @@ class IPCInterfaceTest(BitcoinTestFramework):
         coinbase.vout = [CTxOut()]
         coinbase.vout[0].scriptPubKey = miniwallet.get_output_script()
         coinbase.vout[0].nValue = coinbase_template.valueRemaining
-        # Add SegWit OP_RETURN. This is currently always present even for
-        # empty blocks, but this may change.
+        # Add SegWit OP_RETURN if provided
         found_witness_op_return = False
         for output_data in coinbase_template.requiredOutputs:
             output = CTxOut()
@@ -179,6 +180,7 @@ class IPCInterfaceTest(BitcoinTestFramework):
                 found_witness_op_return = True
 
         assert_equal(has_witness, found_witness_op_return)
+        assert_equal(has_witness, expect_witness)
 
         coinbase.nLockTime = coinbase_template.lockTime
 
@@ -227,7 +229,17 @@ class IPCInterfaceTest(BitcoinTestFramework):
             assert_equal(len(header.result), block_header_size)
             block = await self.parse_and_deserialize_block(template, ctx)
             assert_equal(ser_uint256(block.hashPrevBlock), newblockref.result.hash)
-            assert len(block.vtx) >= 1
+
+            # Template block.vtx only contains a (dummy) coinbase
+            assert_equal(len(block.vtx), 1)
+            # Check that coinbase for an empty block doesn't have a witness")
+            await self.build_coinbase_test(template, ctx, miniwallet, expect_witness=False)
+            # Unless requested otherwise
+            opts.alwaysAddCoinbaseCommitment = True
+            template = mining.result.createNewBlock(ctx, opts)
+            await self.build_coinbase_test(template, ctx, miniwallet, expect_witness=True)
+            opts.alwaysAddCoinbaseCommitment = False
+
             txfees = await template.result.getTxFees(ctx)
             assert_equal(len(txfees.result), 0)
             txsigops = await template.result.getTxSigops(ctx)
@@ -262,6 +274,7 @@ class IPCInterfaceTest(BitcoinTestFramework):
             template6 = await waitnext
             block4 = await self.parse_and_deserialize_block(template6, ctx)
             assert_equal(len(block4.vtx), 3)
+
             self.log.debug("Wait for another, but time out, since the fee threshold is set now")
             template7 = await template6.result.waitNext(ctx, waitoptions)
             assert_equal(template7.to_dict(), {})
@@ -293,7 +306,7 @@ class IPCInterfaceTest(BitcoinTestFramework):
             template = await mining.result.createNewBlock(ctx, opts)
             block = await self.parse_and_deserialize_block(template, ctx)
 
-            coinbase = await self.build_coinbase_test(template, ctx, miniwallet)
+            coinbase = await self.build_coinbase_test(template, ctx, miniwallet, expect_witness=True)
 
             # Reduce payout for balance comparison simplicity
             coinbase.vout[0].nValue = COIN

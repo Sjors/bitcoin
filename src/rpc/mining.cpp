@@ -167,7 +167,8 @@ static UniValue generateBlocks(ChainstateManager& chainman, Mining& miner, const
     while (nGenerate > 0 && !chainman.m_interrupt) {
         std::unique_ptr<BlockTemplate> block_template(miner.createNewBlock({
             .coinbase_output_script = coinbase_output_script,
-            .clear_coinbase = false
+            .clear_coinbase = false,
+            .always_add_coinbase_commitment = true
         }));
         CHECK_NONFATAL(block_template);
 
@@ -382,7 +383,8 @@ static RPCHelpMan generateblock()
             std::unique_ptr<BlockTemplate> block_template{miner.createNewBlock({
                 .use_mempool = false,
                 .coinbase_output_script = coinbase_output_script,
-                .clear_coinbase = false
+                .clear_coinbase = false,
+                .always_add_coinbase_commitment = true
             })};
             CHECK_NONFATAL(block_template);
 
@@ -878,7 +880,10 @@ static RPCHelpMan getblocktemplate()
         time_start = GetTime();
 
         // Create new block
-        block_template = miner.createNewBlock({.clear_coinbase = false});
+        block_template = miner.createNewBlock({
+            .clear_coinbase = false,
+            .always_add_coinbase_commitment = true
+        });
         CHECK_NONFATAL(block_template);
 
 
