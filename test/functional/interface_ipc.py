@@ -182,13 +182,6 @@ class IPCInterfaceTest(BitcoinTestFramework):
 
         coinbase.nLockTime = coinbase_template.lockTime
 
-        # Compare to dummy coinbase provided by the deprecated getCoinbaseTx()
-        coinbase_legacy = await self.parse_and_deserialize_coinbase_tx(template, ctx)
-        assert_equal(coinbase_legacy.vout[0].nValue, coinbase_template.valueRemaining)
-        # Swap dummy output for our own
-        coinbase_legacy.vout[0].scriptPubKey = coinbase.vout[0].scriptPubKey
-        assert_equal(coinbase.serialize().hex(), coinbase_legacy.serialize().hex())
-
         return coinbase
 
     def run_mining_test(self):
@@ -239,11 +232,6 @@ class IPCInterfaceTest(BitcoinTestFramework):
             assert_equal(len(txfees.result), 0)
             txsigops = await template.result.getTxSigops(ctx)
             assert_equal(len(txsigops.result), 0)
-            # Inspect dummy coinbase returned by (deprecated) getCoinbaseTx()
-            coinbase_data = BytesIO((await template.result.getCoinbaseTx(ctx)).result)
-            coinbase = CTransaction()
-            coinbase.deserialize(coinbase_data)
-            assert_equal(coinbase.vin[0].prevout.hash, 0)
             self.log.debug("Wait for a new template")
             waitoptions = self.capnp_modules['mining'].BlockWaitOptions()
             waitoptions.timeout = timeout

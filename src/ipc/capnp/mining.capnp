@@ -28,9 +28,12 @@ interface BlockTemplate $Proxy.wrap("interfaces::BlockTemplate") {
     getTxFees @3 (context: Proxy.Context) -> (result: List(Int64));
     getTxSigops @4 (context: Proxy.Context) -> (result: List(Int64));
     getCoinbase @12 (context: Proxy.Context) -> (result: CoinbaseTemplate);
-    getCoinbaseTx @5 (context: Proxy.Context) -> (result: Data);
-    getCoinbaseCommitment @6 (context: Proxy.Context) -> (result: Data);
-    getWitnessCommitmentIndex @7 (context: Proxy.Context) -> (result: Int32);
+
+    # DEPRECATED in favor of getCoinbase(), server returns an error:
+    getCoinbaseTx @5 () -> ();
+    getCoinbaseCommitment @6 () -> ();
+    getWitnessCommitmentIndex @7 () -> ();
+
     getCoinbaseMerklePath @8 (context: Proxy.Context) -> (result: List(Data));
     submitSolution @9 (context: Proxy.Context, version: UInt32, timestamp: UInt32, nonce: UInt32, coinbase :Data) -> (result: Bool);
     waitNext @10 (context: Proxy.Context, options: BlockWaitOptions) -> (result: BlockTemplate);

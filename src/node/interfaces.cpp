@@ -896,22 +896,6 @@ public:
         return m_coinbase_template;
     }
 
-    CTransactionRef getCoinbaseTx() override
-    {
-        return m_block_template->block.vtx[0];
-    }
-
-    std::vector<unsigned char> getCoinbaseCommitment() override
-    {
-        Assume(m_coinbase_template.default_witness_commitment == m_block_template->vchCoinbaseCommitment);
-        return m_block_template->vchCoinbaseCommitment;
-    }
-
-    int getWitnessCommitmentIndex() override
-    {
-        return GetWitnessCommitmentIndex(m_block_template->block);
-    }
-
     std::vector<uint256> getCoinbaseMerklePath() override
     {
         return TransactionMerklePath(m_block_template->block, 0);

@@ -44,25 +44,16 @@ public:
 
     /** Return fields needed to construct a coinbase transaction */
     virtual node::CoinbaseTemplate getCoinbase() = 0;
-    /**
-     * Return dummy coinbase transaction.
-     *
-     * @note deprecated: use getCoinbase()
-     **/
-    virtual CTransactionRef getCoinbaseTx() = 0;
-    /**
-     * Return scriptPubKey with SegWit OP_RETURN.
-     *
-     * @note deprecated: use the required_outputs field from getCoinbase()
-     */
-    virtual std::vector<unsigned char> getCoinbaseCommitment() = 0;
-    /**
-     * Return which output in the dummy coinbase contains the SegWit OP_RETURN.
-     *
-     * @note deprecated. Scan outputs from getCoinbase() outputs field for the
-     *       SegWit marker.
-     */
-    virtual int getWitnessCommitmentIndex() = 0;
+
+    virtual void getCoinbaseTx() {
+        throw std::runtime_error("Old mining interface (@5) not supported. Please update your client!");
+    }
+    virtual void getCoinbaseCommitment() {
+        throw std::runtime_error("Old mining interface (@6) not supported. Please update your client!");
+    };
+    virtual void getWitnessCommitmentIndex() {
+        throw std::runtime_error("Old mining interface (@7) not supported. Please update your client!");
+    }
 
     /**
      * Compute merkle path to the coinbase transaction
