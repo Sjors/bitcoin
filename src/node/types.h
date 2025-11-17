@@ -139,6 +139,13 @@ struct CoinbaseTemplate {
      */
     std::vector<CTxOut> required_outputs;
     uint32_t lock_time;
+
+    /**
+     * Default witness commitment
+     *
+     * For getblocktemplate RPC, not exposed via IPC.
+     */
+    std::vector<unsigned char> default_witness_commitment;
 };
 
 /**

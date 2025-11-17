@@ -52,6 +52,8 @@ public:
     virtual CTransactionRef getCoinbaseTx() = 0;
     /**
      * Return scriptPubKey with SegWit OP_RETURN.
+     *
+     * @note deprecated: use the required_outputs field from getCoinbase()
      */
     virtual std::vector<unsigned char> getCoinbaseCommitment() = 0;
     /**

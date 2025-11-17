@@ -634,6 +634,8 @@ node::CoinbaseTemplate ExtractCoinbaseTemplate(const node::CBlockTemplate& block
 
     coinbase.lock_time = coinbase_tx->nLockTime;
 
+    coinbase.default_witness_commitment = block_template.vchCoinbaseCommitment;
+
     return coinbase;
 }
 } // namespace node

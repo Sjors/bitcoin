@@ -903,6 +903,7 @@ public:
 
     std::vector<unsigned char> getCoinbaseCommitment() override
     {
+        Assume(m_coinbase_template.default_witness_commitment == m_block_template->vchCoinbaseCommitment);
         return m_block_template->vchCoinbaseCommitment;
     }
 

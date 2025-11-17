@@ -8,7 +8,10 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 import shutil
-from test_framework.blocktools import NULL_OUTPOINT
+from test_framework.blocktools import (
+    NULL_OUTPOINT,
+    WITNESS_COMMITMENT_HEADER,
+)
 from test_framework.messages import (
     CBlock,
     CTransaction,
@@ -168,13 +171,11 @@ class IPCInterfaceTest(BitcoinTestFramework):
         # Add SegWit OP_RETURN. This is currently always present even for
         # empty blocks, but this may change.
         found_witness_op_return = False
-        # Compare SegWit OP_RETURN to getCoinbaseCommitment()
-        coinbase_commitment = (await template.result.getCoinbaseCommitment(ctx)).result
         for output_data in coinbase_template.requiredOutputs:
             output = CTxOut()
             output.deserialize(BytesIO(output_data))
             coinbase.vout.append(output)
-            if output.scriptPubKey == coinbase_commitment:
+            if len(output.scriptPubKey) >= 6 and output.scriptPubKey[2:6] == WITNESS_COMMITMENT_HEADER:
                 found_witness_op_return = True
 
         assert_equal(has_witness, found_witness_op_return)

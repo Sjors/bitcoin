@@ -1015,8 +1015,9 @@ static RPCHelpMan getblocktemplate()
         result.pushKV("signet_challenge", HexStr(consensusParams.signet_challenge));
     }
 
-    if (!block_template->getCoinbaseCommitment().empty()) {
-        result.pushKV("default_witness_commitment", HexStr(block_template->getCoinbaseCommitment()));
+    auto default_witness_commitment{block_template->getCoinbase().default_witness_commitment};
+    if (!default_witness_commitment.empty()) {
+        result.pushKV("default_witness_commitment", HexStr(default_witness_commitment));
     }
 
     return result;
