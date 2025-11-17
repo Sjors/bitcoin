@@ -42,9 +42,18 @@ public:
     // Sigop cost per transaction, not including coinbase transaction.
     virtual std::vector<int64_t> getTxSigops() = 0;
 
-    virtual CTransactionRef getCoinbaseTx() = 0;
-    virtual std::vector<unsigned char> getCoinbaseCommitment() = 0;
-    virtual int getWitnessCommitmentIndex() = 0;
+    /** Return fields needed to construct a coinbase transaction */
+    virtual node::CoinbaseTemplate getCoinbase() = 0;
+
+    virtual void getCoinbaseTx() {
+        throw std::runtime_error("Old mining interface (@5) not supported. Please update your client!");
+    }
+    virtual void getCoinbaseCommitment() {
+        throw std::runtime_error("Old mining interface (@6) not supported. Please update your client!");
+    };
+    virtual void getWitnessCommitmentIndex() {
+        throw std::runtime_error("Old mining interface (@7) not supported. Please update your client!");
+    }
 
     /**
      * Compute merkle path to the coinbase transaction

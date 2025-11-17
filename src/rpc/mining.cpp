@@ -165,7 +165,11 @@ static UniValue generateBlocks(ChainstateManager& chainman, Mining& miner, const
 {
     UniValue blockHashes(UniValue::VARR);
     while (nGenerate > 0 && !chainman.m_interrupt) {
-        std::unique_ptr<BlockTemplate> block_template(miner.createNewBlock({ .coinbase_output_script = coinbase_output_script }));
+        std::unique_ptr<BlockTemplate> block_template(miner.createNewBlock({
+            .coinbase_output_script = coinbase_output_script,
+            .clear_coinbase = false,
+            .always_add_coinbase_commitment = true
+        }));
         CHECK_NONFATAL(block_template);
 
         std::shared_ptr<const CBlock> block_out;
@@ -376,7 +380,12 @@ static RPCHelpMan generateblock()
     {
         LOCK(chainman.GetMutex());
         {
-            std::unique_ptr<BlockTemplate> block_template{miner.createNewBlock({.use_mempool = false, .coinbase_output_script = coinbase_output_script})};
+            std::unique_ptr<BlockTemplate> block_template{miner.createNewBlock({
+                .use_mempool = false,
+                .coinbase_output_script = coinbase_output_script,
+                .clear_coinbase = false,
+                .always_add_coinbase_commitment = true
+            })};
             CHECK_NONFATAL(block_template);
 
             block = block_template->getBlock();
@@ -871,7 +880,10 @@ static RPCHelpMan getblocktemplate()
         time_start = GetTime();
 
         // Create new block
-        block_template = miner.createNewBlock();
+        block_template = miner.createNewBlock({
+            .clear_coinbase = false,
+            .always_add_coinbase_commitment = true
+        });
         CHECK_NONFATAL(block_template);
 
 
@@ -1015,8 +1027,9 @@ static RPCHelpMan getblocktemplate()
         result.pushKV("signet_challenge", HexStr(consensusParams.signet_challenge));
     }
 
-    if (!block_template->getCoinbaseCommitment().empty()) {
-        result.pushKV("default_witness_commitment", HexStr(block_template->getCoinbaseCommitment()));
+    auto default_witness_commitment{block_template->getCoinbase().default_witness_commitment};
+    if (!default_witness_commitment.empty()) {
+        result.pushKV("default_witness_commitment", HexStr(default_witness_commitment));
     }
 
     return result;

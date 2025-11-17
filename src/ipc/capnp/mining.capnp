@@ -17,8 +17,8 @@ interface Mining $Proxy.wrap("interfaces::Mining") {
     isInitialBlockDownload @1 (context :Proxy.Context) -> (result: Bool);
     getTip @2 (context :Proxy.Context) -> (result: Common.BlockRef, hasResult: Bool);
     waitTipChanged @3 (context :Proxy.Context, currentTip: Data, timeout: Float64) -> (result: Common.BlockRef);
-    createNewBlock @4 (options: BlockCreateOptions) -> (result: BlockTemplate);
-    checkBlock @5 (block: Data, options: BlockCheckOptions) -> (reason: Text, debug: Text, result: Bool);
+    createNewBlock @4 (context :Proxy.Context, options: BlockCreateOptions) -> (result: BlockTemplate);
+    checkBlock @5 (context :Proxy.Context, block: Data, options: BlockCheckOptions) -> (reason: Text, debug: Text, result: Bool);
 }
 
 interface BlockTemplate $Proxy.wrap("interfaces::BlockTemplate") {
@@ -27,9 +27,13 @@ interface BlockTemplate $Proxy.wrap("interfaces::BlockTemplate") {
     getBlock @2 (context: Proxy.Context) -> (result: Data);
     getTxFees @3 (context: Proxy.Context) -> (result: List(Int64));
     getTxSigops @4 (context: Proxy.Context) -> (result: List(Int64));
-    getCoinbaseTx @5 (context: Proxy.Context) -> (result: Data);
-    getCoinbaseCommitment @6 (context: Proxy.Context) -> (result: Data);
-    getWitnessCommitmentIndex @7 (context: Proxy.Context) -> (result: Int32);
+    getCoinbase @12 (context: Proxy.Context) -> (result: CoinbaseTemplate);
+
+    # DEPRECATED in favor of getCoinbase(), server returns an error:
+    getCoinbaseTx @5 () -> ();
+    getCoinbaseCommitment @6 () -> ();
+    getWitnessCommitmentIndex @7 () -> ();
+
     getCoinbaseMerklePath @8 (context: Proxy.Context) -> (result: List(Data));
     submitSolution @9 (context: Proxy.Context, version: UInt32, timestamp: UInt32, nonce: UInt32, coinbase :Data) -> (result: Bool);
     waitNext @10 (context: Proxy.Context, options: BlockWaitOptions) -> (result: BlockTemplate);
@@ -40,6 +44,7 @@ struct BlockCreateOptions $Proxy.wrap("node::BlockCreateOptions") {
     useMempool @0 :Bool $Proxy.name("use_mempool");
     blockReservedWeight @1 :UInt64 $Proxy.name("block_reserved_weight");
     coinbaseOutputMaxAdditionalSigops @2 :UInt64 $Proxy.name("coinbase_output_max_additional_sigops");
+    alwaysAddCoinbaseCommitment @3 :Bool $Proxy.name("always_add_coinbase_commitment");
 }
 
 struct BlockWaitOptions $Proxy.wrap("node::BlockWaitOptions") {
@@ -50,4 +55,14 @@ struct BlockWaitOptions $Proxy.wrap("node::BlockWaitOptions") {
 struct BlockCheckOptions $Proxy.wrap("node::BlockCheckOptions") {
     checkMerkleRoot @0 :Bool $Proxy.name("check_merkle_root");
     checkPow @1 :Bool $Proxy.name("check_pow");
+}
+
+struct CoinbaseTemplate $Proxy.wrap("node::CoinbaseTemplate") {
+    version @0 :UInt32 $Proxy.name("version");
+    sequence @1 :UInt32 $Proxy.name("sequence");
+    scriptSigPrefix @2 :Data $Proxy.name("script_sig_prefix");
+    witness @3 :Data $Proxy.name("witness");
+    valueRemaining @4 :Int64 $Proxy.name("value_remaining");
+    requiredOutputs @5 :List(Data) $Proxy.name("required_outputs");
+    lockTime @6 :UInt32 $Proxy.name("lock_time");
 }

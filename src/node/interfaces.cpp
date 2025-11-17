@@ -83,6 +83,7 @@ using interfaces::Node;
 using interfaces::WalletLoader;
 using node::BlockAssembler;
 using node::BlockWaitOptions;
+using node::CoinbaseTemplate;
 using util::Join;
 
 namespace node {
@@ -863,10 +864,17 @@ public:
     explicit BlockTemplateImpl(BlockAssembler::Options assemble_options,
                                std::unique_ptr<CBlockTemplate> block_template,
                                NodeContext& node) : m_assemble_options(std::move(assemble_options)),
+                                                    m_coinbase_template(ExtractCoinbaseTemplate(*Assert(block_template))),
                                                     m_block_template(std::move(block_template)),
                                                     m_node(node)
     {
         assert(m_block_template);
+
+        if (m_assemble_options.clear_coinbase) {
+            // Clear dummy coinbase so it's not exposed to callers of getBlock()
+            CMutableTransaction empty_tx;
+            m_block_template->block.vtx[0] = MakeTransactionRef(std::move(empty_tx));
+        }
     }
 
     CBlockHeader getBlockHeader() override
@@ -889,19 +897,9 @@ public:
         return m_block_template->vTxSigOpsCost;
     }
 
-    CTransactionRef getCoinbaseTx() override
+    CoinbaseTemplate getCoinbase() override
     {
-        return m_block_template->block.vtx[0];
-    }
-
-    std::vector<unsigned char> getCoinbaseCommitment() override
-    {
-        return m_block_template->vchCoinbaseCommitment;
-    }
-
-    int getWitnessCommitmentIndex() override
-    {
-        return GetWitnessCommitmentIndex(m_block_template->block);
+        return m_coinbase_template;
     }
 
     std::vector<uint256> getCoinbaseMerklePath() override
@@ -928,6 +926,8 @@ public:
     }
 
     const BlockAssembler::Options m_assemble_options;
+
+    const CoinbaseTemplate m_coinbase_template;
 
     const std::unique_ptr<CBlockTemplate> m_block_template;
 
