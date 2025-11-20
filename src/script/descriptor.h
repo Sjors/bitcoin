@@ -177,6 +177,10 @@ struct Descriptor {
  */
 std::vector<std::unique_ptr<Descriptor>> Parse(std::span<const char> descriptor, FlatSigningProvider& out, std::string& error, bool require_checksum = false);
 
+/** Disallow string literal due to its trailing null byte */
+template <size_t N>
+std::vector<std::unique_ptr<Descriptor>> Parse(const char (&descriptor)[N], FlatSigningProvider& out, std::string& error, bool require_checksum) = delete;
+
 /** Get the checksum for a `descriptor`.
  *
  * - If it already has one, and it is correct, return the checksum in the input.
