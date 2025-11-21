@@ -24,7 +24,9 @@
 #include <kernel/context.h>
 #include <kernel/mempool_entry.h>
 #include <logging.h>
+#include <logging/timer.h>
 #include <mapport.h>
+#include <memusage.h>
 #include <net.h>
 #include <net_processing.h>
 #include <netaddress.h>
@@ -79,6 +81,7 @@ using interfaces::Chain;
 using interfaces::FoundBlock;
 using interfaces::Handler;
 using interfaces::MakeSignalHandler;
+using interfaces::MemoryLoad;
 using interfaces::Mining;
 using interfaces::Node;
 using interfaces::WalletLoader;
@@ -1012,6 +1015,22 @@ public:
         reason = state.GetRejectReason();
         debug = state.GetDebugMessage();
         return state.IsValid();
+    }
+
+    MemoryLoad getMemoryLoad() override
+    {
+        CTxMemPool& mempool{*Assert(m_node.mempool)};
+        TxTemplateMap& tx_refs{*Assert(m_tx_template_refs)};
+        size_t usage_bytes{0};
+        {
+            LOG_TIME_MILLIS_WITH_CATEGORY("Calculate template transaction reference memory footprint", BCLog::BENCH);
+            for (const auto& [tx_ref, _] : tx_refs) {
+                if (!Assume(tx_ref)) continue;
+                if (mempool.exists(tx_ref->GetWitnessHash())) continue;
+                usage_bytes += RecursiveDynamicUsage(*tx_ref);
+            }
+        }
+        return {.usage = usage_bytes};;
     }
 
     NodeContext* context() override { return &m_node; }
