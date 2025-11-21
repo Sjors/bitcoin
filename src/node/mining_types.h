@@ -17,11 +17,13 @@
 #include <primitives/transaction.h>
 #include <script/script.h>
 #include <uint256.h>
+#include <util/hasher.h>
 #include <util/time.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 namespace node {
@@ -172,6 +174,11 @@ struct CoinbaseTx {
     std::vector<CTxOut> required_outputs;
     uint32_t lock_time;
 };
+
+/**
+ * Map how many templates refer to each transaction reference.
+ */
+using TxTemplateMap = std::unordered_map<CTransactionRef, size_t, CTransactionRefSaltedHash, CTransactionRefComp>;
 
 } // namespace node
 
