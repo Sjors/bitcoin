@@ -67,6 +67,7 @@
 #include <any>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <utility>
 
 #include <boost/signals2/signal.hpp>
@@ -857,16 +858,40 @@ public:
     NodeContext& m_node;
 };
 
+typedef std::map<CTransactionRef, size_t> TxTemplateMap;
 class BlockTemplateImpl : public BlockTemplate
 {
 public:
-    explicit BlockTemplateImpl(BlockAssembler::Options assemble_options,
-                               std::unique_ptr<CBlockTemplate> block_template,
-                               NodeContext& node) : m_assemble_options(std::move(assemble_options)),
-                                                    m_block_template(std::move(block_template)),
-                                                    m_node(node)
+    explicit BlockTemplateImpl(
+        BlockAssembler::Options assemble_options,
+        std::unique_ptr<CBlockTemplate> block_template,
+        NodeContext& node,
+        std::shared_ptr<TxTemplateMap> tx_template_refs) : m_assemble_options(std::move(assemble_options)),
+                                                          m_block_template(std::move(block_template)),
+                                                          m_node(node),
+                                                          m_tx_template_refs(std::move(tx_template_refs))
+
     {
         assert(m_block_template);
+
+        TxTemplateMap& tx_refs{*Assert(m_tx_template_refs)};
+        // Don't track the dummy coinbase, because it can be modified in-place
+        // by submitSolution()
+        for (const CTransactionRef& tx : m_block_template->block.vtx | std::views::drop(1)) {
+            tx_refs[tx]++;
+        }
+    }
+
+    ~BlockTemplateImpl()
+    {
+        TxTemplateMap& tx_refs{*Assert(m_tx_template_refs)};
+        for (const CTransactionRef& tx : m_block_template->block.vtx | std::views::drop(1)) {
+            auto ref_count{tx_refs.find(tx)};
+            if (!Assume(ref_count != tx_refs.end())) break;
+            if (--ref_count->second == 0) {
+                tx_refs.erase(ref_count);
+            }
+        }
     }
 
     CBlockHeader getBlockHeader() override
@@ -918,7 +943,7 @@ public:
     std::unique_ptr<BlockTemplate> waitNext(BlockWaitOptions options) override
     {
         auto new_template = WaitAndCreateNewBlock(chainman(), notifications(), m_node.mempool.get(), m_block_template, options, m_assemble_options, m_interrupt_wait);
-        if (new_template) return std::make_unique<BlockTemplateImpl>(m_assemble_options, std::move(new_template), m_node);
+        if (new_template) return std::make_unique<BlockTemplateImpl>(m_assemble_options, std::move(new_template), m_node, m_tx_template_refs);
         return nullptr;
     }
 
@@ -935,12 +960,13 @@ public:
     ChainstateManager& chainman() { return *Assert(m_node.chainman); }
     KernelNotifications& notifications() { return *Assert(m_node.notifications); }
     NodeContext& m_node;
+    const std::shared_ptr<TxTemplateMap> m_tx_template_refs;
 };
 
 class MinerImpl : public Mining
 {
 public:
-    explicit MinerImpl(NodeContext& node) : m_node(node) {}
+    explicit MinerImpl(NodeContext& node) : m_node(node), m_tx_template_refs{std::make_shared<TxTemplateMap>()} {}
 
     bool isTestChain() override
     {
@@ -969,7 +995,14 @@ public:
 
         BlockAssembler::Options assemble_options{options};
         ApplyArgsManOptions(*Assert(m_node.args), assemble_options);
-        return std::make_unique<BlockTemplateImpl>(assemble_options, BlockAssembler{chainman().ActiveChainstate(), context()->mempool.get(), assemble_options}.CreateNewBlock(), m_node);
+        return std::make_unique<BlockTemplateImpl>(
+            assemble_options,
+            BlockAssembler{chainman().ActiveChainstate(),
+            context()->mempool.get(),
+            assemble_options}.CreateNewBlock(),
+            m_node,
+            m_tx_template_refs
+        );
     }
 
     bool checkBlock(const CBlock& block, const node::BlockCheckOptions& options, std::string& reason, std::string& debug) override
@@ -985,6 +1018,11 @@ public:
     ChainstateManager& chainman() { return *Assert(m_node.chainman); }
     KernelNotifications& notifications() { return *Assert(m_node.notifications); }
     NodeContext& m_node;
+
+    // Track how many templates (which we hold on to on behalf of connected
+    // clients) are referencing each transaction. This is used to track the
+    // memory footprint of non-mempool transactions.
+    std::shared_ptr<TxTemplateMap> m_tx_template_refs;
 };
 } // namespace
 } // namespace node
