@@ -68,9 +68,27 @@ class IPCInterfaceTest(BitcoinTestFramework):
 
         asyncio.run(capnp.run(async_routine()))
 
+    def run_deprecated_mining_test(self):
+        self.log.info("Running deprecated mining interface test")
+        async def async_routine():
+            ctx, init = await make_capnp_init_ctx(self)
+            self.log.debug("Calling deprecated makeMiningDeprecatedV2 should raise an error")
+            try:
+                await init.makeMiningDeprecatedV2()
+                assert False, "Expected an exception"
+            except capnp.KjException as e:
+                assert "Old mining interface" in str(e)
+        asyncio.run(capnp.run(async_routine()))
+
     def run_test(self):
         self.run_echo_test()
         self.run_mining_test()
+
+        # Run at the end: the exception triggers a disconnect which causes a race
+        # in libmultiprocess thread cleanup. See:
+        # https://github.com/bitcoin-core/libmultiprocess/issues/189
+        # https://github.com/bitcoin/bitcoin/pull/34284
+        self.run_deprecated_mining_test()
 
 if __name__ == '__main__':
     IPCInterfaceTest(__file__).main()
