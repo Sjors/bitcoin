@@ -6,52 +6,60 @@
 
 #include <addrman.h>
 #include <banman.h>
+#include <chain.h>
 #include <chainparams.h>
+#include <coins.h>
 #include <common/system.h>
 #include <consensus/consensus.h>
-#include <consensus/params.h>
 #include <consensus/validation.h>
-#include <crypto/sha256.h>
+#include <crypto/hex_base.h>
+#include <dbwrapper.h>
 #include <init.h>
-#include <init/common.h>
 #include <interfaces/chain.h>
 #include <interfaces/mining.h>
 #include <kernel/context.h>
-#include <kernel/mempool_entry.h>
 #include <logging.h>
 #include <net.h>
 #include <net_processing.h>
+#include <netbase.h>
+#include <netgroup.h>
 #include <node/blockstorage.h>
 #include <node/chainstate.h>
 #include <node/context.h>
 #include <node/kernel_notifications.h>
-#include <node/mempool_args.h>
 #include <node/miner.h>
+#include <node/mining_args.h>
 #include <node/peerman_args.h>
 #include <node/warnings.h>
 #include <noui.h>
-#include <policy/fees/block_policy_estimator.h>
+#include <policy/feerate.h>
+#include <policy/policy.h>
 #include <pow.h>
+#include <primitives/block.h>
 #include <random.h>
-#include <rpc/blockchain.h>
 #include <rpc/register.h>
 #include <rpc/server.h>
 #include <scheduler.h>
-#include <script/sigcache.h>
+#include <script/interpreter.h>
+#include <script/script.h>
+#include <script/sign.h>
+#include <script/signingprovider.h>
+#include <serialize.h>
+#include <span.h>
 #include <streams.h>
+#include <sync.h>
 #include <test/util/coverage.h>
 #include <test/util/net.h>
 #include <test/util/random.h>
-#include <test/util/transaction_utils.h>
 #include <test/util/txmempool.h>
-#include <txdb.h>
+#include <tinyformat.h>
 #include <txmempool.h>
+#include <uint256.h>
 #include <util/chaintype.h>
 #include <util/check.h>
 #include <util/fs_helpers.h>
 #include <util/rbf.h>
 #include <util/strencodings.h>
-#include <util/string.h>
 #include <util/task_runner.h>
 #include <util/thread.h>
 #include <util/threadnames.h>
@@ -60,12 +68,23 @@
 #include <util/vector.h>
 #include <validation.h>
 #include <validationinterface.h>
-#include <walletinitinterface.h>
 
 #include <algorithm>
-#include <future>
+#include <array>
+#include <atomic>
+#include <cstdlib>
+#include <deque>
 #include <functional>
+#include <future>
+#include <iostream>
+#include <iterator>
+#include <map>
+#include <numeric>
+#include <span>
 #include <stdexcept>
+#include <string_view>
+#include <thread>
+#include <tuple>
 
 using namespace util::hex_literals;
 using node::ApplyArgsManOptions;
@@ -361,6 +380,7 @@ TestingSetup::TestingSetup(
                                                m_node.args->GetIntArg("-checkaddrman", 0));
     m_node.banman = std::make_unique<BanMan>(m_args.GetDataDirBase() / "banlist", nullptr, DEFAULT_MISBEHAVING_BANTIME);
     m_node.connman = std::make_unique<ConnmanTestMsg>(0x1337, 0x1337, *m_node.addrman, *m_node.netgroupman, Params()); // Deterministic randomness for tests.
+    Assert(ReadMiningArgs(*m_node.args, m_node.mining_args));
     PeerManager::Options peerman_opts;
     ApplyArgsManOptions(*m_node.args, peerman_opts);
     peerman_opts.deterministic_rng = true;

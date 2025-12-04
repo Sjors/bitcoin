@@ -2,26 +2,54 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <chain.h>
+#include <coins.h>
+#include <consensus/amount.h>
+#include <consensus/consensus.h>
 #include <consensus/validation.h>
-#include <node/context.h>
-#include <node/mempool_args.h>
 #include <node/miner.h>
+#include <node/mining_args.h>
+#include <node/mining_types.h>
+#include <policy/feerate.h>
+#include <policy/packages.h>
 #include <policy/truc_policy.h>
+#include <primitives/block.h>
+#include <primitives/transaction.h>
+#include <script/script.h>
+#include <sync.h>
 #include <test/fuzz/FuzzedDataProvider.h>
 #include <test/fuzz/fuzz.h>
 #include <test/fuzz/util.h>
 #include <test/fuzz/util/mempool.h>
 #include <test/util/mining.h>
+#include <test/util/random.h>
 #include <test/util/script.h>
 #include <test/util/setup_common.h>
 #include <test/util/txmempool.h>
+#include <txmempool.h>
 #include <util/check.h>
-#include <util/rbf.h>
+#include <util/string.h>
+#include <util/time.h>
 #include <util/translation.h>
 #include <validation.h>
 #include <validationinterface.h>
 
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <iterator>
+#include <limits>
+#include <map>
+#include <memory>
+#include <optional>
+#include <set>
+#include <span>
+#include <string>
+#include <utility>
+#include <vector>
 using node::BlockAssembler;
+using node::BlockCreateOptions;
+using node::MiningArgs;
 using node::NodeContext;
 using util::ToString;
 
@@ -94,11 +122,14 @@ void Finish(FuzzedDataProvider& fuzzed_data_provider, MockedTxPool& tx_pool, Cha
 {
     WITH_LOCK(::cs_main, tx_pool.check(chainstate.CoinsTip(), chainstate.m_chain.Height() + 1));
     {
-        BlockAssembler::Options options;
-        options.block_max_weight = fuzzed_data_provider.ConsumeIntegralInRange(0U, MAX_BLOCK_WEIGHT);
-        options.blockMinFeeRate = CFeeRate{ConsumeMoney(fuzzed_data_provider, /*max=*/COIN)};
-        options.include_dummy_extranonce = true;
-        auto assembler = BlockAssembler{chainstate, &tx_pool, options};
+        MiningArgs mining_args{
+            .block_min_fee_rate = CFeeRate{ConsumeMoney(fuzzed_data_provider, /*max=*/COIN)}
+        };
+        BlockCreateOptions options{
+            .include_dummy_extranonce = true,
+            .block_max_weight = fuzzed_data_provider.ConsumeIntegralInRange(0U, MAX_BLOCK_WEIGHT),
+        };
+        auto assembler = BlockAssembler{chainstate, &tx_pool, mining_args, options};
         auto block_template = assembler.CreateNewBlock();
         Assert(block_template->block.vtx.size() >= 1);
 

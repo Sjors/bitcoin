@@ -3,16 +3,29 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <addresstype.h>
+#include <chain.h>
 #include <coins.h>
-#include <common/system.h>
+#include <consensus/amount.h>
 #include <consensus/consensus.h>
 #include <consensus/merkle.h>
 #include <consensus/tx_verify.h>
 #include <interfaces/mining.h>
+#include <interfaces/types.h>
+#include <kernel/chainparams.h>
 #include <node/miner.h>
+#include <node/mining_args.h>
 #include <node/mining_types.h>
+#include <policy/feerate.h>
 #include <policy/policy.h>
-#include <test/util/random.h>
+#include <pow.h>
+#include <primitives/block.h>
+#include <primitives/transaction.h>
+#include <random.h>
+#include <script/script.h>
+#include <serialize.h>
+#include <sync.h>
+#include <test/util/common.h>
+#include <test/util/setup_common.h>
 #include <test/util/transaction_utils.h>
 #include <test/util/txmempool.h>
 #include <txmempool.h>
@@ -24,15 +37,18 @@
 #include <util/translation.h>
 #include <validation.h>
 #include <versionbits.h>
-#include <pow.h>
-
-#include <test/util/common.h>
-#include <test/util/setup_common.h>
-
-#include <memory>
-#include <vector>
 
 #include <boost/test/unit_test.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
+#include <memory>
+#include <optional>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 using namespace util::hex_literals;
 using interfaces::BlockTemplate;
@@ -183,7 +199,8 @@ void MinerTestingSetup::TestPackageSelection(const CScript& scriptPubKey, const 
     const auto block_package_feerates = BlockAssembler{
         m_node.chainman->ActiveChainstate(),
         &tx_mempool,
-        {}
+        m_node.mining_args,
+        BlockCreateOptions{}
     }.CreateNewBlock()->m_package_feerates;
     BOOST_CHECK(block_package_feerates.size() == 2);
 
