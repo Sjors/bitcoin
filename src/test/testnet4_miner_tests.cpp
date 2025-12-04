@@ -4,7 +4,7 @@
 
 #include <chain.h>
 #include <interfaces/mining.h>
-#include <node/types.h>
+#include <node/mining_types.h>
 #include <primitives/block.h>
 #include <sync.h>
 #include <test/util/setup_common.h>

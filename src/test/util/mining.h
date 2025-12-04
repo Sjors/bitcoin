@@ -5,8 +5,7 @@
 #ifndef BITCOIN_TEST_UTIL_MINING_H
 #define BITCOIN_TEST_UTIL_MINING_H
 
-#include <node/types.h>
-
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -14,8 +13,8 @@
 class CBlock;
 class CChainParams;
 class COutPoint;
-class CScript;
 namespace node {
+struct BlockCreateOptions;
 struct NodeContext;
 } // namespace node
 

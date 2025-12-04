@@ -4,7 +4,7 @@
 
 #include <bench/bench.h>
 #include <consensus/consensus.h>
-#include <node/types.h>
+#include <node/mining_types.h>
 #include <primitives/transaction.h>
 #include <random.h>
 #include <script/script.h>

@@ -8,7 +8,7 @@
 #include <kernel/chainparams.h>
 #include <net.h>
 #include <net_processing.h>
-#include <node/types.h>
+#include <node/mining_types.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <protocol.h>

@@ -12,7 +12,7 @@
 #include <interfaces/mining.h>
 #include <key_io.h>
 #include <node/context.h>
-#include <node/types.h>
+#include <node/mining_types.h>
 #include <pow.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
