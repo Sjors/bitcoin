@@ -5,17 +5,28 @@
 """Test the IPC (multiprocess) interface."""
 import asyncio
 import inspect
+import time
 from contextlib import asynccontextmanager, AsyncExitStack
 from io import BytesIO
 from pathlib import Path
 import shutil
-from test_framework.messages import (CBlock, CTransaction, ser_uint256, COIN)
+from test_framework.messages import (
+    CBlock,
+    CBlockHeader,
+    CTransaction,
+    COIN,
+    from_hex,
+    msg_headers,
+    ser_uint256,
+)
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal,
+    assert_greater_than_or_equal,
     assert_not_equal
 )
 from test_framework.wallet import MiniWallet
+from test_framework.p2p import P2PInterface
 
 # Test may be skipped and not have capnp installed
 try:
@@ -174,19 +185,38 @@ class IPCInterfaceTest(BitcoinTestFramework):
             assert_equal(oldblockref.height, newblockref.height)
 
             async with AsyncExitStack() as stack:
-                self.log.debug("Create a template")
                 opts = self.capnp_modules['mining'].BlockCreateOptions()
                 opts.useMempool = True
                 opts.blockReservedWeight = 4000
                 opts.coinbaseOutputMaxAdditionalSigops = 0
+
+                self.log.debug("createNewBlock() should wait if tip is still updating")
+                self.disconnect_nodes(0, 1)
+                node1_block_hash = self.generate(self.nodes[1], 1, sync_fun=self.no_op)[0]
+                header = from_hex(CBlockHeader(), self.nodes[1].getblockheader(node1_block_hash, False))
+                header_only_peer = self.nodes[0].add_p2p_connection(P2PInterface())
+                header_only_peer.send_and_ping(msg_headers([header]))
+                start = time.time()
+                async with destroying((await mining.createNewBlock(opts)).result, ctx):
+                    pass
+                # Lower-bound only: a heavily loaded CI host might still exceed 0.9s
+                # even without the cooldown, so this can miss regressions but avoids
+                # spurious failures.
+                assert_greater_than_or_equal(time.time() - start, 0.9)
+                header_only_peer.peer_disconnect()
+                self.connect_nodes(0, 1)
+                self.sync_all()
+
+                self.log.debug("Create a template")
                 template = await create_block_template(mining, stack, ctx, opts)
 
                 self.log.debug("Test some inspectors of Template")
                 header = (await template.getBlockHeader(ctx)).result
                 assert_equal(len(header), block_header_size)
                 block = await self.parse_and_deserialize_block(template, ctx)
-                assert_equal(ser_uint256(block.hashPrevBlock), newblockref.hash)
-                assert len(block.vtx) >= 1
+                current_tip = self.nodes[0].getbestblockhash()
+                assert_equal(ser_uint256(block.hashPrevBlock), ser_uint256(int(current_tip, 16)))
+                assert_greater_than_or_equal(len(block.vtx), 1)
                 txfees = await template.getTxFees(ctx)
                 assert_equal(len(txfees.result), 0)
                 txsigops = await template.getTxSigops(ctx)
