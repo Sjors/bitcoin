@@ -257,6 +257,18 @@ struct PackageMempoolAcceptResult
 };
 
 /**
+ * Optional evaluation context for mempool acceptance checks.
+ *
+ * When set, the transaction is evaluated as if it were to be mined in a block
+ * with the given height and/or median-time-past (MTP). Unset fields default to
+ * the values implied by the current active chain tip.
+ */
+struct MempoolAcceptContext {
+    std::optional<int> height;
+    std::optional<int64_t> mtp;
+};
+
+/**
  * Try to add a transaction to the mempool. This is an internal function and is exposed only for testing.
  * Client code should use ChainstateManager::ProcessTransaction()
  *
@@ -271,7 +283,8 @@ struct PackageMempoolAcceptResult
  * @returns a MempoolAcceptResult indicating whether the transaction was accepted/rejected with reason.
  */
 MempoolAcceptResult AcceptToMemoryPool(Chainstate& active_chainstate, const CTransactionRef& tx,
-                                       int64_t accept_time, bool bypass_limits, bool test_accept)
+                                       int64_t accept_time, bool bypass_limits, bool test_accept,
+                                       const MempoolAcceptContext& eval_context = {})
     EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /**
@@ -285,7 +298,8 @@ MempoolAcceptResult AcceptToMemoryPool(Chainstate& active_chainstate, const CTra
 * possible for the package to be partially submitted.
 */
 PackageMempoolAcceptResult ProcessNewPackage(Chainstate& active_chainstate, CTxMemPool& pool,
-                                                   const Package& txns, bool test_accept, const std::optional<CFeeRate>& client_maxfeerate)
+                                                   const Package& txns, bool test_accept, const std::optional<CFeeRate>& client_maxfeerate,
+                                                   const MempoolAcceptContext& eval_context = {})
                                                    EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /* Mempool validation helper functions */
@@ -293,7 +307,9 @@ PackageMempoolAcceptResult ProcessNewPackage(Chainstate& active_chainstate, CTxM
 /**
  * Check if transaction will be final in the next block to be created.
  */
-bool CheckFinalTxAtTip(const CBlockIndex& active_chain_tip, const CTransaction& tx) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+bool CheckFinalTxAtTip(const CBlockIndex& active_chain_tip, const CTransaction& tx,
+                       const MempoolAcceptContext& eval_context = {})
+                       EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
 /**
  * Calculate LockPoints required to check if transaction will be BIP68 final in the next block
@@ -328,7 +344,8 @@ std::optional<LockPoints> CalculateLockPointsAtTip(
  * The LockPoints should not be considered valid if CheckSequenceLocksAtTip returns false.
  */
 bool CheckSequenceLocksAtTip(CBlockIndex* tip,
-                             const LockPoints& lock_points);
+                             const LockPoints& lock_points,
+                             const MempoolAcceptContext& eval_context = {});
 
 /**
  * Closure representing one script verification
