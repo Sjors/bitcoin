@@ -250,17 +250,16 @@ bool CheckSequenceLocksAtTip(CBlockIndex* tip,
 {
     assert(tip != nullptr);
 
-    CBlockIndex index;
-    index.pprev = tip;
     // CheckSequenceLocksAtTip() uses active_chainstate.m_chain.Height()+1 to evaluate
     // height based locks because when SequenceLocks() is called within
     // ConnectBlock(), the height of the block *being*
     // evaluated is what is used.
     // Thus if we want to know if a transaction can be part of the
     // *next* block, we need to use one more than active_chainstate.m_chain.Height()
-    index.nHeight = tip->nHeight + 1;
+    const int block_height{tip->nHeight + 1};
+    const int64_t block_time{tip->GetMedianTimePast()};
 
-    return EvaluateSequenceLocks(index, {lock_points.height, lock_points.time});
+    return EvaluateSequenceLocks(block_height, block_time, {lock_points.height, lock_points.time});
 }
 
 static void LimitMempoolSize(CTxMemPool& pool, CCoinsViewCache& coins_cache)
