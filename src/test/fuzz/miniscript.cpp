@@ -106,6 +106,12 @@ struct TestData {
             return &it->second;
         }
     }
+
+    //! Whether signing material is available for this pubkey in this script context.
+    bool HasPrivKey(const MsCtx script_ctx, const Key& key) const {
+        const auto sig_ptr = GetSig(script_ctx, key);
+        return sig_ptr && sig_ptr->second;
+    }
 } TEST_DATA;
 
 /**
@@ -1162,8 +1168,7 @@ void TestNode(const MsCtx script_ctx, const NodeRef& node, FuzzedDataProvider& p
     // are identical, this implies that for such nodes, the non-malleable
     // satisfaction will also match the expected policy.
     const auto is_key_satisfiable = [script_ctx](const CPubKey& pubkey) -> bool {
-        auto sig_ptr{TEST_DATA.GetSig(script_ctx, pubkey)};
-        return sig_ptr != nullptr && sig_ptr->second;
+        return TEST_DATA.HasPrivKey(script_ctx, pubkey);
     };
     bool satisfiable = node->IsSatisfiable([&](const Node& node) -> bool {
         switch (node.fragment) {
