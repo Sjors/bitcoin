@@ -132,13 +132,10 @@ struct ParserContext {
 
     std::optional<std::string> ToString(const Key& key, bool& has_priv_key) const
     {
-        has_priv_key = false;
-        auto it = TEST_DATA.dummy_key_idx_map.find(key);
-        if (it == TEST_DATA.dummy_key_idx_map.end()) {
-            return HexStr(key);
-        }
-        has_priv_key = true;
-        uint8_t idx = it->second;
+        const auto it = TEST_DATA.dummy_key_idx_map.find(key);
+        assert(it != TEST_DATA.dummy_key_idx_map.end());
+        has_priv_key = TEST_DATA.HasPrivKey(script_ctx, key);
+        const uint8_t idx = it->second;
         return HexStr(std::span{&idx, 1});
     }
 
@@ -1043,8 +1040,23 @@ void TestNode(const MsCtx script_ctx, const NodeRef& node, FuzzedDataProvider& p
 
     // Check that it roundtrips to text representation
     const ParserContext parser_ctx{script_ctx};
-    std::optional<std::string> str{node->ToString(parser_ctx)};
+    bool has_priv_key{false};
+    std::optional<std::string> str{node->ToString(parser_ctx, has_priv_key)};
     assert(str);
+
+    // Check has_priv_key against expectation
+    bool expected_has_priv_key{false};
+    std::vector<const Node*> nodes{node.get()};
+    while (!nodes.empty() && !expected_has_priv_key) {
+        const Node* n{nodes.back()};
+        nodes.pop_back();
+        expected_has_priv_key = std::any_of(n->keys.begin(), n->keys.end(), [&](const auto& key) {
+            return TEST_DATA.HasPrivKey(script_ctx, key);
+        });
+        for (const auto& sub : n->subs) nodes.push_back(sub.get());
+    }
+    assert(has_priv_key == expected_has_priv_key);
+
     auto parsed = miniscript::FromString(*str, parser_ctx);
     assert(parsed);
     assert(*parsed == *node);
