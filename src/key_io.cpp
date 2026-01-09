@@ -163,31 +163,31 @@ CTxDestination DecodeDestination(const std::string& str, const CChainParams& par
             if (version == 0) {
                 {
                     WitnessV0KeyHash keyid;
-                    if (data.size() == keyid.size()) {
-                        std::copy(data.begin(), data.end(), keyid.begin());
+                    if (bech32_data.size() == keyid.size()) {
+                        std::copy(bech32_data.begin(), bech32_data.end(), keyid.begin());
                         return keyid;
                     }
                 }
                 {
                     WitnessV0ScriptHash scriptid;
-                    if (data.size() == scriptid.size()) {
-                        std::copy(data.begin(), data.end(), scriptid.begin());
+                    if (bech32_data.size() == scriptid.size()) {
+                        std::copy(bech32_data.begin(), bech32_data.end(), scriptid.begin());
                         return scriptid;
                     }
                 }
 
-                error_str = strprintf("Invalid Bech32 v0 address program size (%d %s), per BIP141", data.size(), byte_str);
+                error_str = strprintf("Invalid Bech32 v0 address program size (%d %s), per BIP141", bech32_data.size(), byte_str);
                 return CNoDestination();
             }
 
-            if (version == 1 && data.size() == WITNESS_V1_TAPROOT_SIZE) {
+            if (version == 1 && bech32_data.size() == WITNESS_V1_TAPROOT_SIZE) {
                 static_assert(WITNESS_V1_TAPROOT_SIZE == WitnessV1Taproot::size());
                 WitnessV1Taproot tap;
-                std::copy(data.begin(), data.end(), tap.begin());
+                std::copy(bech32_data.begin(), bech32_data.end(), tap.begin());
                 return tap;
             }
 
-            if (CScript::IsPayToAnchor(version, data)) {
+            if (CScript::IsPayToAnchor(version, bech32_data)) {
                 return PayToAnchor();
             }
 
@@ -196,12 +196,12 @@ CTxDestination DecodeDestination(const std::string& str, const CChainParams& par
                 return CNoDestination();
             }
 
-            if (data.size() < 2 || data.size() > BECH32_WITNESS_PROG_MAX_LEN) {
-                error_str = strprintf("Invalid Bech32 address program size (%d %s)", data.size(), byte_str);
+            if (bech32_data.size() < 2 || bech32_data.size() > BECH32_WITNESS_PROG_MAX_LEN) {
+                error_str = strprintf("Invalid Bech32 address program size (%d %s)", bech32_data.size(), byte_str);
                 return CNoDestination();
             }
 
-            return WitnessUnknown{version, data};
+            return WitnessUnknown{version, bech32_data};
         } else {
             error_str = strprintf("Invalid padding in Bech32 data section");
             return CNoDestination();
