@@ -1,0 +1,66 @@
+// Copyright (c) The Bitcoin Core developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
+#include <wallet/encrypted_backup.h>
+
+#include <set>
+#include <span>
+
+#include <key_io.h>
+#include <script/descriptor.h>
+#include <util/strencodings.h>
+#include <util/string.h>
+
+namespace wallet {
+
+util::Result<std::vector<XOnlyPubKey>> ExtractKeysFromDescriptor(const std::string& descriptor,
+                                                                 std::set<std::string>* excluded_expressions)
+{
+    FlatSigningProvider provider;
+    std::string error;
+    auto parsed = Parse(descriptor, provider, error, /*require_checksum=*/false);
+    if (parsed.empty()) {
+        return util::Error{Untranslated(strprintf("Failed to parse descriptor: %s", error))};
+    }
+
+    // Only BIP32 public key expressions that are not directly observable from
+    // descriptor spends contribute to the encryption key set.
+    std::set<XOnlyPubKey> normalized_keys;
+    for (const auto& desc : parsed) {
+        std::set<CExtPubKey> ext_pubkeys;
+        desc->GetExtPubKeys(ext_pubkeys, /*exclude_observable=*/true);
+        for (const auto& ext_pubkey : ext_pubkeys) {
+            const XOnlyPubKey xonly{ext_pubkey.pubkey};
+            if (xonly == XOnlyPubKey::NUMS_H) continue;
+            normalized_keys.insert(xonly);
+        }
+
+        if (excluded_expressions) {
+            // Literal pubkeys are always excluded; xpubs are excluded when
+            // observable from spends. The NUMS point is not reported, since
+            // no cosigner holds it.
+            std::set<CPubKey> all_pubkeys;
+            std::set<CExtPubKey> all_ext_pubkeys;
+            // Classify each occurrence before deduplicating: the same xpub
+            // may appear both bare and with trailing derivation.
+            desc->GetPubKeys(all_pubkeys, all_ext_pubkeys, /*only_observable=*/true);
+            for (const auto& pubkey : all_pubkeys) {
+                if (XOnlyPubKey{pubkey} == XOnlyPubKey::NUMS_H) continue;
+                excluded_expressions->insert(HexStr(pubkey));
+            }
+            for (const auto& ext_pubkey : all_ext_pubkeys) {
+                if (XOnlyPubKey{ext_pubkey.pubkey} == XOnlyPubKey::NUMS_H) continue;
+                excluded_expressions->insert(EncodeExtPubKey(ext_pubkey));
+            }
+        }
+    }
+
+    if (normalized_keys.empty()) {
+        return util::Error{Untranslated("No valid extended public keys with trailing derivation found in descriptor")};
+    }
+
+    return std::vector<XOnlyPubKey>(normalized_keys.begin(), normalized_keys.end());
+}
+
+} // namespace wallet
