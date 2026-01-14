@@ -6,8 +6,10 @@
 #define BITCOIN_WALLET_ENCRYPTED_BACKUP_H
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <pubkey.h>
@@ -39,6 +41,31 @@ static constexpr std::string_view BIP_INDIVIDUAL_SECRET_TAG = "BIP138_INDIVIDUAL
  * Each element is a 32-bit child index where hardened indices have the high bit set.
  */
 using DerivationPath = std::vector<uint32_t>;
+
+/**
+ * Selects how to interpret the `DATA` of a content item: the BIP138 `TYPE`
+ * byte carried at the start of each `CONTENT_TYPE` field.
+ */
+enum class DataType : uint8_t {
+    END_OF_CONTENT = 0x00, //!< End of content items; padding follows
+    BIP_NUMBER = 0x01,
+    VENDOR_SPECIFIC = 0x02,
+    STRING = 0x03,
+};
+
+/** Well-known BIP numbers for content types */
+static constexpr uint16_t BIP_DESCRIPTORS = 380;
+static constexpr uint16_t BIP_WALLET_POLICIES = 388;
+static constexpr uint16_t BIP_LABELS = 329;
+
+/**
+ * Represents the content metadata in an encrypted backup.
+ */
+struct EncryptedBackupContentType {
+    DataType type{DataType::END_OF_CONTENT};
+    uint16_t bip_number{0};                    // Used when type == BIP_NUMBER
+    std::vector<uint8_t> payload;               // Used when type == VENDOR_SPECIFIC
+};
 
 /**
  * Extract and normalize all eligible extended public keys from a descriptor string.
@@ -116,6 +143,22 @@ util::Result<std::vector<uint8_t>> EncodeIndividualSecrets(const std::vector<uin
  * @return Vector of individual secrets, or error message
  */
 util::Result<std::vector<uint256>> DecodeIndividualSecrets(std::span<const uint8_t> data);
+
+/**
+ * Encode content metadata according to the backup format.
+ *
+ * @param[in] content The content metadata
+ * @return Encoded bytes, or error message
+ */
+util::Result<std::vector<uint8_t>> EncodeContentType(const EncryptedBackupContentType& content);
+
+/**
+ * Decode content metadata from backup format.
+ *
+ * @param[in] data The encoded data
+ * @return Content metadata, if a supported type was found, and bytes consumed; or error message
+ */
+util::Result<std::pair<std::optional<EncryptedBackupContentType>, size_t>> DecodeContentType(std::span<const uint8_t> data);
 
 } // namespace wallet
 
