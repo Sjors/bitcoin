@@ -11,6 +11,7 @@
 #include <hash.h>
 #include <key_io.h>
 #include <script/descriptor.h>
+#include <util/bip32.h>
 #include <util/strencodings.h>
 #include <util/string.h>
 
@@ -98,6 +99,115 @@ std::vector<uint256> ComputeAllIndividualSecrets(const uint256& decryption_secre
                        [](uint8_t a, uint8_t b) { return a ^ b; });
         result.push_back(ci);
     }
+    return result;
+}
+
+bool IsCommonDerivationPath(const DerivationPath& path)
+{
+    constexpr uint32_t HARDENED{0x80000000};
+    if (path.size() != 3 && path.size() != 4) return false;
+    const uint32_t purpose{path[0]};
+    // Coin type 0 (mainnet) or 1 (test networks)
+    if (path[1] != HARDENED && path[1] != (1 | HARDENED)) return false;
+    // Accounts 0 through 9
+    if (path[2] < HARDENED || path[2] > (9 | HARDENED)) return false;
+    if (path.size() == 3) {
+        return purpose == (44 | HARDENED) || purpose == (49 | HARDENED) ||
+               purpose == (84 | HARDENED) || purpose == (86 | HARDENED) ||
+               purpose == (87 | HARDENED);
+    }
+    return purpose == (48 | HARDENED) && (path[3] == (1 | HARDENED) || path[3] == (2 | HARDENED));
+}
+
+std::vector<DerivationPath> CommonDerivationPaths()
+{
+    constexpr uint32_t HARDENED{0x80000000};
+    std::vector<DerivationPath> paths;
+    for (uint32_t coin{0}; coin <= 1; ++coin) {
+        for (uint32_t account{0}; account <= 9; ++account) {
+            for (uint32_t purpose : {44, 49, 84, 86, 87}) {
+                paths.push_back({purpose | HARDENED, coin | HARDENED, account | HARDENED});
+            }
+            for (uint32_t script_type{1}; script_type <= 2; ++script_type) {
+                paths.push_back({48 | HARDENED, coin | HARDENED, account | HARDENED, script_type | HARDENED});
+            }
+        }
+    }
+    return paths;
+}
+
+util::Result<std::vector<uint8_t>> EncodeDerivationPaths(const std::vector<DerivationPath>& paths)
+{
+    // Sort lexicographically and deduplicate for consistent encoding
+    auto sorted_paths{paths};
+    std::sort(sorted_paths.begin(), sorted_paths.end());
+    sorted_paths.erase(std::unique(sorted_paths.begin(), sorted_paths.end()), sorted_paths.end());
+
+    if (sorted_paths.size() > 255) {
+        return util::Error{Untranslated("Too many derivation paths (max 255)")};
+    }
+
+    std::vector<uint8_t> result;
+    result.push_back(static_cast<uint8_t>(sorted_paths.size()));
+
+    for (const auto& path : sorted_paths) {
+        if (path.empty()) {
+            return util::Error{Untranslated("Derivation path must contain at least one child")};
+        }
+        if (path.size() > 255) {
+            return util::Error{Untranslated("Derivation path too long (max 255 components)")};
+        }
+        result.push_back(static_cast<uint8_t>(path.size()));
+        for (uint32_t child : path) {
+            // Big-endian encoding
+            result.push_back((child >> 24) & 0xFF);
+            result.push_back((child >> 16) & 0xFF);
+            result.push_back((child >> 8) & 0xFF);
+            result.push_back(child & 0xFF);
+        }
+    }
+
+    return result;
+}
+
+util::Result<std::vector<DerivationPath>> DecodeDerivationPaths(std::span<const uint8_t> data)
+{
+    if (data.empty()) {
+        return util::Error{Untranslated("Empty derivation paths data")};
+    }
+
+    std::vector<DerivationPath> result;
+    size_t pos = 0;
+
+    uint8_t count = data[pos++];
+    result.reserve(count);
+
+    for (uint8_t i = 0; i < count; ++i) {
+        if (pos >= data.size()) {
+            return util::Error{Untranslated("Truncated derivation path data")};
+        }
+
+        uint8_t child_count = data[pos++];
+        if (child_count == 0) {
+            return util::Error{Untranslated("Derivation path must contain at least one child")};
+        }
+        DerivationPath path;
+        path.reserve(child_count);
+
+        for (uint8_t j = 0; j < child_count; ++j) {
+            if (pos + 4 > data.size()) {
+                return util::Error{Untranslated("Truncated child index")};
+            }
+            uint32_t child = (static_cast<uint32_t>(data[pos]) << 24) |
+                            (static_cast<uint32_t>(data[pos + 1]) << 16) |
+                            (static_cast<uint32_t>(data[pos + 2]) << 8) |
+                            static_cast<uint32_t>(data[pos + 3]);
+            pos += 4;
+            path.push_back(child);
+        }
+        result.push_back(std::move(path));
+    }
+
     return result;
 }
 
