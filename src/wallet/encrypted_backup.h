@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <set>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,12 @@ static constexpr std::string_view BIP_DECRYPTION_SECRET_TAG = "BIP138_DECRYPTION
 
 /** Prefix for deriving individual secrets */
 static constexpr std::string_view BIP_INDIVIDUAL_SECRET_TAG = "BIP138_INDIVIDUAL_SECRET";
+
+/**
+ * Represents a parsed derivation path (e.g., m/44'/0'/0').
+ * Each element is a 32-bit child index where hardened indices have the high bit set.
+ */
+using DerivationPath = std::vector<uint32_t>;
 
 /**
  * Extract and normalize all eligible extended public keys from a descriptor string.
@@ -83,6 +90,42 @@ uint256 ComputeIndividualSecret(const XOnlyPubKey& key);
  */
 std::vector<uint256> ComputeAllIndividualSecrets(const uint256& decryption_secret,
                                                   const std::vector<XOnlyPubKey>& keys);
+
+/**
+ * Whether the path is one of the common derivation paths that recovery
+ * implementations try automatically (m/44h|49h|84h|86h|87h/<coin>h/<account>h
+ * and m/48h/<coin>h/<account>h/1h|2h, with coin 0 or 1 and accounts 0-9).
+ * Such paths can be omitted from a backup, which enhances privacy.
+ *
+ * @param[in] path The derivation path
+ * @return True if the path is a common derivation path
+ */
+bool IsCommonDerivationPath(const DerivationPath& path);
+
+/**
+ * All common derivation paths (see IsCommonDerivationPath), for both mainnet
+ * and test coin types. Recovery implementations try these automatically when
+ * searching for a matching decryption key.
+ *
+ * @return Vector of common derivation paths
+ */
+std::vector<DerivationPath> CommonDerivationPaths();
+
+/**
+ * Encode derivation paths according to the backup format.
+ *
+ * @param[in] paths Vector of derivation paths
+ * @return Encoded bytes, or error if too many paths
+ */
+util::Result<std::vector<uint8_t>> EncodeDerivationPaths(const std::vector<DerivationPath>& paths);
+
+/**
+ * Decode derivation paths from backup format.
+ *
+ * @param[in] data The encoded data
+ * @return Vector of derivation paths, or error message
+ */
+util::Result<std::vector<DerivationPath>> DecodeDerivationPaths(std::span<const uint8_t> data);
 
 } // namespace wallet
 
