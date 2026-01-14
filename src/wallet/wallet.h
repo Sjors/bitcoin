@@ -68,6 +68,7 @@ class Wallet;
 }
 namespace wallet {
 class CWallet;
+struct EncryptedBackupMetadata;
 class WalletBatch;
 enum class DBErrors : int;
 } // namespace wallet
@@ -892,6 +893,8 @@ public:
     void postInitProcess();
 
     [[nodiscard]] bool BackupWallet(const std::string& strDest) const;
+    util::Result<std::string> CreateEncryptedDescriptorBackup() const;
+    static util::Result<std::vector<uint8_t>> DecryptEncryptedBackupBase64WithExtPubKey(const std::string& base64_str, const std::string& pubkey_str);
 
     /* Returns true if HD is enabled */
     bool IsHDEnabled() const;
