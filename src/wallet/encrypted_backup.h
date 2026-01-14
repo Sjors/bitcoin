@@ -27,6 +27,12 @@ namespace wallet {
  * Restoring from an encrypted backup creates a watch-only wallet.
  */
 
+/** Prefix for deriving the decryption secret */
+static constexpr std::string_view BIP_DECRYPTION_SECRET_TAG = "BIP138_DECRYPTION_SECRET";
+
+/** Prefix for deriving individual secrets */
+static constexpr std::string_view BIP_INDIVIDUAL_SECRET_TAG = "BIP138_INDIVIDUAL_SECRET";
+
 /**
  * Extract and normalize all eligible extended public keys from a descriptor string.
  *
@@ -38,6 +44,39 @@ namespace wallet {
  * @return Vector of normalized x-only public keys, or error message
  */
 util::Result<std::vector<XOnlyPubKey>> ExtractKeysFromDescriptor(const std::string& descriptor);
+
+/**
+ * Compute the decryption secret from a set of public keys.
+ *
+ * s = TaggedHash("BIP138_DECRYPTION_SECRET", p1 || p2 || ... || pn)
+ * where p1...pn are sorted lexicographically.
+ *
+ * @param[in] keys The normalized x-only public keys (must be sorted)
+ * @return The 32-byte decryption secret
+ */
+uint256 ComputeDecryptionSecret(const std::vector<XOnlyPubKey>& keys);
+
+/**
+ * Compute an individual secret for a specific public key.
+ *
+ * si = TaggedHash("BIP138_INDIVIDUAL_SECRET", pi)
+ *
+ * @param[in] key The normalized x-only public key
+ * @return The 32-byte individual secret
+ */
+uint256 ComputeIndividualSecret(const XOnlyPubKey& key);
+
+/**
+ * Compute all individual secrets from the decryption secret and keys.
+ *
+ * ci = s XOR si
+ *
+ * @param[in] decryption_secret The decryption secret
+ * @param[in] keys The normalized x-only public keys
+ * @return Vector of individual secrets (ci values)
+ */
+std::vector<uint256> ComputeAllIndividualSecrets(const uint256& decryption_secret,
+                                                  const std::vector<XOnlyPubKey>& keys);
 
 } // namespace wallet
 
