@@ -5,7 +5,9 @@
 #ifndef BITCOIN_WALLET_ENCRYPTEDBACKUP_H
 #define BITCOIN_WALLET_ENCRYPTEDBACKUP_H
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -28,6 +30,24 @@ namespace wallet {
  * IMPORTANT: This format intentionally does NOT backup private key material.
  * Restoring from an encrypted backup creates a watch-only wallet.
  */
+
+/** Magic bytes for encrypted backup format */
+static constexpr std::array<uint8_t, 6> ENCRYPTED_BACKUP_MAGIC = {'B', 'I', 'P', 'X', 'X', 'X'};
+
+/** Current format version */
+static constexpr uint8_t ENCRYPTED_BACKUP_VERSION = 0x01;
+
+/** Encryption algorithm identifiers */
+enum class EncryptionAlgorithm : uint8_t {
+    RESERVED = 0x00,
+    CHACHA20_POLY1305 = 0x01,
+};
+
+/** Size of the nonce for ChaCha20-Poly1305 */
+static constexpr size_t ENCRYPTED_BACKUP_NONCE_SIZE = 12;
+
+/** Size of the authentication tag */
+static constexpr size_t ENCRYPTED_BACKUP_TAG_SIZE = 16;
 
 /** Prefix for deriving the decryption secret */
 static constexpr std::string_view BIP_DECRYPTION_SECRET_TAG = "BIP_XXXX_DECRYPTION_SECRET";
@@ -60,6 +80,23 @@ struct EncryptedBackupContent {
     ContentType type{ContentType::RESERVED};
     uint16_t bip_number{0};                    // Used when type == BIP_NUMBER
     std::vector<uint8_t> vendor_data;          // Used when type == VENDOR_SPECIFIC
+};
+
+/**
+ * Represents a complete encrypted backup structure.
+ *
+ * This struct represents the parsed/encoded backup format. Note that the content
+ * type metadata is stored inside the encrypted payload, not in this struct.
+ * The content is passed separately to CreateEncryptedBackup() and decoded
+ * separately after decryption.
+ */
+struct EncryptedBackup {
+    uint8_t version{ENCRYPTED_BACKUP_VERSION};
+    std::vector<DerivationPath> derivation_paths;
+    std::vector<uint256> individual_secrets;
+    EncryptionAlgorithm encryption{EncryptionAlgorithm::CHACHA20_POLY1305};
+    std::array<uint8_t, ENCRYPTED_BACKUP_NONCE_SIZE> nonce;
+    std::vector<uint8_t> ciphertext;  // Includes content prefix and authentication tag
 };
 
 /**
@@ -190,6 +227,100 @@ util::Result<std::vector<uint8_t>> EncodeContent(const EncryptedBackupContent& c
  * @return Content metadata and bytes consumed, or error message
  */
 util::Result<std::pair<EncryptedBackupContent, size_t>> DecodeContent(std::span<const uint8_t> data);
+
+/**
+ * Encrypt plaintext using ChaCha20-Poly1305.
+ *
+ * @param[in] plaintext The data to encrypt
+ * @param[in] secret The 32-byte encryption secret
+ * @param[in] nonce The 12-byte nonce
+ * @return Ciphertext with authentication tag appended
+ */
+std::vector<uint8_t> EncryptChaCha20Poly1305(std::span<const uint8_t> plaintext,
+                                              const uint256& secret,
+                                              std::span<const uint8_t, ENCRYPTED_BACKUP_NONCE_SIZE> nonce);
+
+/**
+ * Decrypt ciphertext using ChaCha20-Poly1305.
+ *
+ * @param[in] ciphertext The encrypted data with authentication tag
+ * @param[in] secret The 32-byte decryption secret
+ * @param[in] nonce The 12-byte nonce
+ * @return Plaintext, or nullopt if authentication fails
+ */
+std::optional<std::vector<uint8_t>> DecryptChaCha20Poly1305(std::span<const uint8_t> ciphertext,
+                                                             const uint256& secret,
+                                                             std::span<const uint8_t, ENCRYPTED_BACKUP_NONCE_SIZE> nonce);
+
+/**
+ * Create an encrypted backup from a descriptor and plaintext payload.
+ *
+ * @param[in] descriptor The wallet descriptor (used to derive encryption key)
+ * @param[in] plaintext The data to encrypt (typically the descriptor itself or labels)
+ * @param[in] content Content type metadata
+ * @param[in] derivation_paths Optional derivation paths to include
+ * @return The encrypted backup structure, or error message
+ */
+util::Result<EncryptedBackup> CreateEncryptedBackup(
+    const std::string& descriptor,
+    std::span<const uint8_t> plaintext,
+    const EncryptedBackupContent& content,
+    const std::vector<DerivationPath>& derivation_paths = {});
+
+/**
+ * Encode an encrypted backup to binary format.
+ *
+ * @param[in] backup The backup structure to encode
+ * @return Encoded binary data
+ */
+std::vector<uint8_t> EncodeEncryptedBackup(const EncryptedBackup& backup);
+
+/**
+ * Encode an encrypted backup to base64 string.
+ *
+ * @param[in] backup The backup structure to encode
+ * @return Base64-encoded string
+ */
+std::string EncodeEncryptedBackupBase64(const EncryptedBackup& backup);
+
+/**
+ * Decode an encrypted backup from binary format.
+ *
+ * @param[in] data The encoded binary data
+ * @return The backup structure, or error message
+ */
+util::Result<EncryptedBackup> DecodeEncryptedBackup(std::span<const uint8_t> data);
+
+/**
+ * Decode an encrypted backup from base64 string.
+ *
+ * @param[in] base64_str The base64-encoded string
+ * @return The backup structure, or error message
+ */
+util::Result<EncryptedBackup> DecodeEncryptedBackupBase64(const std::string& base64_str);
+
+/**
+ * Attempt to decrypt an encrypted backup using a single public key.
+ *
+ * Tries to reconstruct the decryption secret using the individual secrets
+ * in the backup and the provided key.
+ *
+ * @param[in] backup The encrypted backup
+ * @param[in] key The normalized x-only public key to try
+ * @return Decrypted plaintext, or nullopt if key doesn't match or decryption fails
+ */
+std::optional<std::vector<uint8_t>> DecryptBackupWithKey(const EncryptedBackup& backup,
+                                                          const uint256& key);
+
+/**
+ * Attempt to decrypt an encrypted backup using any matching key from a descriptor.
+ *
+ * @param[in] backup The encrypted backup
+ * @param[in] descriptor A descriptor containing potential decryption keys
+ * @return Decrypted plaintext, or error message
+ */
+util::Result<std::vector<uint8_t>> DecryptBackupWithDescriptor(const EncryptedBackup& backup,
+                                                                const std::string& descriptor);
 
 } // namespace wallet
 

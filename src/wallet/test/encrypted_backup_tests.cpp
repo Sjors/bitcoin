@@ -325,6 +325,123 @@ BOOST_AUTO_TEST_CASE(content_type_encoding_test)
     }
 }
 
+BOOST_AUTO_TEST_CASE(chacha20poly1305_roundtrip_test)
+{
+    // Test basic encryption/decryption roundtrip
+    std::vector<uint8_t> plaintext = {'H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd'};
+    uint256 secret;
+    GetStrongRandBytes(secret);
+
+    std::array<uint8_t, ENCRYPTED_BACKUP_NONCE_SIZE> nonce;
+    GetStrongRandBytes(nonce);
+
+    // Encrypt
+    auto ciphertext = EncryptChaCha20Poly1305(plaintext, secret, nonce);
+    BOOST_CHECK_EQUAL(ciphertext.size(), plaintext.size() + ENCRYPTED_BACKUP_TAG_SIZE);
+
+    // Decrypt with correct key
+    auto decrypted = DecryptChaCha20Poly1305(ciphertext, secret, nonce);
+    BOOST_REQUIRE(decrypted.has_value());
+    BOOST_CHECK(decrypted.value() == plaintext);
+
+    // Decrypt with wrong key should fail
+    uint256 wrong_secret;
+    GetStrongRandBytes(wrong_secret);
+    auto decrypted_wrong = DecryptChaCha20Poly1305(ciphertext, wrong_secret, nonce);
+    BOOST_CHECK(!decrypted_wrong.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(full_backup_roundtrip_test)
+{
+    // Test full backup creation and decryption with a real descriptor
+    // Use testnet tpub since we're running on RegTest
+    std::string descriptor = "wpkh([d34db33f/84h/1h/0h]tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba/0/*)";
+
+    // Create backup
+    EncryptedBackupContent content;
+    content.type = ContentType::BIP_NUMBER;
+    content.bip_number = BIP_DESCRIPTORS;
+
+    std::vector<uint8_t> plaintext(descriptor.begin(), descriptor.end());
+
+    auto backup_result = CreateEncryptedBackup(descriptor, plaintext, content, {});
+    BOOST_REQUIRE_MESSAGE(backup_result, util::ErrorString(backup_result).original);
+
+    // Encode to binary
+    auto encoded = EncodeEncryptedBackup(*backup_result);
+    BOOST_CHECK(!encoded.empty());
+
+    // Check magic bytes
+    BOOST_CHECK_EQUAL(encoded[0], 'B');
+    BOOST_CHECK_EQUAL(encoded[1], 'I');
+    BOOST_CHECK_EQUAL(encoded[2], 'P');
+
+    // Decode back
+    auto decoded_result = DecodeEncryptedBackup(encoded);
+    BOOST_REQUIRE_MESSAGE(decoded_result, util::ErrorString(decoded_result).original);
+
+    // Decrypt using the same descriptor
+    auto decrypted = DecryptBackupWithDescriptor(*decoded_result, descriptor);
+    BOOST_REQUIRE_MESSAGE(decrypted, util::ErrorString(decrypted).original);
+
+    // Verify plaintext matches
+    std::string decrypted_str(decrypted->begin(), decrypted->end());
+    BOOST_CHECK_EQUAL(decrypted_str, descriptor);
+}
+
+BOOST_AUTO_TEST_CASE(base64_encoding_test)
+{
+    // Test base64 encoding roundtrip
+    // Use testnet tpub since we're running on RegTest
+    std::string descriptor = "wpkh([d34db33f/84h/1h/0h]tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba/0/*)";
+
+    EncryptedBackupContent content;
+    content.type = ContentType::BIP_NUMBER;
+    content.bip_number = BIP_DESCRIPTORS;
+
+    std::vector<uint8_t> plaintext(descriptor.begin(), descriptor.end());
+
+    auto backup_result = CreateEncryptedBackup(descriptor, plaintext, content, {});
+    BOOST_REQUIRE_MESSAGE(backup_result, util::ErrorString(backup_result).original);
+
+    // Encode to base64
+    std::string base64_str = EncodeEncryptedBackupBase64(*backup_result);
+    BOOST_CHECK(!base64_str.empty());
+
+    // Decode from base64
+    auto decoded_result = DecodeEncryptedBackupBase64(base64_str);
+    BOOST_REQUIRE_MESSAGE(decoded_result, util::ErrorString(decoded_result).original);
+
+    // Decrypt
+    auto decrypted = DecryptBackupWithDescriptor(*decoded_result, descriptor);
+    BOOST_REQUIRE_MESSAGE(decrypted, util::ErrorString(decrypted).original);
+
+    std::string decrypted_str(decrypted->begin(), decrypted->end());
+    BOOST_CHECK_EQUAL(decrypted_str, descriptor);
+}
+
+BOOST_AUTO_TEST_CASE(wrong_key_decryption_test)
+{
+    // Test that decryption fails with wrong key
+    // Use testnet tpub keys since we're running on RegTest
+    std::string descriptor1 = "wpkh([11111111/84h/1h/0h]tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba/0/*)";
+    std::string descriptor2 = "wpkh([22222222/84h/1h/0h]tpubDCBEcmVKbfC9KfdydyLbJ2gfNL88grZu1XcWSW9ytTM6fitvaRmVyr8Ddf7SjZ2ZfMx9RicjYAXhuh3fmLiVLPodPEqnQQURUfrBKiiVZc8/0/*)";
+
+    EncryptedBackupContent content;
+    content.type = ContentType::BIP_NUMBER;
+    content.bip_number = BIP_DESCRIPTORS;
+
+    std::vector<uint8_t> plaintext(descriptor1.begin(), descriptor1.end());
+
+    // Create backup with descriptor1
+    auto backup_result = CreateEncryptedBackup(descriptor1, plaintext, content, {});
+    BOOST_REQUIRE_MESSAGE(backup_result, util::ErrorString(backup_result).original);
+
+    // Try to decrypt with descriptor2 - should fail
+    auto decrypted = DecryptBackupWithDescriptor(*backup_result, descriptor2);
+    BOOST_CHECK_MESSAGE(!decrypted, "Decryption should fail with wrong key");
+}
+
 BOOST_AUTO_TEST_SUITE_END()
 
 } // namespace wallet
