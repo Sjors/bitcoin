@@ -6,6 +6,7 @@
 #define BITCOIN_WALLET_ENCRYPTEDBACKUP_H
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,12 @@ static constexpr std::string_view BIP_DECRYPTION_SECRET_TAG = "BIP_XXXX_DECRYPTI
 
 /** Prefix for deriving individual secrets */
 static constexpr std::string_view BIP_INDIVIDUAL_SECRET_TAG = "BIP_XXXX_INDIVIDUAL_SECRET";
+
+/**
+ * Represents a parsed derivation path (e.g., m/44'/0'/0').
+ * Each element is a 32-bit child index where hardened indices have the high bit set.
+ */
+using DerivationPath = std::vector<uint32_t>;
 
 /**
  * Normalize a public key to 32-byte x-only format.
@@ -105,6 +112,30 @@ uint256 ComputeIndividualSecret(const uint256& key);
  */
 std::vector<uint256> ComputeAllIndividualSecrets(const uint256& decryption_secret,
                                                   const std::vector<uint256>& keys);
+
+/**
+ * Parse a derivation path string (e.g., "m/44'/0'/0'") into a DerivationPath.
+ *
+ * @param[in] path_str The path string to parse
+ * @return The parsed path, or error message
+ */
+util::Result<DerivationPath> ParseDerivationPath(const std::string& path_str);
+
+/**
+ * Encode derivation paths according to the backup format.
+ *
+ * @param[in] paths Vector of derivation paths
+ * @return Encoded bytes, or error if too many paths
+ */
+util::Result<std::vector<uint8_t>> EncodeDerivationPaths(const std::vector<DerivationPath>& paths);
+
+/**
+ * Decode derivation paths from backup format.
+ *
+ * @param[in] data The encoded data
+ * @return Vector of derivation paths, or error message
+ */
+util::Result<std::vector<DerivationPath>> DecodeDerivationPaths(std::span<const uint8_t> data);
 
 } // namespace wallet
 
