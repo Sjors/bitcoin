@@ -40,6 +40,7 @@ static void SetupWalletToolArgs(ArgsManager& argsman)
     argsman.AddArg("-debug=<category>", "Output debugging information (default: 0).", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-printtoconsole", "Send trace/debug info to console (default: 1 when no -debug is true, 0 otherwise).", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-pubkey=<key>", "Extended public key (xpub/tpub) for decrypting a backup", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::OPTIONS);
+    argsman.AddArg("-xpub=<key>", "Extended public key (xpub/tpub) whose derivation path to include in backup header", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::OPTIONS);
 
     argsman.AddCommand("info", "Get wallet info");
     argsman.AddCommand("create", "Create a new descriptor wallet file");

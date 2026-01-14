@@ -195,9 +195,24 @@ bool ExecuteWalletToolFunc(const ArgsManager& args, const std::string& command)
 
         LOCK(wallet_instance->cs_wallet);
 
+        // If -xpub is provided, validate it
+        std::optional<std::string> target_xpub;
+        if (args.IsArgSet("-xpub")) {
+            std::string xpub_str = args.GetArg("-xpub", "");
+            CExtPubKey ext_pubkey = DecodeExtPubKey(xpub_str);
+            if (!ext_pubkey.pubkey.IsValid()) {
+                tfm::format(std::cerr, "Invalid extended public key: %s\n", xpub_str);
+                wallet_instance->Close();
+                return false;
+            }
+            target_xpub = xpub_str;
+        }
+
         // Collect all descriptors from the wallet in listdescriptors format
         // This format preserves origin info and can be used with importdescriptors
         std::vector<std::pair<std::string, WalletDescriptorInfo>> all_descriptors;
+        std::vector<DerivationPath> derivation_paths;
+        bool found_target_xpub = false;
 
         const auto active_spk_mans = wallet_instance->GetActiveScriptPubKeyMans();
 
@@ -226,11 +241,51 @@ bool ExecuteWalletToolFunc(const ArgsManager& args, const std::string& command)
                     wallet_desc.next_index
                 };
                 all_descriptors.emplace_back(desc_str, std::move(info));
+
+                // Check if this descriptor contains the target xpub (if specified)
+                // and extract its derivation path from the origin info
+                if (target_xpub) {
+                    // Look for the xpub in the descriptor string and check for origin info
+                    // Format: [fingerprint/path]xpub...
+                    size_t xpub_pos = desc_str.find(*target_xpub);
+                    if (xpub_pos != std::string::npos) {
+                        found_target_xpub = true;
+                        // Look for origin info before the xpub: [fingerprint/path]
+                        if (xpub_pos > 0 && desc_str[xpub_pos - 1] == ']') {
+                            size_t bracket_start = desc_str.rfind('[', xpub_pos - 1);
+                            if (bracket_start != std::string::npos) {
+                                std::string origin = desc_str.substr(bracket_start + 1, xpub_pos - bracket_start - 2);
+                                // origin is "fingerprint/path" - find the first /
+                                size_t slash_pos = origin.find('/');
+                                if (slash_pos != std::string::npos) {
+                                    std::string path_str = "m" + origin.substr(slash_pos);
+
+                                    auto parsed_path = ParseDerivationPath(path_str);
+                                    if (parsed_path && derivation_paths.empty()) {
+                                        derivation_paths.push_back(*parsed_path);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
         if (all_descriptors.empty()) {
             tfm::format(std::cerr, "No descriptors found in wallet.\n");
+            wallet_instance->Close();
+            return false;
+        }
+
+        if (target_xpub && !found_target_xpub) {
+            tfm::format(std::cerr, "Specified xpub not found in any wallet descriptor: %s\n", *target_xpub);
+            wallet_instance->Close();
+            return false;
+        }
+
+        if (target_xpub && derivation_paths.empty()) {
+            tfm::format(std::cerr, "Specified xpub has no origin info (derivation path) in descriptor.\n");
             wallet_instance->Close();
             return false;
         }
@@ -256,7 +311,7 @@ bool ExecuteWalletToolFunc(const ArgsManager& args, const std::string& command)
         content.bip_number = BIP_DESCRIPTORS;
 
         // Create the encrypted backup
-        auto backup_result = CreateEncryptedBackup(primary_descriptor, plaintext, content, {});
+        auto backup_result = CreateEncryptedBackup(primary_descriptor, plaintext, content, derivation_paths);
         if (!backup_result) {
             tfm::format(std::cerr, "Failed to create encrypted backup: %s\n",
                         util::ErrorString(backup_result).original);

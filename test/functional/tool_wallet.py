@@ -482,8 +482,34 @@ class ToolWalletTest(BitcoinTestFramework):
         assert_equal(metadata["version"], 1)
         assert_equal(metadata["encryption"], "ChaCha20-Poly1305")
         assert metadata["recipients"] >= 1
-        # Content type is encrypted, not visible in header
+        # Without -xpub, there should be no derivation paths
+        assert_equal(metadata["derivation_paths"], [])
         self.log.debug(f"Backup metadata: {json.dumps(metadata, indent=2)}")
+
+        # Test that -xpub with an xpub not in the wallet gets rejected
+        self.log.info("Testing that unknown xpub is rejected...")
+        # Use a valid but unrelated testnet xpub
+        unknown_xpub = "tpubD6NzVbkrYhZ4XgiXtGrdW5XDAPFCL9h7we1vwNCpn8tGbBcgfVYjXyhWo4E1xkh56hjod1RhGjxbaTLV3X4FyWuejifB9jusQ46QzG87VKp"
+        p = self.bitcoin_wallet_process(f"-wallet={wallet_name}", f"-xpub={unknown_xpub}", "encryptbackup")
+        backup_output, stderr = p.communicate()
+        assert_equal(p.poll(), 1)
+        assert "not found in any wallet descriptor" in stderr
+
+        # Test encryptbackup with -xpub to include derivation path
+        self.log.info("Creating encrypted backup with -xpub for derivation path...")
+        p = self.bitcoin_wallet_process(f"-wallet={wallet_name}", f"-xpub={xpub_for_decrypt}", "encryptbackup")
+        backup_with_path_output, stderr = p.communicate()
+        assert_equal(p.poll(), 0)
+        backup_with_path_base64 = backup_with_path_output.strip()
+
+        # Inspect the backup with derivation path
+        p = self.bitcoin_wallet_process("inspectbackup")
+        inspect_output, stderr = p.communicate(input=backup_with_path_base64)
+        assert_equal(p.poll(), 0)
+        metadata_with_path = json.loads(inspect_output)
+        # BIP44 testnet path: m/44'/1'/0'
+        assert_equal(metadata_with_path["derivation_paths"], ["m/44'/1'/0'"])
+        self.log.info(f"Derivation paths in backup: {metadata_with_path['derivation_paths']}")
 
         # Decrypt the backup using just the xpub (no wallet needed)
         self.log.info("Decrypting backup using xpub...")
