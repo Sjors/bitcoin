@@ -148,6 +148,7 @@ target_json_data_sources(test_bitcoin
   data/bip138_encryption_secret.json
   data/bip138_derivation_path.json
   data/bip138_individual_secrets.json
+  data/bip138_content_type.json
   data/blockfilters.json
   data/key_io_invalid.json
   data/key_io_valid.json

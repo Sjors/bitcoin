@@ -8,6 +8,7 @@
 #include <test/data/bip138_encryption_secret.json.h>
 #include <test/data/bip138_derivation_path.json.h>
 #include <test/data/bip138_individual_secrets.json.h>
+#include <test/data/bip138_content_type.json.h>
 
 #include <test/util/json.h>
 #include <test/util/setup_common.h>
@@ -257,6 +258,50 @@ BOOST_AUTO_TEST_CASE(individual_secrets_encoding_test)
         auto decoded_result = DecodeIndividualSecrets(*encoded_result);
         BOOST_REQUIRE_MESSAGE(decoded_result, util::ErrorString(decoded_result).original);
         BOOST_CHECK_EQUAL(decoded_result->size(), secrets.size());
+    }
+}
+
+BOOST_AUTO_TEST_CASE(content_type_encoding_test)
+{
+    // Test content type encoding using BIP test vectors
+    UniValue vectors = read_json(json_tests::bip138_content_type);
+
+    for (size_t i = 0; i < vectors.size(); ++i) {
+        const UniValue& vec = vectors[i];
+        std::string description = vec["description"].get_str();
+        bool valid = vec["valid"].get_bool();
+        std::string content_hex = vec["content"].get_str();
+
+        BOOST_TEST_MESSAGE("Testing: " << description);
+
+        auto content_bytes = ParseHex(content_hex);
+
+        // Try to decode
+        auto decoded_result = DecodeContent(content_bytes);
+
+        if (!valid) {
+            BOOST_CHECK_MESSAGE(!decoded_result,
+                description << ": expected decode failure but got success");
+        } else {
+            BOOST_REQUIRE_MESSAGE(decoded_result,
+                description << ": expected decode success but got: " <<
+                (decoded_result ? "" : util::ErrorString(decoded_result).original));
+
+            auto [content, bytes_consumed] = *decoded_result;
+
+            BOOST_CHECK_EQUAL(bytes_consumed, content_bytes.size());
+            BOOST_REQUIRE_MESSAGE(content.has_value(), description << ": expected decoded content");
+
+            if (content->type == ContentType::BIP_NUMBER) {
+                BOOST_CHECK_EQUAL(static_cast<int>(content->bip_number), (content_bytes[1] << 8) | content_bytes[2]);
+            } else if (content->type == ContentType::VENDOR_SPECIFIC) {
+                BOOST_CHECK_EQUAL(HexStr(content->payload), content_hex.substr(4));
+            }
+
+            auto reencoded = EncodeContent(*content);
+            BOOST_REQUIRE_MESSAGE(reencoded, util::ErrorString(reencoded).original);
+            BOOST_CHECK_EQUAL(HexStr(*reencoded), content_hex);
+        }
     }
 }
 
