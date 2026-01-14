@@ -140,6 +140,7 @@ target_json_data_sources(test_bitcoin
   data/bip341_wallet_vectors.json
   data/bip_encrypted_backup_derivation_path.json
   data/bip_encrypted_backup_encryption_secret.json
+  data/bip_encrypted_backup_individual_secrets.json
   data/bip_encrypted_backup_keys_types.json
   data/blockfilters.json
   data/key_io_invalid.json

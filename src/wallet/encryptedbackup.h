@@ -137,6 +137,22 @@ util::Result<std::vector<uint8_t>> EncodeDerivationPaths(const std::vector<Deriv
  */
 util::Result<std::vector<DerivationPath>> DecodeDerivationPaths(std::span<const uint8_t> data);
 
+/**
+ * Encode individual secrets according to the backup format.
+ *
+ * @param[in] secrets Vector of individual secrets
+ * @return Encoded bytes, or error if empty or too many secrets
+ */
+util::Result<std::vector<uint8_t>> EncodeIndividualSecrets(const std::vector<uint256>& secrets);
+
+/**
+ * Decode individual secrets from backup format.
+ *
+ * @param[in] data The encoded data
+ * @return Vector of individual secrets, or error message
+ */
+util::Result<std::vector<uint256>> DecodeIndividualSecrets(std::span<const uint8_t> data);
+
 } // namespace wallet
 
 #endif // BITCOIN_WALLET_ENCRYPTEDBACKUP_H

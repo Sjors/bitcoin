@@ -196,4 +196,56 @@ util::Result<std::vector<DerivationPath>> DecodeDerivationPaths(std::span<const 
     return result;
 }
 
+util::Result<std::vector<uint8_t>> EncodeIndividualSecrets(const std::vector<uint256>& secrets)
+{
+    if (secrets.empty()) {
+        return util::Error{Untranslated("At least one individual secret is required")};
+    }
+    if (secrets.size() > 255) {
+        return util::Error{Untranslated("Too many individual secrets (max 255)")};
+    }
+
+    // Sort secrets lexicographically for consistent encoding
+    std::vector<uint256> sorted_secrets = secrets;
+    std::sort(sorted_secrets.begin(), sorted_secrets.end());
+
+    std::vector<uint8_t> result;
+    result.reserve(1 + sorted_secrets.size() * 32);
+    result.push_back(static_cast<uint8_t>(sorted_secrets.size()));
+
+    for (const auto& secret : sorted_secrets) {
+        result.insert(result.end(), secret.begin(), secret.end());
+    }
+
+    return result;
+}
+
+util::Result<std::vector<uint256>> DecodeIndividualSecrets(std::span<const uint8_t> data)
+{
+    if (data.empty()) {
+        return util::Error{Untranslated("Empty individual secrets data")};
+    }
+
+    uint8_t count = data[0];
+    if (count == 0) {
+        return util::Error{Untranslated("At least one individual secret is required")};
+    }
+
+    size_t expected_size = 1 + count * 32;
+    if (data.size() < expected_size) {
+        return util::Error{Untranslated("Truncated individual secrets data")};
+    }
+
+    std::vector<uint256> result;
+    result.reserve(count);
+
+    for (size_t i = 0; i < count; ++i) {
+        uint256 secret;
+        std::memcpy(secret.data(), data.data() + 1 + i * 32, 32);
+        result.push_back(secret);
+    }
+
+    return result;
+}
+
 } // namespace wallet
