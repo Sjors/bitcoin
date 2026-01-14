@@ -47,6 +47,7 @@ static void SetupWalletToolArgs(ArgsManager& argsman)
     argsman.AddCommand("createfromdump", "Create new wallet file from dumped records");
     argsman.AddCommand("encryptbackup", "Create an encrypted backup of wallet descriptors (outputs base64)");
     argsman.AddCommand("decryptbackup", "Decrypt an encrypted backup (reads base64 from stdin, requires -pubkey)");
+    argsman.AddCommand("inspectbackup", "Show unencrypted metadata from a backup (reads base64 from stdin)");
 }
 
 static std::optional<int> WalletAppInit(ArgsManager& args, int argc, char* argv[])

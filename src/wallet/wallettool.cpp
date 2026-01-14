@@ -11,6 +11,7 @@
 #include <key_io.h>
 #include <script/descriptor.h>
 #include <univalue.h>
+#include <util/bip32.h>
 #include <util/check.h>
 #include <util/fs.h>
 #include <util/translation.h>
@@ -311,6 +312,47 @@ bool ExecuteWalletToolFunc(const ArgsManager& args, const std::string& command)
         // Output the decrypted content as JSON (importdescriptors-compatible format)
         std::string plaintext(decrypted->begin(), decrypted->end());
         tfm::format(std::cout, "%s\n", plaintext);
+    } else if (command == "inspectbackup") {
+        // Show unencrypted metadata from a backup
+        // Read base64 backup from stdin
+        std::string base64_input;
+        std::getline(std::cin, base64_input);
+        if (base64_input.empty()) {
+            tfm::format(std::cerr, "No backup data provided on stdin.\n");
+            return false;
+        }
+
+        // Decode the backup
+        auto backup_result = DecodeEncryptedBackupBase64(base64_input);
+        if (!backup_result) {
+            tfm::format(std::cerr, "Failed to decode backup: %s\n",
+                        util::ErrorString(backup_result).original);
+            return false;
+        }
+
+        const EncryptedBackup& backup = *backup_result;
+
+        // Output metadata as JSON (only unencrypted header fields)
+        UniValue result(UniValue::VOBJ);
+        result.pushKV("version", backup.version);
+        result.pushKV("recipients", static_cast<int>(backup.individual_secrets.size()));
+
+        // Encryption algorithm
+        std::string enc_str;
+        switch (backup.encryption) {
+            case EncryptionAlgorithm::CHACHA20_POLY1305: enc_str = "ChaCha20-Poly1305"; break;
+            default: enc_str = "unknown"; break;
+        }
+        result.pushKV("encryption", enc_str);
+
+        // Derivation paths
+        UniValue paths_arr(UniValue::VARR);
+        for (const auto& path : backup.derivation_paths) {
+            paths_arr.push_back(WriteHDKeypath(path, /*apostrophe=*/true));
+        }
+        result.pushKV("derivation_paths", paths_arr);
+
+        tfm::format(std::cout, "%s\n", result.write(2));
     } else {
         tfm::format(std::cerr, "Invalid command: %s\n", command);
         return false;

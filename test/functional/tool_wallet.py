@@ -472,6 +472,19 @@ class ToolWalletTest(BitcoinTestFramework):
         xpub_for_decrypt = xpub_match.group(0)
         self.log.info(f"Using xpub for decryption: {xpub_for_decrypt[:20]}...")
 
+        # Test inspectbackup command to view unencrypted metadata
+        self.log.info("Testing inspectbackup command...")
+        p = self.bitcoin_wallet_process("inspectbackup")
+        inspect_output, stderr = p.communicate(input=backup_base64)
+        assert_equal(p.poll(), 0)
+        import json
+        metadata = json.loads(inspect_output)
+        assert_equal(metadata["version"], 1)
+        assert_equal(metadata["encryption"], "ChaCha20-Poly1305")
+        assert metadata["recipients"] >= 1
+        # Content type is encrypted, not visible in header
+        self.log.debug(f"Backup metadata: {json.dumps(metadata, indent=2)}")
+
         # Decrypt the backup using just the xpub (no wallet needed)
         self.log.info("Decrypting backup using xpub...")
         p = self.bitcoin_wallet_process(f"-pubkey={xpub_for_decrypt}", "decryptbackup")
