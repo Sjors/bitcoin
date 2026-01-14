@@ -6,9 +6,11 @@
 
 #include <test/data/bip138_keys_types.json.h>
 #include <test/data/bip138_encryption_secret.json.h>
+#include <test/data/bip138_derivation_path.json.h>
 
 #include <test/util/json.h>
 #include <test/util/setup_common.h>
+#include <util/bip32.h>
 #include <util/strencodings.h>
 
 #include <boost/test/unit_test.hpp>
@@ -53,6 +55,11 @@ static std::string DescriptorForKeyExpression(const std::string& key_str)
         return "pk(" + key_str + ")";
     }
     return "wpkh(" + key_str + ")";
+}
+
+static bool ParseNonEmptyHDKeypath(const std::string& path_str, DerivationPath& path)
+{
+    return ParseHDKeypath(path_str, path) && !path.empty();
 }
 
 BOOST_AUTO_TEST_CASE(key_normalization_test)
@@ -145,6 +152,58 @@ BOOST_AUTO_TEST_CASE(secret_derivation_test)
             BOOST_CHECK_MESSAGE(reconstructed == decryption_secret,
                 description << ": XOR reconstruction failed for key " << j);
         }
+    }
+}
+
+BOOST_AUTO_TEST_CASE(derivation_path_encoding_test)
+{
+    // Test derivation path encoding using BIP test vectors
+    UniValue vectors = read_json(json_tests::bip138_derivation_path);
+
+    for (size_t i = 0; i < vectors.size(); ++i) {
+        const UniValue& vec = vectors[i];
+        std::string description = vec["description"].get_str();
+        const UniValue& paths_arr = vec["paths"];
+
+        BOOST_TEST_MESSAGE("Testing: " << description);
+
+        // Parse paths
+        std::vector<DerivationPath> paths;
+        bool parse_failed = false;
+        for (size_t j = 0; j < paths_arr.size(); ++j) {
+            DerivationPath path;
+            if (!ParseNonEmptyHDKeypath(paths_arr[j].get_str(), path)) {
+                parse_failed = true;
+                break;
+            }
+            paths.push_back(path);
+        }
+
+        // Check if this test vector should fail
+        if (vec["expected"].isNull()) {
+            if (!parse_failed) {
+                auto encoded_result = EncodeDerivationPaths(paths);
+                BOOST_CHECK_MESSAGE(!encoded_result,
+                    description << ": expected failure but got success");
+            }
+            continue;
+        }
+
+        BOOST_REQUIRE_MESSAGE(!parse_failed, description << ": unexpected parse failure");
+        std::string expected_hex = vec["expected"].get_str();
+
+        // Encode
+        auto encoded_result = EncodeDerivationPaths(paths);
+        BOOST_REQUIRE_MESSAGE(encoded_result, util::ErrorString(encoded_result).original);
+
+        std::string result_hex = HexStr(*encoded_result);
+        BOOST_CHECK_MESSAGE(result_hex == expected_hex,
+            description << ": expected " << expected_hex << " got " << result_hex);
+
+        // Test round-trip decode
+        auto decoded_result = DecodeDerivationPaths(*encoded_result);
+        BOOST_REQUIRE_MESSAGE(decoded_result, util::ErrorString(decoded_result).original);
+        BOOST_CHECK_EQUAL(decoded_result->size(), paths.size());
     }
 }
 
