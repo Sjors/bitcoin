@@ -186,9 +186,14 @@ bool ExecuteWalletToolFunc(const ArgsManager& args, const std::string& command)
         const std::shared_ptr<CWallet> wallet_instance = MakeWallet(name, path, options);
         if (!wallet_instance) return false;
 
+        std::optional<std::string> target_xpub;
+        if (args.IsArgSet("-xpub")) {
+            target_xpub = args.GetArg("-xpub", "");
+        }
+
         WalletContext context;
         auto wallet_interface{interfaces::MakeWallet(context, wallet_instance)};
-        auto backup_result{wallet_interface->createEncryptedDescriptorBackup()};
+        auto backup_result{wallet_interface->createEncryptedDescriptorBackup(target_xpub)};
         if (!backup_result) {
             tfm::format(std::cerr, "%s\n", util::ErrorString(backup_result).original);
             wallet_instance->Close();

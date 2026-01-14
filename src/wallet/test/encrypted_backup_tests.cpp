@@ -585,7 +585,7 @@ BOOST_AUTO_TEST_CASE(interface_create_encrypted_descriptor_backup_test)
 
     std::shared_ptr<CWallet> wallet_ptr{&wallet, [](CWallet*) {}};
     auto wallet_interface{interfaces::MakeWallet(context, wallet_ptr)};
-    auto backup{wallet_interface->createEncryptedDescriptorBackup()};
+    auto backup{wallet_interface->createEncryptedDescriptorBackup(std::nullopt)};
     BOOST_REQUIRE_MESSAGE(backup, util::ErrorString(backup).original);
 
     auto metadata{CWallet::GetEncryptedBackupMetadata(*backup)};

@@ -23,6 +23,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -95,7 +96,7 @@ public:
     virtual bool backupWallet(const std::string& filename) = 0;
 
     //! Create an encrypted backup of public wallet descriptors.
-    virtual util::Result<std::string> createEncryptedDescriptorBackup() = 0;
+    virtual util::Result<std::string> createEncryptedDescriptorBackup(const std::optional<std::string>& target_xpub) = 0;
 
     //! Get wallet name.
     virtual std::string getWalletName() = 0;

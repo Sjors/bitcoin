@@ -91,6 +91,28 @@ static std::string EncryptionAlgorithmString(EncryptionAlgorithm algorithm)
     return "unknown";
 }
 
+static std::optional<DerivationPath> ExtractTargetDerivationPath(std::string_view descriptor, std::string_view target_xpub)
+{
+    const size_t xpub_pos{descriptor.find(target_xpub)};
+    if (xpub_pos == std::string_view::npos) return std::nullopt;
+
+    if (xpub_pos == 0 || descriptor[xpub_pos - 1] != ']') return std::nullopt;
+
+    const size_t bracket_start{descriptor.rfind('[', xpub_pos - 1)};
+    if (bracket_start == std::string_view::npos) return std::nullopt;
+
+    const std::string_view origin{descriptor.substr(bracket_start + 1, xpub_pos - bracket_start - 2)};
+    const size_t slash_pos{origin.find('/')};
+    if (slash_pos == std::string_view::npos) return std::nullopt;
+
+    DerivationPath parsed_path;
+    if (!ParseHDKeypath("m" + std::string{origin.substr(slash_pos)}, parsed_path) || parsed_path.empty()) {
+        return std::nullopt;
+    }
+
+    return parsed_path;
+}
+
 util::Result<std::vector<XOnlyPubKey>> ExtractKeysFromDescriptor(const std::string& descriptor)
 {
     FlatSigningProvider provider;
@@ -708,9 +730,18 @@ static UniValue DescriptorBackupSetToUniValue(const DescriptorBackupSet& set)
     return obj;
 }
 
-util::Result<std::string> CWallet::CreateEncryptedDescriptorBackup() const
+util::Result<std::string> CWallet::CreateEncryptedDescriptorBackup(const std::optional<std::string>& target_xpub) const
 {
+    if (target_xpub) {
+        const CExtPubKey ext_pubkey{DecodeExtPubKey(*target_xpub)};
+        if (!ext_pubkey.pubkey.IsValid()) {
+            return util::Error{Untranslated(strprintf("Invalid extended public key: %s", *target_xpub))};
+        }
+    }
+
     std::vector<WalletDescriptorInfo> all_descriptors;
+    std::vector<DerivationPath> derivation_paths;
+    bool found_target_xpub{false};
 
     {
         LOCK(cs_wallet);
@@ -738,11 +769,28 @@ util::Result<std::string> CWallet::CreateEncryptedDescriptorBackup() const
                 wallet_desc.next_index
             };
             all_descriptors.push_back(std::move(info));
+
+            if (target_xpub && desc_str.find(*target_xpub) != std::string::npos) {
+                found_target_xpub = true;
+                if (derivation_paths.empty()) {
+                    if (auto path{ExtractTargetDerivationPath(desc_str, *target_xpub)}) {
+                        derivation_paths.push_back(*path);
+                    }
+                }
+            }
         }
     }
 
     if (all_descriptors.empty()) {
         return util::Error{Untranslated("No descriptors found in wallet.")};
+    }
+
+    if (target_xpub && !found_target_xpub) {
+        return util::Error{Untranslated(strprintf("Specified xpub not found in any wallet descriptor: %s", *target_xpub))};
+    }
+
+    if (target_xpub && derivation_paths.empty()) {
+        return util::Error{Untranslated("Specified xpub has no origin info (derivation path) in descriptor.")};
     }
 
     std::map<std::string, DescriptorBackupSet> descriptor_sets;
@@ -803,7 +851,7 @@ util::Result<std::string> CWallet::CreateEncryptedDescriptorBackup() const
         .payload = {},
     };
 
-    auto backup_result{CreateEncryptedBackup(primary_descriptor, plaintext, content, {})};
+    auto backup_result{CreateEncryptedBackup(primary_descriptor, plaintext, content, derivation_paths)};
     if (!backup_result) {
         return util::Error{Untranslated(strprintf("Failed to create encrypted backup: %s", util::ErrorString(backup_result).original))};
     }
