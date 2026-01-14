@@ -22,6 +22,7 @@
 #include <wallet/coincontrol.h>
 #include <wallet/context.h>
 #include <wallet/export.h>
+#include <wallet/encrypted_backup.h>
 #include <wallet/feebumper.h>
 #include <wallet/fees.h>
 #include <wallet/load.h>
@@ -42,6 +43,7 @@ using interfaces::Handler;
 using interfaces::MakeSignalHandler;
 using interfaces::Wallet;
 using interfaces::WalletAddress;
+using interfaces::WalletBackup;
 using interfaces::WalletBalances;
 using interfaces::WalletLoader;
 using interfaces::WalletMigrationResult;
@@ -153,6 +155,10 @@ public:
     }
     void abortRescan() override { m_wallet->AbortRescan(); }
     bool backupWallet(const std::string& filename) override { return m_wallet->BackupWallet(filename); }
+    util::Result<std::string> createEncryptedDescriptorBackup() override
+    {
+        return m_wallet->CreateEncryptedDescriptorBackup();
+    }
     std::string getWalletName() override { return m_wallet->GetName(); }
     util::Result<CTxDestination> getNewDestination(const OutputType type, const std::string& label) override
     {
@@ -533,6 +539,15 @@ public:
     std::shared_ptr<CWallet> m_wallet;
 };
 
+class WalletBackupImpl : public WalletBackup
+{
+public:
+    util::Result<std::vector<uint8_t>> decryptEncryptedDescriptorBackup(const std::string& base64_str, const std::string& pubkey_str) override
+    {
+        return CWallet::DecryptEncryptedBackupBase64WithExtPubKey(base64_str, pubkey_str);
+    }
+};
+
 class WalletLoaderImpl : public WalletLoader
 {
 public:
@@ -675,6 +690,11 @@ public:
 
 namespace interfaces {
 std::unique_ptr<Wallet> MakeWallet(wallet::WalletContext& context, const std::shared_ptr<wallet::CWallet>& wallet) { return wallet ? std::make_unique<wallet::WalletImpl>(context, wallet) : nullptr; }
+
+std::unique_ptr<WalletBackup> MakeWalletBackup()
+{
+    return std::make_unique<wallet::WalletBackupImpl>();
+}
 
 std::unique_ptr<WalletLoader> MakeWalletLoader(Chain& chain, ArgsManager& args)
 {
