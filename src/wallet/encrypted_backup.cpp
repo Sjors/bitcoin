@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
+#include <map>
 #include <set>
 #include <span>
 
@@ -17,10 +19,66 @@
 #include <serialize.h>
 #include <span.h>
 #include <streams.h>
+#include <univalue.h>
 #include <util/bip32.h>
 #include <util/strencodings.h>
+#include <util/string.h>
+#include <wallet/descriptor_info.h>
+#include <wallet/wallet.h>
 
 namespace wallet {
+
+static std::optional<XOnlyPubKey> ToXOnly(const CExtPubKey& ext_pubkey)
+{
+    if (!ext_pubkey.pubkey.IsFullyValid() || !ext_pubkey.pubkey.IsValidNonHybrid()) {
+        return std::nullopt;
+    }
+    return XOnlyPubKey{ext_pubkey.pubkey};
+}
+
+static std::string DescriptorWithoutChecksum(const std::string& descriptor)
+{
+    return descriptor.substr(0, descriptor.find('#'));
+}
+
+static bool ParsesAsDescriptor(const std::string& descriptor)
+{
+    FlatSigningProvider provider;
+    std::string error;
+    return !Parse(descriptor, provider, error, /*require_checksum=*/false).empty();
+}
+
+static std::optional<std::pair<std::string, bool>> GetDescriptorBranchGroup(const std::string& descriptor)
+{
+    const std::string descriptor_without_checksum{DescriptorWithoutChecksum(descriptor)};
+    std::string receive_group{descriptor_without_checksum};
+    util::ReplaceAll(receive_group, "/0/*", "/<0;1>/*");
+    const bool has_receive_branch{receive_group != descriptor_without_checksum};
+
+    std::string change_group{descriptor_without_checksum};
+    util::ReplaceAll(change_group, "/1/*", "/<0;1>/*");
+    const bool has_change_branch{change_group != descriptor_without_checksum};
+
+    if (has_receive_branch == has_change_branch) return std::nullopt;
+
+    std::string group{has_receive_branch ? std::move(receive_group) : std::move(change_group)};
+    if (!ParsesAsDescriptor(group)) {
+        return std::nullopt;
+    }
+
+    return std::make_pair(std::move(group), has_change_branch);
+}
+
+static std::optional<std::string> GetReceiveChangeMultipathDescriptor(const std::string& descriptor)
+{
+    std::string descriptor_without_checksum{DescriptorWithoutChecksum(descriptor)};
+    std::string without_multipath{descriptor_without_checksum};
+    util::ReplaceAll(without_multipath, "/<0;1>/*", "");
+    if (without_multipath == descriptor_without_checksum || !ParsesAsDescriptor(descriptor_without_checksum)) {
+        return std::nullopt;
+    }
+    return descriptor_without_checksum;
+}
 
 util::Result<std::vector<XOnlyPubKey>> ExtractKeysFromDescriptor(const std::string& descriptor)
 {
@@ -583,6 +641,188 @@ util::Result<std::vector<uint8_t>> DecryptBackupWithDescriptor(const EncryptedBa
     }
 
     return util::Error{Untranslated("No matching key found for decryption")};
+}
+
+struct DescriptorBackupSet {
+    std::optional<WalletDescriptorInfo> receive;
+    std::optional<WalletDescriptorInfo> change;
+    std::string multipath_descriptor;
+    bool multipath{false};
+    bool archived{true};
+    std::optional<std::pair<int64_t, int64_t>> range;
+    uint64_t birth_time{std::numeric_limits<uint64_t>::max()};
+};
+
+static util::Result<void> AddDescriptorToBackupSet(DescriptorBackupSet& set, WalletDescriptorInfo info, bool change, bool multipath = false)
+{
+    if (set.range && info.range) {
+        set.range = std::make_pair(
+            std::min(set.range->first, info.range->first),
+            std::max(set.range->second, info.range->second));
+    } else if (!set.range) {
+        set.range = info.range;
+    }
+    set.birth_time = std::min(set.birth_time, info.creation_time);
+    set.archived = set.archived && !info.active;
+    set.multipath = set.multipath || multipath;
+
+    auto& target{change ? set.change : set.receive};
+    if (target) {
+        return util::Error{Untranslated("Duplicate receive or change descriptor in backup set.")};
+    }
+    target = std::move(info);
+    return {};
+}
+
+static UniValue DescriptorBackupSetToUniValue(const DescriptorBackupSet& set)
+{
+    UniValue obj(UniValue::VOBJ);
+    obj.pushKV("descriptor", set.receive->descriptor);
+    if (set.change) {
+        obj.pushKV("change_descriptor", set.change->descriptor);
+    }
+    if (set.archived) {
+        obj.pushKV("archived", true);
+    }
+    if (set.birth_time != std::numeric_limits<uint64_t>::max()) {
+        obj.pushKV("birth_time", set.birth_time);
+    }
+    if (set.range) {
+        UniValue range(UniValue::VARR);
+        range.push_back(set.range->first);
+        // range_end is exclusive internally, display as inclusive (hence -1)
+        range.push_back(set.range->second - 1);
+        obj.pushKV("range", std::move(range));
+    }
+    return obj;
+}
+
+util::Result<std::string> CWallet::CreateEncryptedDescriptorBackup() const
+{
+    std::vector<WalletDescriptorInfo> all_descriptors;
+
+    {
+        LOCK(cs_wallet);
+
+        const auto active_spk_mans{GetActiveScriptPubKeyMans()};
+
+        for (const auto& spk_man : GetAllScriptPubKeyMans()) {
+            auto desc_spk_man{dynamic_cast<DescriptorScriptPubKeyMan*>(spk_man)};
+            if (!desc_spk_man) continue;
+
+            LOCK(desc_spk_man->cs_desc_man);
+            std::string desc_str;
+            if (!desc_spk_man->GetDescriptorString(desc_str, /*priv=*/false)) {
+                return util::Error{Untranslated("Failed to get descriptor string.")};
+            }
+
+            const auto& wallet_desc{desc_spk_man->GetWalletDescriptor()};
+            const bool is_range{wallet_desc.descriptor->IsRange()};
+            WalletDescriptorInfo info{
+                desc_str,
+                wallet_desc.creation_time,
+                active_spk_mans.contains(desc_spk_man),
+                IsInternalScriptPubKeyMan(desc_spk_man),
+                is_range ? std::optional(std::make_pair(wallet_desc.range_start, wallet_desc.range_end)) : std::nullopt,
+                wallet_desc.next_index
+            };
+            all_descriptors.push_back(std::move(info));
+        }
+    }
+
+    if (all_descriptors.empty()) {
+        return util::Error{Untranslated("No descriptors found in wallet.")};
+    }
+
+    std::map<std::string, DescriptorBackupSet> descriptor_sets;
+    for (const auto& info : all_descriptors) {
+        if (auto multipath_descriptor{GetReceiveChangeMultipathDescriptor(info.descriptor)}) {
+            auto& descriptor_set{descriptor_sets[*multipath_descriptor]};
+            descriptor_set.multipath_descriptor = *multipath_descriptor;
+            auto add_result{AddDescriptorToBackupSet(descriptor_set, info, /*change=*/false, /*multipath=*/true)};
+            if (!add_result) {
+                return util::Error{util::ErrorString(add_result)};
+            }
+            continue;
+        }
+
+        const auto branch_group{GetDescriptorBranchGroup(info.descriptor)};
+        if (!branch_group) {
+            return util::Error{Untranslated(strprintf("Descriptor is not a receive/change pair and cannot be backed up as BIP380 content: %s", info.descriptor))};
+        }
+
+        auto& descriptor_set{descriptor_sets[branch_group->first]};
+        descriptor_set.multipath_descriptor = branch_group->first;
+        auto add_result{AddDescriptorToBackupSet(descriptor_set, info, branch_group->second)};
+        if (!add_result) {
+            return util::Error{util::ErrorString(add_result)};
+        }
+    }
+
+    std::vector<DescriptorBackupSet> sorted_sets;
+    sorted_sets.reserve(descriptor_sets.size());
+    for (auto& [_, set] : descriptor_sets) {
+        if (!set.receive || (!set.multipath && !set.change)) {
+            return util::Error{Untranslated("Descriptor backup requires both receive and change descriptors.")};
+        }
+        if (set.multipath && set.change) {
+            return util::Error{Untranslated("Multipath descriptor backup must not include a change descriptor.")};
+        }
+        sorted_sets.push_back(std::move(set));
+    }
+
+    std::sort(sorted_sets.begin(), sorted_sets.end(), [](const auto& a, const auto& b) {
+        return a.receive->descriptor < b.receive->descriptor;
+    });
+
+    const std::string primary_descriptor{sorted_sets.front().receive->descriptor};
+    UniValue descriptor_sets_arr(UniValue::VARR);
+    for (const auto& descriptor_set : sorted_sets) {
+        descriptor_sets_arr.push_back(DescriptorBackupSetToUniValue(descriptor_set));
+    }
+
+    UniValue descriptor_backup(UniValue::VOBJ);
+    descriptor_backup.pushKV("version", 1);
+    descriptor_backup.pushKV("descriptor_sets", std::move(descriptor_sets_arr));
+    const std::string plaintext_str{descriptor_backup.write()};
+    const std::vector<uint8_t> plaintext{plaintext_str.begin(), plaintext_str.end()};
+    const EncryptedBackupContent content{
+        .type = ContentType::BIP_NUMBER,
+        .bip_number = BIP_DESCRIPTORS,
+        .payload = {},
+    };
+
+    auto backup_result{CreateEncryptedBackup(primary_descriptor, plaintext, content, {})};
+    if (!backup_result) {
+        return util::Error{Untranslated(strprintf("Failed to create encrypted backup: %s", util::ErrorString(backup_result).original))};
+    }
+
+    return EncodeEncryptedBackupBase64(*backup_result);
+}
+
+util::Result<std::vector<uint8_t>> CWallet::DecryptEncryptedBackupBase64WithExtPubKey(const std::string& base64_str, const std::string& pubkey_str)
+{
+    const CExtPubKey ext_pubkey{DecodeExtPubKey(pubkey_str)};
+    if (!ext_pubkey.pubkey.IsValid()) {
+        return util::Error{Untranslated(strprintf("Invalid extended public key: %s", pubkey_str))};
+    }
+
+    auto backup_result{DecodeEncryptedBackupBase64(base64_str)};
+    if (!backup_result) {
+        return util::Error{Untranslated(strprintf("Failed to decode backup: %s", util::ErrorString(backup_result).original))};
+    }
+
+    auto xonly_key{ToXOnly(ext_pubkey)};
+    if (!xonly_key) {
+        return util::Error{Untranslated(strprintf("Invalid extended public key: %s", pubkey_str))};
+    }
+
+    auto plaintexts{DecryptBackupContentsWithKey(*backup_result, *xonly_key, BIP_DESCRIPTORS)};
+    if (!plaintexts) {
+        return util::Error{Untranslated("Failed to decrypt backup: provided key does not match any recipient.")};
+    }
+
+    return plaintexts->front();
 }
 
 } // namespace wallet

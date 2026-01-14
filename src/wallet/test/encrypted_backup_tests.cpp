@@ -12,6 +12,7 @@
 #include <test/data/bip138_content_type.json.h>
 #include <test/data/bip138_chacha20poly1305_encryption.json.h>
 #include <test/data/bip138_encrypted_backup.json.h>
+#include <test/data/bip138_bip380_descriptor_backup.json.h>
 
 #include <test/util/json.h>
 #include <test/util/setup_common.h>
@@ -316,6 +317,21 @@ BOOST_AUTO_TEST_CASE(content_type_encoding_test)
             BOOST_CHECK_EQUAL(HexStr(*reencoded), content_hex);
         }
     }
+}
+
+BOOST_AUTO_TEST_CASE(bip380_descriptor_backup_vector_test)
+{
+    UniValue json_vectors{read_json(json_tests::bip138_bip380_descriptor_backup)};
+    BOOST_REQUIRE(json_vectors.isArray());
+    BOOST_REQUIRE_EQUAL(json_vectors.size(), 2);
+
+    const UniValue& descriptor_pair{json_vectors[0]["document"]["descriptor_sets"][0]};
+    BOOST_CHECK(descriptor_pair["descriptor"].get_str().find("/0/*") != std::string::npos);
+    BOOST_CHECK(descriptor_pair["change_descriptor"].get_str().find("/1/*") != std::string::npos);
+
+    const UniValue& multipath_descriptor{json_vectors[1]["document"]["descriptor_sets"][0]};
+    BOOST_CHECK(multipath_descriptor["descriptor"].get_str().find("/<0;1>/*") != std::string::npos);
+    BOOST_CHECK(multipath_descriptor["change_descriptor"].isNull());
 }
 
 BOOST_AUTO_TEST_CASE(chacha20poly1305_roundtrip_test)

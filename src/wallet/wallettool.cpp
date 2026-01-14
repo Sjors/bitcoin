@@ -5,9 +5,12 @@
 #include <wallet/wallettool.h>
 
 #include <common/args.h>
+#include <interfaces/wallet.h>
+#include <univalue.h>
 #include <util/check.h>
 #include <util/fs.h>
 #include <util/translation.h>
+#include <wallet/context.h>
 #include <wallet/dump.h>
 #include <wallet/wallet.h>
 #include <wallet/walletutil.h>
@@ -171,6 +174,51 @@ bool ExecuteWalletToolFunc(const ArgsManager& args, const std::string& command)
             tfm::format(std::cerr, "%s\n", error.original);
         }
         return ret;
+    } else if (command == "encryptbackup") {
+        if (!args.IsArgSet("-wallet")) {
+            tfm::format(std::cerr, "Wallet name must be provided for encryptbackup.\n");
+            return false;
+        }
+
+        DatabaseOptions options;
+        ReadDatabaseArgs(args, options);
+        options.require_existing = true;
+        const std::shared_ptr<CWallet> wallet_instance = MakeWallet(name, path, options);
+        if (!wallet_instance) return false;
+
+        WalletContext context;
+        auto wallet_interface{interfaces::MakeWallet(context, wallet_instance)};
+        auto backup_result{wallet_interface->createEncryptedDescriptorBackup()};
+        if (!backup_result) {
+            tfm::format(std::cerr, "%s\n", util::ErrorString(backup_result).original);
+            wallet_instance->Close();
+            return false;
+        }
+
+        tfm::format(std::cout, "%s\n", *backup_result);
+        wallet_instance->Close();
+    } else if (command == "decryptbackup") {
+        if (!args.IsArgSet("-pubkey")) {
+            tfm::format(std::cerr, "Extended public key must be provided via -pubkey for decryptbackup.\n");
+            return false;
+        }
+
+        std::string base64_input;
+        std::getline(std::cin, base64_input);
+        if (base64_input.empty()) {
+            tfm::format(std::cerr, "No backup data provided on stdin.\n");
+            return false;
+        }
+
+        auto wallet_backup{interfaces::MakeWalletBackup()};
+        auto decrypted{wallet_backup->decryptEncryptedDescriptorBackup(base64_input, args.GetArg("-pubkey", ""))};
+        if (!decrypted) {
+            tfm::format(std::cerr, "%s\n", util::ErrorString(decrypted).original);
+            return false;
+        }
+
+        std::string plaintext(decrypted->begin(), decrypted->end());
+        tfm::format(std::cout, "%s\n", plaintext);
     } else {
         tfm::format(std::cerr, "Invalid command: %s\n", command);
         return false;
