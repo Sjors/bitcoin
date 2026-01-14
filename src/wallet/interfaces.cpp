@@ -16,6 +16,7 @@
 #include <support/allocators/secure.h>
 #include <sync.h>
 #include <uint256.h>
+#include <util/bip32.h>
 #include <util/check.h>
 #include <util/translation.h>
 #include <util/ui_change_type.h>
@@ -537,6 +538,25 @@ public:
     util::Result<std::vector<uint8_t>> decryptEncryptedDescriptorBackup(const std::string& base64_str, const std::string& pubkey_str) override
     {
         return CWallet::DecryptEncryptedBackupBase64WithExtPubKey(base64_str, pubkey_str);
+    }
+
+    util::Result<interfaces::EncryptedDescriptorBackupMetadata> getEncryptedDescriptorBackupMetadata(const std::string& base64_str) override
+    {
+        auto metadata{CWallet::GetEncryptedBackupMetadata(base64_str)};
+        if (!metadata) return util::Error{util::ErrorString(metadata)};
+
+        std::vector<std::string> derivation_paths;
+        derivation_paths.reserve(metadata->derivation_paths.size());
+        for (const auto& path : metadata->derivation_paths) {
+            derivation_paths.push_back(WriteHDKeypath(path, /*apostrophe=*/true));
+        }
+
+        return interfaces::EncryptedDescriptorBackupMetadata{
+            .version = static_cast<int>(metadata->version),
+            .recipient_count = metadata->recipient_count,
+            .encryption = metadata->encryption,
+            .derivation_paths = std::move(derivation_paths),
+        };
     }
 };
 

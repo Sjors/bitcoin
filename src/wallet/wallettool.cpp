@@ -219,6 +219,33 @@ bool ExecuteWalletToolFunc(const ArgsManager& args, const std::string& command)
 
         std::string plaintext(decrypted->begin(), decrypted->end());
         tfm::format(std::cout, "%s\n", plaintext);
+    } else if (command == "inspectbackup") {
+        std::string base64_input;
+        std::getline(std::cin, base64_input);
+        if (base64_input.empty()) {
+            tfm::format(std::cerr, "No backup data provided on stdin.\n");
+            return false;
+        }
+
+        auto wallet_backup{interfaces::MakeWalletBackup()};
+        auto metadata{wallet_backup->getEncryptedDescriptorBackupMetadata(base64_input)};
+        if (!metadata) {
+            tfm::format(std::cerr, "%s\n", util::ErrorString(metadata).original);
+            return false;
+        }
+
+        UniValue result(UniValue::VOBJ);
+        result.pushKV("version", static_cast<int>(metadata->version));
+        result.pushKV("recipients", static_cast<int>(metadata->recipient_count));
+        result.pushKV("encryption", metadata->encryption);
+
+        UniValue paths_arr(UniValue::VARR);
+        for (const auto& path : metadata->derivation_paths) {
+            paths_arr.push_back(path);
+        }
+        result.pushKV("derivation_paths", paths_arr);
+
+        tfm::format(std::cout, "%s\n", result.write(2));
     } else {
         tfm::format(std::cerr, "Invalid command: %s\n", command);
         return false;

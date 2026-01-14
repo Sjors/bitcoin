@@ -5,6 +5,7 @@
 #include <wallet/encrypted_backup.h>
 
 #include <crypto/chacha20poly1305.h>
+#include <interfaces/wallet.h>
 #include <test/data/bip138_keys_types.json.h>
 #include <test/data/bip138_encryption_secret.json.h>
 #include <test/data/bip138_derivation_path.json.h>
@@ -18,6 +19,9 @@
 #include <test/util/setup_common.h>
 #include <util/bip32.h>
 #include <util/strencodings.h>
+#include <wallet/context.h>
+#include <wallet/test/util.h>
+#include <wallet/wallet.h>
 
 #include <span.h>
 #include <streams.h>
@@ -567,6 +571,37 @@ BOOST_AUTO_TEST_CASE(base64_encoding_test)
 
     std::string decrypted_str(decrypted->begin(), decrypted->end());
     BOOST_CHECK_EQUAL(decrypted_str, descriptor);
+}
+
+BOOST_AUTO_TEST_CASE(interface_create_encrypted_descriptor_backup_test)
+{
+    WalletContext context;
+    CWallet wallet(/*chain=*/nullptr, "", CreateMockableWalletDatabase());
+    {
+        LOCK(wallet.cs_wallet);
+        wallet.SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
+        wallet.SetupDescriptorScriptPubKeyMans();
+    }
+
+    std::shared_ptr<CWallet> wallet_ptr{&wallet, [](CWallet*) {}};
+    auto wallet_interface{interfaces::MakeWallet(context, wallet_ptr)};
+    auto backup{wallet_interface->createEncryptedDescriptorBackup()};
+    BOOST_REQUIRE_MESSAGE(backup, util::ErrorString(backup).original);
+
+    auto metadata{CWallet::GetEncryptedBackupMetadata(*backup)};
+    BOOST_REQUIRE_MESSAGE(metadata, util::ErrorString(metadata).original);
+    BOOST_CHECK_EQUAL(static_cast<int>(metadata->version), static_cast<int>(ENCRYPTED_BACKUP_VERSION));
+    BOOST_CHECK(metadata->recipient_count > 0);
+    BOOST_CHECK_EQUAL(metadata->encryption, "ChaCha20-Poly1305");
+    BOOST_CHECK(metadata->derivation_paths.empty());
+
+    auto wallet_backup{interfaces::MakeWalletBackup()};
+    auto interface_metadata{wallet_backup->getEncryptedDescriptorBackupMetadata(*backup)};
+    BOOST_REQUIRE_MESSAGE(interface_metadata, util::ErrorString(interface_metadata).original);
+    BOOST_CHECK_EQUAL(interface_metadata->version, static_cast<int>(ENCRYPTED_BACKUP_VERSION));
+    BOOST_CHECK(interface_metadata->recipient_count > 0);
+    BOOST_CHECK_EQUAL(interface_metadata->encryption, "ChaCha20-Poly1305");
+    BOOST_CHECK(interface_metadata->derivation_paths.empty());
 }
 
 BOOST_AUTO_TEST_CASE(wrong_key_decryption_test)

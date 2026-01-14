@@ -80,6 +80,17 @@ static std::optional<std::string> GetReceiveChangeMultipathDescriptor(const std:
     return descriptor_without_checksum;
 }
 
+static std::string EncryptionAlgorithmString(EncryptionAlgorithm algorithm)
+{
+    switch (algorithm) {
+    case EncryptionAlgorithm::CHACHA20_POLY1305:
+        return "ChaCha20-Poly1305";
+    case EncryptionAlgorithm::RESERVED:
+        break;
+    }
+    return "unknown";
+}
+
 util::Result<std::vector<XOnlyPubKey>> ExtractKeysFromDescriptor(const std::string& descriptor)
 {
     FlatSigningProvider provider;
@@ -823,6 +834,21 @@ util::Result<std::vector<uint8_t>> CWallet::DecryptEncryptedBackupBase64WithExtP
     }
 
     return plaintexts->front();
+}
+
+util::Result<EncryptedBackupMetadata> CWallet::GetEncryptedBackupMetadata(const std::string& base64_str)
+{
+    auto backup_result{DecodeEncryptedBackupBase64(base64_str)};
+    if (!backup_result) {
+        return util::Error{Untranslated(strprintf("Failed to decode backup: %s", util::ErrorString(backup_result).original))};
+    }
+
+    return EncryptedBackupMetadata{
+        .version = backup_result->version,
+        .recipient_count = backup_result->individual_secrets.size(),
+        .encryption = EncryptionAlgorithmString(backup_result->encryption),
+        .derivation_paths = backup_result->derivation_paths,
+    };
 }
 
 } // namespace wallet

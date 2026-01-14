@@ -99,6 +99,13 @@ struct EncryptedBackup {
     std::vector<uint8_t> ciphertext;  // Includes content metadata, plaintext, and authentication tag
 };
 
+struct EncryptedBackupMetadata {
+    uint8_t version{ENCRYPTED_BACKUP_VERSION};
+    size_t recipient_count{0};
+    std::string encryption;
+    std::vector<DerivationPath> derivation_paths;
+};
+
 /**
  * Extract and normalize all eligible extended public keys from a descriptor string.
  *
