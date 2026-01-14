@@ -11,6 +11,7 @@ add_library(bitcoin_wallet STATIC EXCLUDE_FROM_ALL
   db.cpp
   descriptor_info.cpp
   dump.cpp
+  encrypted_backup.cpp
   external_signer_scriptpubkeyman.cpp
   feebumper.cpp
   fees.cpp
