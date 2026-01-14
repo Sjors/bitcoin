@@ -11,6 +11,7 @@ target_sources(test_bitcoin
     db_tests.cpp
     coinselector_tests.cpp
     coinselection_tests.cpp
+    encrypted_backup_tests.cpp
     feebumper_tests.cpp
     group_outputs_tests.cpp
     init_tests.cpp
