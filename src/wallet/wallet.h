@@ -895,6 +895,7 @@ public:
     [[nodiscard]] bool BackupWallet(const std::string& strDest) const;
     util::Result<std::string> CreateEncryptedDescriptorBackup() const;
     static util::Result<std::vector<uint8_t>> DecryptEncryptedBackupBase64WithExtPubKey(const std::string& base64_str, const std::string& pubkey_str);
+    static util::Result<EncryptedBackupMetadata> GetEncryptedBackupMetadata(const std::string& base64_str);
 
     /* Returns true if HD is enabled */
     bool IsHDEnabled() const;

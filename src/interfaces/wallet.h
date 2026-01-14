@@ -18,6 +18,7 @@
 #include <util/result.h>
 #include <util/ui_change_type.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -307,6 +308,17 @@ public:
     virtual wallet::CWallet* wallet() { return nullptr; }
 };
 
+//! Metadata for an encrypted descriptor backup.
+struct EncryptedDescriptorBackupMetadata
+{
+    int version{0};
+    //! Number of individual secrets in the backup. May include decoys, so
+    //! this is an upper bound on the number of recipients, not their count.
+    size_t individual_secret_count{0};
+    std::string encryption;
+    std::vector<std::string> derivation_paths;
+};
+
 //! Interface for encrypted wallet backup utility operations.
 class WalletBackup
 {
@@ -315,6 +327,9 @@ public:
 
     //! Decrypt an encrypted descriptor backup with an extended public key.
     virtual util::Result<std::vector<uint8_t>> decryptEncryptedDescriptorBackup(const std::string& base64_str, const std::string& pubkey_str) = 0;
+
+    //! Get metadata from an encrypted descriptor backup.
+    virtual util::Result<EncryptedDescriptorBackupMetadata> getEncryptedDescriptorBackupMetadata(const std::string& base64_str) = 0;
 };
 
 //! Wallet chain client that in addition to having chain client methods for
