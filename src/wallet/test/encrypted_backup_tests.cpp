@@ -4,10 +4,12 @@
 
 #include <wallet/encryptedbackup.h>
 
+#include <test/data/bip_encrypted_backup_encryption_secret.json.h>
 #include <test/data/bip_encrypted_backup_keys_types.json.h>
 
 #include <base58.h>
 #include <key_io.h>
+#include <random.h>
 #include <test/util/json.h>
 #include <test/util/setup_common.h>
 #include <util/strencodings.h>
@@ -104,6 +106,81 @@ BOOST_AUTO_TEST_CASE(key_normalization_test)
         BOOST_CHECK_MESSAGE(result == expected,
             description << ": expected " << expected_hex << " got " << HexStr(result));
     }
+}
+
+BOOST_AUTO_TEST_CASE(secret_derivation_test)
+{
+    // Test secret derivation using BIP test vectors
+    UniValue vectors = read_json(json_tests::bip_encrypted_backup_encryption_secret);
+
+    for (size_t i = 0; i < vectors.size(); ++i) {
+        const UniValue& vec = vectors[i];
+        std::string description = vec["description"].get_str();
+        const UniValue& keys_arr = vec["keys"];
+
+        BOOST_TEST_MESSAGE("Testing: " << description);
+
+        // Parse keys
+        std::vector<uint256> keys;
+        for (size_t j = 0; j < keys_arr.size(); ++j) {
+            auto key_bytes = ParseHex(keys_arr[j].get_str());
+            BOOST_REQUIRE_EQUAL(key_bytes.size(), 32u);
+            uint256 key;
+            std::memcpy(key.data(), key_bytes.data(), 32);
+            keys.push_back(key);
+        }
+
+        // Compute secrets
+        std::vector<uint256> sorted_keys = keys;
+        std::sort(sorted_keys.begin(), sorted_keys.end());
+        // Remove duplicates
+        sorted_keys.erase(std::unique(sorted_keys.begin(), sorted_keys.end()), sorted_keys.end());
+
+        uint256 decryption_secret = ComputeDecryptionSecret(sorted_keys);
+        BOOST_CHECK(!decryption_secret.IsNull());
+
+        auto individual_secrets = ComputeAllIndividualSecrets(decryption_secret, sorted_keys);
+        BOOST_CHECK_EQUAL(individual_secrets.size(), sorted_keys.size());
+
+        // TODO: When BIP test vectors are updated with actual expected values,
+        // compare decryption_secret and individual_secrets against them.
+        // Currently the BIP has "TBD" placeholders.
+        std::string expected_secret = vec["decryption_secret"].get_str();
+        if (expected_secret != "TBD") {
+            auto expected_bytes = ParseHex(expected_secret);
+            BOOST_REQUIRE_EQUAL(expected_bytes.size(), 32u);
+            uint256 expected;
+            std::memcpy(expected.data(), expected_bytes.data(), 32);
+            BOOST_CHECK_MESSAGE(decryption_secret == expected,
+                description << ": decryption_secret mismatch");
+        }
+
+        // Verify XOR property: for each key, ci XOR si = s
+        for (size_t j = 0; j < sorted_keys.size(); ++j) {
+            uint256 si = ComputeIndividualSecret(sorted_keys[j]);
+            uint256 reconstructed;
+            for (size_t k = 0; k < 32; ++k) {
+                reconstructed.data()[k] = individual_secrets[j].data()[k] ^ si.data()[k];
+            }
+            BOOST_CHECK_MESSAGE(reconstructed == decryption_secret,
+                description << ": XOR reconstruction failed for key " << j);
+        }
+    }
+}
+
+BOOST_AUTO_TEST_CASE(nums_point_test)
+{
+    // Verify NUMS point detection
+    auto nums_bytes = ParseHex("50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0");
+    uint256 nums_key;
+    std::memcpy(nums_key.data(), nums_bytes.data(), 32);
+
+    BOOST_CHECK(IsNUMSPoint(nums_key));
+
+    // Random key should not be NUMS
+    uint256 random_key;
+    GetStrongRandBytes(random_key);
+    BOOST_CHECK(!IsNUMSPoint(random_key));
 }
 
 BOOST_AUTO_TEST_SUITE_END()
