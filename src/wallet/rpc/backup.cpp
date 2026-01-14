@@ -21,6 +21,7 @@
 #include <util/fs.h>
 #include <util/time.h>
 #include <util/translation.h>
+#include <wallet/descriptor_info.h>
 #include <wallet/imports.h>
 #include <wallet/rpc/util.h>
 #include <wallet/wallet.h>
@@ -356,16 +357,7 @@ RPCMethod listdescriptors()
 
     const auto active_spk_mans = wallet->GetActiveScriptPubKeyMans();
 
-    struct WalletDescInfo {
-        std::string descriptor;
-        uint64_t creation_time;
-        bool active;
-        std::optional<bool> internal;
-        std::optional<std::pair<int64_t,int64_t>> range;
-        int64_t next_index;
-    };
-
-    std::vector<WalletDescInfo> wallet_descriptors;
+    std::vector<WalletDescriptorInfo> wallet_descriptors;
     for (const auto& spk_man : wallet->GetAllScriptPubKeyMans()) {
         const auto desc_spk_man = dynamic_cast<DescriptorScriptPubKeyMan*>(spk_man);
         if (!desc_spk_man) {
@@ -391,23 +383,8 @@ RPCMethod listdescriptors()
     });
 
     UniValue descriptors(UniValue::VARR);
-    for (const WalletDescInfo& info : wallet_descriptors) {
-        UniValue spk(UniValue::VOBJ);
-        spk.pushKV("desc", info.descriptor);
-        spk.pushKV("timestamp", info.creation_time);
-        spk.pushKV("active", info.active);
-        if (info.internal.has_value()) {
-            spk.pushKV("internal", info.internal.value());
-        }
-        if (info.range.has_value()) {
-            UniValue range(UniValue::VARR);
-            range.push_back(info.range->first);
-            range.push_back(info.range->second - 1);
-            spk.pushKV("range", std::move(range));
-            spk.pushKV("next", info.next_index);
-            spk.pushKV("next_index", info.next_index);
-        }
-        descriptors.push_back(std::move(spk));
+    for (const WalletDescriptorInfo& info : wallet_descriptors) {
+        descriptors.push_back(DescriptorInfoToUniValue(info));
     }
 
     UniValue response(UniValue::VOBJ);
