@@ -34,6 +34,43 @@ public:
     /** 96-bit nonce type. */
     using Nonce96 = ChaCha20::Nonce96;
 
+    /** Size of the nonce in bytes. */
+    static constexpr unsigned NONCE_SIZE = 12;
+
+    /** Convert a 12-byte array to a Nonce96.
+     *
+     * RFC8439 defines the nonce as 96 opaque bits. This helper converts
+     * a byte array (big-endian) to the internal {uint32_t, uint64_t} representation.
+     */
+    static Nonce96 NonceFromBytes(std::span<const std::byte, NONCE_SIZE> nonce_bytes) noexcept
+    {
+        return {
+            (uint32_t(uint8_t(nonce_bytes[0])) << 24) | (uint32_t(uint8_t(nonce_bytes[1])) << 16) |
+            (uint32_t(uint8_t(nonce_bytes[2])) << 8) | uint32_t(uint8_t(nonce_bytes[3])),
+            (uint64_t(uint8_t(nonce_bytes[4])) << 56) | (uint64_t(uint8_t(nonce_bytes[5])) << 48) |
+            (uint64_t(uint8_t(nonce_bytes[6])) << 40) | (uint64_t(uint8_t(nonce_bytes[7])) << 32) |
+            (uint64_t(uint8_t(nonce_bytes[8])) << 24) | (uint64_t(uint8_t(nonce_bytes[9])) << 16) |
+            (uint64_t(uint8_t(nonce_bytes[10])) << 8) | uint64_t(uint8_t(nonce_bytes[11]))
+        };
+    }
+
+    /** Convert a Nonce96 back to a 12-byte array (big-endian). */
+    static void NonceToBytes(Nonce96 nonce, std::span<std::byte, NONCE_SIZE> nonce_bytes) noexcept
+    {
+        nonce_bytes[0] = std::byte((nonce.first >> 24) & 0xFF);
+        nonce_bytes[1] = std::byte((nonce.first >> 16) & 0xFF);
+        nonce_bytes[2] = std::byte((nonce.first >> 8) & 0xFF);
+        nonce_bytes[3] = std::byte(nonce.first & 0xFF);
+        nonce_bytes[4] = std::byte((nonce.second >> 56) & 0xFF);
+        nonce_bytes[5] = std::byte((nonce.second >> 48) & 0xFF);
+        nonce_bytes[6] = std::byte((nonce.second >> 40) & 0xFF);
+        nonce_bytes[7] = std::byte((nonce.second >> 32) & 0xFF);
+        nonce_bytes[8] = std::byte((nonce.second >> 24) & 0xFF);
+        nonce_bytes[9] = std::byte((nonce.second >> 16) & 0xFF);
+        nonce_bytes[10] = std::byte((nonce.second >> 8) & 0xFF);
+        nonce_bytes[11] = std::byte(nonce.second & 0xFF);
+    }
+
     /** Encrypt a message with a specified 96-bit nonce and aad.
      *
      * Requires cipher.size() = plain.size() + EXPANSION.

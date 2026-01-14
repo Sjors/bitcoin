@@ -22,6 +22,7 @@
 #include <util/strencodings.h>
 
 #include <algorithm>
+#include <ranges>
 #include <vector>
 
 #include <boost/test/unit_test.hpp>
@@ -1048,6 +1049,34 @@ BOOST_AUTO_TEST_CASE(chacha20poly1305_testvectors)
                            "30a6757ff8439b975363f166a0fa0e36722ab35936abd704297948f45083f4d4"
                            "99433137ce931f7fca28a0acd3bc30f57b550acbc21cbd45bbef0739d9caf30c"
                            "14b94829deb27f0b1923a2af704ae5d6");
+}
+
+BOOST_AUTO_TEST_CASE(chacha20poly1305_nonce_conversion)
+{
+    // Test NonceFromBytes/NonceToBytes roundtrip
+    auto key = ParseHex<std::byte>("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f");
+    auto nonce_bytes = ParseHex<std::byte>("000000000001020304050607");
+
+    // Convert bytes to Nonce96
+    auto nonce = AEADChaCha20Poly1305::NonceFromBytes(std::span<const std::byte, 12>{nonce_bytes.data(), 12});
+    // Expected: first 4 bytes = 0x00000000, next 8 bytes = 0x0001020304050607
+    BOOST_CHECK_EQUAL(nonce.first, 0x00000000U);
+    BOOST_CHECK_EQUAL(nonce.second, 0x0001020304050607ULL);
+
+    // Convert back to bytes and check roundtrip
+    std::array<std::byte, 12> roundtrip_bytes;
+    AEADChaCha20Poly1305::NonceToBytes(nonce, roundtrip_bytes);
+    BOOST_CHECK(std::ranges::equal(nonce_bytes, roundtrip_bytes));
+
+    // Test with different values to ensure byte ordering is correct
+    auto nonce_bytes2 = ParseHex<std::byte>("aabbccdd11223344556677ff");
+    auto nonce2 = AEADChaCha20Poly1305::NonceFromBytes(std::span<const std::byte, 12>{nonce_bytes2.data(), 12});
+    BOOST_CHECK_EQUAL(nonce2.first, 0xaabbccddU);
+    BOOST_CHECK_EQUAL(nonce2.second, 0x11223344556677ffULL);
+
+    std::array<std::byte, 12> roundtrip_bytes2;
+    AEADChaCha20Poly1305::NonceToBytes(nonce2, roundtrip_bytes2);
+    BOOST_CHECK(std::ranges::equal(nonce_bytes2, roundtrip_bytes2));
 }
 
 BOOST_AUTO_TEST_CASE(hkdf_hmac_sha256_l32_tests)
