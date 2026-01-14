@@ -138,6 +138,7 @@ include(TargetDataSources)
 target_json_data_sources(test_bitcoin
   data/base58_encode_decode.json
   data/bip341_wallet_vectors.json
+  data/bip_encrypted_backup_content_type.json
   data/bip_encrypted_backup_derivation_path.json
   data/bip_encrypted_backup_encryption_secret.json
   data/bip_encrypted_backup_individual_secrets.json
