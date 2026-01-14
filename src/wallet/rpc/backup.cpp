@@ -21,6 +21,7 @@
 #include <util/fs.h>
 #include <util/time.h>
 #include <util/translation.h>
+#include <wallet/descriptor_info.h>
 #include <wallet/export.h>
 #include <wallet/imports.h>
 #include <wallet/rpc/util.h>
@@ -365,23 +366,8 @@ RPCMethod listdescriptors()
     });
 
     UniValue descriptors(UniValue::VARR);
-    for (const WalletDescInfo& info : wallet_descriptors) {
-        UniValue spk(UniValue::VOBJ);
-        spk.pushKV("desc", info.descriptor);
-        spk.pushKV("timestamp", info.creation_time);
-        spk.pushKV("active", info.active);
-        if (info.internal.has_value()) {
-            spk.pushKV("internal", info.internal.value());
-        }
-        if (info.range.has_value()) {
-            UniValue range(UniValue::VARR);
-            range.push_back(info.range->first);
-            range.push_back(info.range->second - 1);
-            spk.pushKV("range", std::move(range));
-            spk.pushKV("next", info.next_index);
-            spk.pushKV("next_index", info.next_index);
-        }
-        descriptors.push_back(std::move(spk));
+    for (const WalletDescriptorInfo& info : wallet_descriptors) {
+        descriptors.push_back(DescriptorInfoToUniValue(info));
     }
 
     UniValue response(UniValue::VOBJ);
