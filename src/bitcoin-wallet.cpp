@@ -39,11 +39,16 @@ static void SetupWalletToolArgs(ArgsManager& argsman)
     argsman.AddArg("-dumpfile=<file name>", "When used with 'dump', writes out the records to this file. When used with 'createfromdump', loads the records into a new wallet.", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::OPTIONS);
     argsman.AddArg("-debug=<category>", "Output debugging information (default: 0).", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-printtoconsole", "Send trace/debug info to console (default: 1 when no -debug is true, 0 otherwise).", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
+    argsman.AddArg("-pubkey=<key>", "Extended public key (xpub/tpub) for decrypting a backup", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::OPTIONS);
+    argsman.AddArg("-xpub=<key>", "Extended public key (xpub/tpub) whose derivation path to include in backup header", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::OPTIONS);
 
     argsman.AddCommand("info", "Get wallet info");
     argsman.AddCommand("create", "Create a new descriptor wallet file");
     argsman.AddCommand("dump", "Print out all of the wallet key-value records");
     argsman.AddCommand("createfromdump", "Create new wallet file from dumped records");
+    argsman.AddCommand("encryptbackup", "Create an encrypted backup of wallet descriptors (outputs base64)");
+    argsman.AddCommand("decryptbackup", "Decrypt an encrypted backup (reads base64 from stdin, requires -pubkey)");
+    argsman.AddCommand("inspectbackup", "Show unencrypted metadata from a backup (reads base64 from stdin)");
 }
 
 static std::optional<int> WalletAppInit(ArgsManager& args, int argc, char* argv[])

@@ -56,6 +56,27 @@ void PushParentDescriptors(const CWallet& wallet, const CScript& script_pubkey, 
 
 void HandleWalletError(const std::shared_ptr<CWallet> wallet, DatabaseStatus& status, bilingual_str& error);
 void AppendLastProcessedBlock(UniValue& entry, const CWallet& wallet) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet);
+
+/**
+ * Information about a wallet descriptor, used for serialization to JSON.
+ * This struct captures all the metadata needed for listdescriptors output
+ * and importdescriptors input.
+ */
+struct WalletDescriptorInfo {
+    std::string descriptor;
+    uint64_t creation_time;
+    bool active;
+    std::optional<bool> internal;
+    std::optional<std::pair<int64_t, int64_t>> range;
+    int64_t next_index;
+};
+
+/**
+ * Convert a WalletDescriptorInfo to a UniValue object.
+ * The output format is compatible with both listdescriptors output and
+ * importdescriptors input.
+ */
+UniValue DescriptorInfoToUniValue(const WalletDescriptorInfo& info);
 } //  namespace wallet
 
 #endif // BITCOIN_WALLET_RPC_UTIL_H
