@@ -36,7 +36,9 @@
 #include <psbt.h>
 #include <pubkey.h>
 #include <random.h>
+#include <regex>
 #include <script/descriptor.h>
+#include <script/parsing.h>
 #include <script/interpreter.h>
 #include <script/script.h>
 #include <script/sign.h>
@@ -396,13 +398,6 @@ std::shared_ptr<CWallet> CreateWallet(WalletContext& context, const std::string&
     // Born encrypted wallets need to be created blank first.
     if (!passphrase.empty()) {
         wallet_creation_flags |= WALLET_FLAG_BLANK_WALLET;
-    }
-
-    // Private keys must be disabled for an external signer wallet
-    if ((wallet_creation_flags & WALLET_FLAG_EXTERNAL_SIGNER) && !(wallet_creation_flags & WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
-        error = Untranslated("Private keys must be disabled when using an external signer");
-        status = DatabaseStatus::FAILED_CREATE;
-        return nullptr;
     }
 
     // Do not allow a passphrase when private keys are disabled
@@ -1793,6 +1788,11 @@ uint64_t CWallet::GetWalletFlags() const
     return m_wallet_flags;
 }
 
+void CWallet::LoadHmacBIP388(const std::string& policy_name, const std::string& fingerprint, const std::string& hmac)
+{
+    m_bip388.emplace_back(BIP388{policy_name, fingerprint, hmac});
+}
+
 void CWallet::MaybeUpdateBirthTime(int64_t time)
 {
     int64_t birthtime = m_birth_time.load();
@@ -2182,7 +2182,7 @@ bool CWallet::SignTransaction(CMutableTransaction& tx, const std::map<COutPoint,
     return false;
 }
 
-std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& complete, std::optional<int> sighash_type, bool sign, bool bip32derivs, size_t * n_signed, bool finalize) const
+std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, common::PSBTFillOptions options, bool& complete, size_t* n_signed) const
 {
     if (n_signed) {
         *n_signed = 0;
@@ -2215,7 +2215,7 @@ std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bo
     // Fill in information from ScriptPubKeyMans
     for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
         int n_signed_this_spkm = 0;
-        const auto error{spk_man->FillPSBT(psbtx, txdata, sighash_type, sign, bip32derivs, &n_signed_this_spkm, finalize)};
+        const auto error{spk_man->FillPSBT(psbtx, txdata, options, &n_signed_this_spkm)};
         if (error) {
             return error;
         }
@@ -2675,7 +2675,7 @@ util::Result<void> CWallet::DisplayAddress(const CTxDestination& dest)
 {
     CScript scriptPubKey = GetScriptForDestination(dest);
     for (const auto& spk_man : GetScriptPubKeyMans(scriptPubKey)) {
-        auto signer_spk_man = dynamic_cast<ExternalSignerScriptPubKeyMan *>(spk_man);
+        auto signer_spk_man = dynamic_cast<ExternalSignerScriptPubKeyMan*>(spk_man);
         if (signer_spk_man == nullptr) {
             continue;
         }
@@ -2684,6 +2684,161 @@ util::Result<void> CWallet::DisplayAddress(const CTxDestination& dest)
         return signer_spk_man->DisplayAddress(dest, *signer);
     }
     return util::Error{_("There is no ScriptPubKeyManager for this address")};
+}
+
+// TODO:
+// - apply furth BIP388 restrictions
+// - avoid string parsing, add properties to Descriptor instead
+bool CWallet::IsCandidateForBIP388Policy(DescriptorScriptPubKeyMan& spkm)
+{
+    std::string desc;
+    if (!Assume(spkm.GetDescriptorString(desc, /*priv=*/false))) return false;
+
+    std::span<const char> sp{desc};
+
+    if (!(script::Const("tr(", sp, /*skip=*/true) || script::Const("wsh(", sp, /*skip=*/true))) return false;
+    // Must be MuSig2, have a leaf script or segwit multisig
+    if (desc.find(',') == std::string::npos) return false;
+
+    return true;
+}
+
+util::Result<std::pair<std::string, std::vector<std::string>>> CWallet::DerivePolicy(const std::optional<std::pair<DescriptorScriptPubKeyMan&, DescriptorScriptPubKeyMan&>>& spk_pair)
+{
+    std::string receive_descriptor;
+    std::string change_descriptor;
+
+    DescriptorScriptPubKeyMan* receive{nullptr};
+    DescriptorScriptPubKeyMan* change{nullptr};
+
+    if (spk_pair) {
+        if (!IsCandidateForBIP388Policy(spk_pair->first) || !IsCandidateForBIP388Policy(spk_pair->second)) {
+            return util::Error{_("Provided descriptors are not compatible with BIP388")};
+        }
+        receive = &spk_pair->first;
+        change = &spk_pair->second;
+    } else {
+        for (bool internal : {false, true}) {
+            // TODO: support P2SH.
+            for (const OutputType type : {OutputType::BECH32M, OutputType::BECH32}) {
+                // Only look for a single candidate
+                if (!internal && !receive_descriptor.empty()) continue;
+                if (internal && !change_descriptor.empty()) continue;
+
+                auto spk_man = GetScriptPubKeyMan(type, internal);
+                if (!Assume(spk_man)) continue;
+                auto desc_spk_man = dynamic_cast<DescriptorScriptPubKeyMan*>(spk_man);
+                if (!Assume(desc_spk_man)) continue;
+
+                if (!IsCandidateForBIP388Policy(*desc_spk_man)) continue;
+
+                if (internal) {
+                    change = desc_spk_man;
+                } else {
+                    receive = desc_spk_man;
+                }
+            }
+        }
+    }
+
+    if (!receive || !change) {
+        return util::Error{_("No suitable descriptors found or provided for BIP388 policy")};
+    }
+
+    bool res{receive->GetDescriptorString(receive_descriptor, /*priv=*/false)};
+    res &= change->GetDescriptorString(change_descriptor, /*priv=*/false);
+    if (!Assume(res)) {
+        return util::Error{_("Failed to get descriptor strings")};
+    }
+
+    // TODO: render (candidate) policy directly from Descriptor class and extract
+    //       keys there.
+
+    // Lookup keys in the receive descriptor.
+    std::vector<std::string> keys_info;
+    const std::regex key_regex{R"(((?:\[[a-f\dh'/]{8,}\])?[\w]{10,})[,\)\/])"};
+    auto search_begin = std::sregex_token_iterator(receive_descriptor.begin(), receive_descriptor.end(), key_regex, 1);
+    auto search_end = std::sregex_token_iterator();
+
+    for (std::regex_token_iterator i = search_begin; i != search_end; ++i) {
+        std::string key{i->str()};
+        if (std::find(keys_info.begin(), keys_info.end(), key) != keys_info.end()) continue;
+        keys_info.push_back(key);
+    }
+
+    // Replace keys in descriptor swith @1, etc
+    // - convert /0/* in the receive descriptor to /**
+    // - convert /1/* in the change descriptor to /**
+    // - TODO: support arbitrary /<NUM;NUM>/*
+    // - also drop checksum
+    std::string descriptor_template{receive_descriptor.substr(0, receive_descriptor.size() - 9)};
+    std::string descriptor_template_check{change_descriptor.substr(0, change_descriptor.size() - 9)};
+    uint32_t key_index = 0;
+    for (auto& key_info : keys_info) {
+        util::ReplaceAll(descriptor_template, key_info, strprintf("@%d", key_index), /*regex=*/false);
+        util::ReplaceAll(descriptor_template_check, key_info, strprintf("@%d", key_index), /*regex=*/false);
+        key_index++;
+    }
+
+    // Replace /0/* with /@0/**
+    util::ReplaceAll(descriptor_template, "/0/*", "/**", /*regex=*/false);
+
+    // Replace /1/* with /@0/**
+    util::ReplaceAll(descriptor_template_check, "/1/*", "/**", /*regex=*/false);
+
+    // The receive and change descriptor should now be identical
+    if (descriptor_template != descriptor_template_check) {
+        return util::Error{Untranslated(strprintf(
+            "Receive and change descriptors incompatible for BIP388 policy registration:\n%s\n%s\nKey info:\n%s",
+            descriptor_template.c_str(),
+            descriptor_template_check.c_str(),
+            util::Join(keys_info, "\n")
+        ))};
+    }
+
+    // Replace h with ' in key info:
+    for (std::string& key : keys_info) {
+        util::ReplaceAll(key, "h/", "'/", /*regex=*/false);
+        util::ReplaceAll(key, "h]", "']", /*regex=*/false);
+    }
+
+    return std::pair<std::string, std::vector<std::string>>{descriptor_template, keys_info};
+}
+
+util::Result<std::string> CWallet::RegisterPolicy(const std::optional<std::string>& name)
+{
+    const std::string policy_name{name.has_value() ? *name : m_name};
+
+    // A wallet with multiple descriptors could have multiple BIP388 policies,
+    // but this is currently unsupported. DerivePolicy just picks one.
+    const auto res{DerivePolicy(/*spk_pair=*/std::nullopt)};
+    if (!res) return util::Error{util::ErrorString(res)};
+    const std::string& descriptor_template{res->first};
+    const std::vector<std::string>& keys_info{res->second};
+
+    for (const auto& spk_man : GetActiveScriptPubKeyMans()) {
+        auto signer_spk_man = dynamic_cast<ExternalSignerScriptPubKeyMan *>(spk_man);
+        if (signer_spk_man == nullptr) {
+            continue;
+        }
+        auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
+        if (!signer) return util::Error{util::ErrorString(signer)};
+
+        util::Result<std::string> res{signer_spk_man->RegisterPolicy(*signer, policy_name, descriptor_template, keys_info)};
+        if (!res) return util::Error{util::ErrorString(res)};
+
+        if (res) {
+            // Store hmac in wallet
+            WalletBatch batch(GetDatabase());
+            if (!batch.WriteHmacBip388(policy_name, signer->m_fingerprint, *res)) {
+                return util::Error{_("Failed to store BIP388 hmac in wallet database.")};
+            }
+            LoadHmacBIP388(policy_name, signer->m_fingerprint, *res);
+        }
+
+        return res;
+    }
+    return util::Error{_("Could not find ExternalSignerScriptPubKeyMananager")};
 }
 
 void CWallet::LoadLockedCoin(const COutPoint& coin, bool persistent)
@@ -2982,7 +3137,13 @@ std::shared_ptr<CWallet> CWallet::Create(WalletContext& context, const std::stri
         // Only descriptor wallets can be created
         assert(walletInstance->IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
 
-        if ((wallet_creation_flags & WALLET_FLAG_EXTERNAL_SIGNER) || !(wallet_creation_flags & (WALLET_FLAG_DISABLE_PRIVATE_KEYS | WALLET_FLAG_BLANK_WALLET))) {
+        // Don't generate or import keys for a blank wallet
+        if (!(wallet_creation_flags & WALLET_FLAG_BLANK_WALLET) && (
+            // Fetch keys from an external signer; or
+             (wallet_creation_flags & WALLET_FLAG_EXTERNAL_SIGNER) ||
+            // Generate them, unless private keys are disabled
+            !(wallet_creation_flags & (WALLET_FLAG_DISABLE_PRIVATE_KEYS)))
+        ) {
             walletInstance->SetupDescriptorScriptPubKeyMans();
         }
 
@@ -3556,6 +3717,20 @@ void CWallet::ConnectScriptPubKeyManNotifiers()
     }
 }
 
+std::set<DescriptorScriptPubKeyMan*> CWallet::GetScriptlessSPKMs() const
+{
+    std::set<DescriptorScriptPubKeyMan*> spk_mans;
+    for (const auto& spkm : GetAllScriptPubKeyMans()) {
+        DescriptorScriptPubKeyMan* desc_spkm = dynamic_cast<DescriptorScriptPubKeyMan*>(spkm);
+        if (!desc_spkm) continue;
+        LOCK(desc_spkm->cs_desc_man);
+        if (!desc_spkm->GetWalletDescriptor().descriptor->HasScripts()) {
+            spk_mans.insert(desc_spkm);
+        }
+    }
+    return spk_mans;
+}
+
 DescriptorScriptPubKeyMan& CWallet::LoadDescriptorScriptPubKeyMan(uint256 id, WalletDescriptor& desc)
 {
     DescriptorScriptPubKeyMan* spk_manager;
@@ -3783,8 +3958,8 @@ util::Result<std::reference_wrapper<DescriptorScriptPubKeyMan>> CWallet::AddWall
     }
 
     // Apply the label if necessary
-    // Note: we disable labels for ranged descriptors
-    if (!desc.descriptor->IsRange()) {
+    // Note: we disable labels for descriptors that are ranged or that don't produce output scripts (i.e. unused())
+    if (!desc.descriptor->IsRange() && desc.descriptor->HasScripts()) {
         auto script_pub_keys = spk_man->GetScriptPubKeys();
         if (script_pub_keys.empty()) {
             return util::Error{_("Could not generate scriptPubKeys (cache is empty)")};

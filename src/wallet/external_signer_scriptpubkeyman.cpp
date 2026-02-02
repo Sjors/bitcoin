@@ -7,6 +7,7 @@
 #include <common/system.h>
 #include <external_signer.h>
 #include <node/types.h>
+#include <util/strencodings.h>
 #include <wallet/external_signer_scriptpubkeyman.h>
 
 #include <iostream>
@@ -79,10 +80,10 @@ util::Result<void> ExternalSignerScriptPubKeyMan::DisplayAddress(const CTxDestin
 }
 
 // If sign is true, transaction must previously have been filled
-std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBT(PartiallySignedTransaction& psbt, const PrecomputedTransactionData& txdata, std::optional<int> sighash_type, bool sign, bool bip32derivs, int* n_signed, bool finalize) const
+std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBT(PartiallySignedTransaction& psbt, const PrecomputedTransactionData& txdata, common::PSBTFillOptions options, int* n_signed) const
 {
-    if (!sign) {
-        return DescriptorScriptPubKeyMan::FillPSBT(psbt, txdata, sighash_type, false, bip32derivs, n_signed, finalize);
+    if (!options.sign) {
+        return DescriptorScriptPubKeyMan::FillPSBT(psbt, txdata, options, n_signed);
     }
 
     // Already complete if every input is now signed
@@ -104,7 +105,26 @@ std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBT(PartiallySigned
         LogWarning("Failed to sign: %s\n", failure_reason);
         return PSBTError::EXTERNAL_SIGNER_FAILED;
     }
-    if (finalize) FinalizePSBT(psbt); // This won't work in a multisig setup
+    if (options.finalize) FinalizePSBT(psbt); // This won't work in a multisig setup
     return {};
 }
+
+util::Result<std::string> ExternalSignerScriptPubKeyMan::RegisterPolicy(const ExternalSigner& signer,
+                                                                        const std::string& name,
+                                                                        const std::string& descriptor_template,
+                                                                        const std::vector<std::string>& keys_info) const
+{
+    const UniValue& result{signer.RegisterPolicy(name, descriptor_template, keys_info)};
+
+    const UniValue& error = result.find_value("error");
+    if (error.isStr()) return util::Error{strprintf(_("Signer returned error: %s"), error.getValStr())};
+
+    const UniValue& ret_hmac = result.find_value("hmac");
+    if (!ret_hmac.isStr()) return util::Error{_("Signer did not return hmac")};
+    const std::string hmac{ret_hmac.getValStr()};
+    if (!IsHex(hmac)) return util::Error{strprintf(_("Signer return invalid hmac: %s"), hmac)};
+
+    return util::Result<std::string>(hmac);
+}
+
 } // namespace wallet

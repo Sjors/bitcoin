@@ -7,6 +7,7 @@
 
 #include <addresstype.h>
 #include <common/signmessage.h>
+#include <common/types.h>
 #include <consensus/amount.h>
 #include <interfaces/chain.h>
 #include <primitives/transaction_identifier.h>
@@ -129,6 +130,9 @@ public:
     //! Display address on external signer
     virtual util::Result<void> displayAddress(const CTxDestination& dest) = 0;
 
+    //! Register BIP388 policy on external signer, store and return hmac
+    virtual util::Result<std::string> registerPolicy(const std::optional<std::string>& name) = 0;
+
     //! Lock coin.
     virtual bool lockCoin(const COutPoint& output, bool write_to_db) = 0;
 
@@ -202,9 +206,7 @@ public:
         int& num_blocks) = 0;
 
     //! Fill PSBT.
-    virtual std::optional<common::PSBTError> fillPSBT(std::optional<int> sighash_type,
-        bool sign,
-        bool bip32derivs,
+    virtual std::optional<common::PSBTError> fillPSBT(common::PSBTFillOptions options,
         size_t* n_signed,
         PartiallySignedTransaction& psbtx,
         bool& complete) = 0;

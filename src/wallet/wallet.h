@@ -159,7 +159,8 @@ static constexpr uint64_t KNOWN_WALLET_FLAGS =
     |   WALLET_FLAG_EXTERNAL_SIGNER;
 
 static constexpr uint64_t MUTABLE_WALLET_FLAGS =
-        WALLET_FLAG_AVOID_REUSE;
+        WALLET_FLAG_AVOID_REUSE
+    |   WALLET_FLAG_EXTERNAL_SIGNER;
 
 static const std::map<WalletFlags, std::string> WALLET_FLAG_TO_STRING{
     {WALLET_FLAG_AVOID_REUSE, "avoid_reuse"},
@@ -304,6 +305,13 @@ struct CRecipient
     bool fSubtractFeeFromAmount;
 };
 
+/** BIP388 registered hmac */
+struct BIP388 {
+    std::string name;
+    std::string fingerprint;
+    std::string hmac;
+};
+
 class WalletRescanReserver; //forward declarations for ScanForWalletTransactions/RescanFromTime
 /**
  * A CWallet maintains a set of transactions and balances, and provides the ability to create new transactions.
@@ -382,6 +390,8 @@ private:
 
     /** WalletFlags set on this wallet. */
     std::atomic<uint64_t> m_wallet_flags{0};
+
+    std::vector<BIP388> m_bip388;
 
     bool SetAddressBookWithDB(WalletBatch& batch, const CTxDestination& address, const std::string& strName, const std::optional<AddressPurpose>& strPurpose);
 
@@ -565,6 +575,28 @@ public:
     /** Display address on an external signer. */
     util::Result<void> DisplayAddress(const CTxDestination& dest) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
+    /** Determine if the SPKM descriptor is compatible with BIP388 */
+    bool IsCandidateForBIP388Policy(DescriptorScriptPubKeyMan& spkm) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
+    /**
+     * Derive a BIP388 policy from a pair of descriptor scriptpubkey manangers.
+     *
+     * Ignores trivial single sig policies: pkh(KEY), wpkh(KEY), sh(wpkh(KEY))
+     * and tr(KEY)
+     *
+     * If no SKPM pair is provided, look for the first suitable pair.
+     *
+     * @param[in] spk_pair The receive and change SKPM to use.
+     *
+     * @return a string containing the BIP388 policy and array of strings
+     *         containing the key information. An error if no suitable
+     *         descriptors were found.
+     */
+    util::Result<std::pair<std::string, std::vector<std::string>>> DerivePolicy(const std::optional<std::pair<DescriptorScriptPubKeyMan&, DescriptorScriptPubKeyMan&>>& spk_pair) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
+    /** Register BIP388 on an external signer. Store and return the resulting hmac. */
+    util::Result<std::string> RegisterPolicy(const std::optional<std::string>& name) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
     bool IsLockedCoin(const COutPoint& output) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     void LoadLockedCoin(const COutPoint& coin, bool persistent) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     bool LockCoin(const COutPoint& output, bool persist) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
@@ -666,26 +698,20 @@ public:
 
     /**
      * Fills out a PSBT with information from the wallet. Fills in UTXOs if we have
-     * them. Tries to sign if sign=true. Sets `complete` if the PSBT is now complete
-     * (i.e. has all required signatures or signature-parts, and is ready to
-     * finalize.) Sets `error` and returns false if something goes wrong.
+     * them. Tries to sign if options.sign=true.
+     * Sets `complete` if the PSBT is now complete (i.e. has all required
+     * signatures or signature-parts, and is ready to finalize.)
      *
      * @param[in]  psbtx PartiallySignedTransaction to fill in
+     * @param[in]  options options for filling or signing
      * @param[out] complete indicates whether the PSBT is now complete
-     * @param[in]  sighash_type the sighash type to use when signing (if PSBT does not specify)
-     * @param[in]  sign whether to sign or not
-     * @param[in]  bip32derivs whether to fill in bip32 derivation information if available
      * @param[out] n_signed the number of inputs signed by this wallet
-     * @param[in] finalize whether to create the final scriptSig or scriptWitness if possible
-     * return error
+     * @returns an error if something goes wrong
      */
     std::optional<common::PSBTError> FillPSBT(PartiallySignedTransaction& psbtx,
+                  common::PSBTFillOptions options,
                   bool& complete,
-                  std::optional<int> sighash_type = std::nullopt,
-                  bool sign = true,
-                  bool bip32derivs = true,
-                  size_t* n_signed = nullptr,
-                  bool finalize = true) const;
+                  size_t* n_signed = nullptr) const;
 
     /**
      * Submit the transaction to the node's mempool and then relay to peers.
@@ -917,6 +943,11 @@ public:
     //! Retrieve all of the wallet's flags
     uint64_t GetWalletFlags() const;
 
+    std::vector<BIP388> GetHmacs() const { return m_bip388; }
+
+    //! Load BIP388 registered hmac
+    void LoadHmacBIP388(const std::string& policy_name, const std::string& fingerprint, const std::string& hmac);
+
     /** Return wallet name for use in logs, will return "default wallet" if the wallet has no name. */
     std::string LogName() const override
     {
@@ -941,6 +972,9 @@ public:
     //! Returns all unique ScriptPubKeyMans in m_internal_spk_managers and m_external_spk_managers
     std::set<ScriptPubKeyMan*> GetActiveScriptPubKeyMans() const;
     bool IsActiveScriptPubKeyMan(const ScriptPubKeyMan& spkm) const;
+
+    //! Returns all unused(key) SPKMs
+    std::set<DescriptorScriptPubKeyMan*> GetScriptlessSPKMs() const;
 
     //! Returns all unique ScriptPubKeyMans
     std::set<ScriptPubKeyMan*> GetAllScriptPubKeyMans() const;

@@ -237,6 +237,11 @@ public:
         LOCK(m_wallet->cs_wallet);
         return m_wallet->DisplayAddress(dest);
     }
+    util::Result<std::string> registerPolicy(const std::optional<std::string>& name) override
+    {
+        LOCK(m_wallet->cs_wallet);
+        return m_wallet->RegisterPolicy(name);
+    }
     bool lockCoin(const COutPoint& output, const bool write_to_db) override
     {
         LOCK(m_wallet->cs_wallet);
@@ -372,14 +377,12 @@ public:
         }
         return {};
     }
-    std::optional<PSBTError> fillPSBT(std::optional<int> sighash_type,
-        bool sign,
-        bool bip32derivs,
+    std::optional<PSBTError> fillPSBT(common::PSBTFillOptions options,
         size_t* n_signed,
         PartiallySignedTransaction& psbtx,
         bool& complete) override
     {
-        return m_wallet->FillPSBT(psbtx, complete, sighash_type, sign, bip32derivs, n_signed);
+        return m_wallet->FillPSBT(psbtx, options, complete, n_signed);
     }
     WalletBalances getBalances() override
     {

@@ -10,6 +10,7 @@ See also rpc_signer.py for tests without wallet context.
 import os
 import sys
 
+from test_framework.descriptors import descsum_create
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal,
@@ -61,27 +62,30 @@ class WalletSignerTest(BitcoinTestFramework):
         self.test_invalid_signer()
         self.restart_node(1, [f"-signer={self.mock_multi_signers_path()}", "-keypool=10"])
         self.test_multiple_signers()
+        self.restart_node(1)
+        self.test_bip388_policy()
 
     def test_valid_signer(self):
         self.log.debug(f"-signer={self.mock_signer_path()}")
 
         # Create new wallets for an external signer.
-        # disable_private_keys and descriptors must be true:
-        assert_raises_rpc_error(-4, "Private keys must be disabled when using an external signer", self.nodes[1].createwallet, wallet_name='not_hww', disable_private_keys=False, external_signer=True)
-        self.nodes[1].createwallet(wallet_name='hww', disable_private_keys=True, external_signer=True)
+        self.nodes[1].createwallet(wallet_name='hww', external_signer=True)
         hww = self.nodes[1].get_wallet_rpc('hww')
         assert_equal(hww.getwalletinfo()["external_signer"], True)
 
-        # Flag can't be set afterwards (could be added later for non-blank descriptor based watch-only wallets)
-        self.nodes[1].createwallet(wallet_name='not_hww', disable_private_keys=True, external_signer=False)
+        # Private keys are disabled by default
+        assert_equal(hww.getwalletinfo()["private_keys_enabled"], False)
+
+        # Flag can be set afterwards
+        self.nodes[1].createwallet(wallet_name='not_hww', external_signer=False)
         not_hww = self.nodes[1].get_wallet_rpc('not_hww')
         assert_equal(not_hww.getwalletinfo()["external_signer"], False)
-        assert_raises_rpc_error(-8, "Wallet flag is immutable: external_signer", not_hww.setwalletflag, "external_signer", True)
-
+        not_hww.setwalletflag("external_signer", True)
+        assert_equal(not_hww.getwalletinfo()["external_signer"], True)
 
         self.set_mock_result(self.nodes[1], '0 {"invalid json"}')
         assert_raises_rpc_error(-1, 'Unable to parse JSON',
-            self.nodes[1].createwallet, wallet_name='hww2', disable_private_keys=True, external_signer=True
+            self.nodes[1].createwallet, wallet_name='hww2', external_signer=True
         )
         self.clear_mock_result(self.nodes[1])
 
@@ -210,7 +214,7 @@ class WalletSignerTest(BitcoinTestFramework):
         self.log.info('Test disconnected external signer')
 
         # First create a wallet with the signer connected
-        self.nodes[1].createwallet(wallet_name='hww_disconnect', disable_private_keys=True, external_signer=True)
+        self.nodes[1].createwallet(wallet_name='hww_disconnect', external_signer=True)
         hww = self.nodes[1].get_wallet_rpc('hww_disconnect')
         assert_equal(hww.getwalletinfo()["external_signer"], True)
 
@@ -231,13 +235,53 @@ class WalletSignerTest(BitcoinTestFramework):
     def test_invalid_signer(self):
         self.log.debug(f"-signer={self.mock_invalid_signer_path()}")
         self.log.info('Test invalid external signer')
-        assert_raises_rpc_error(-1, "Invalid descriptor", self.nodes[1].createwallet, wallet_name='hww_invalid', disable_private_keys=True, external_signer=True)
+        assert_raises_rpc_error(-1, "Invalid descriptor", self.nodes[1].createwallet, wallet_name='hww_invalid', external_signer=True)
 
     def test_multiple_signers(self):
         self.log.debug(f"-signer={self.mock_multi_signers_path()}")
         self.log.info('Test multiple external signers')
 
-        assert_raises_rpc_error(-1, "More than one external signer found", self.nodes[1].createwallet, wallet_name='multi_hww', disable_private_keys=True, external_signer=True)
+        assert_raises_rpc_error(-1, "More than one external signer found", self.nodes[1].createwallet, wallet_name='multi_hww', external_signer=True)
+
+    def test_bip388_policy(self):
+        self.log.debug(f"-signer={self.mock_multi_signers_path()}")
+        self.log.info('Register BIP388 wallet policy')\
+
+        # TODO: set blank=True after https://github.com/bitcoin/bitcoin/pull/33112
+        self.nodes[1].createwallet(wallet_name='hww_policy', disable_private_keys=True, external_signer=True)
+        wallet = self.nodes[1].get_wallet_rpc('hww_policy')
+        self.log.debug(wallet.getwalletinfo())
+
+        # e.g. obtained via hwi getxpub
+        device_key = "[00000001/47h/1h/0h]tpubD6NzVbkrYhZ4YNXVQbNhMK1WqguFsUXceaVJKbmno2aZ3B6QfbMeraaYvnBSGpV3vxLyTTK9DYT1yoEck4XUScMzXoQ2U2oSmE2JyMedq3H"
+        # for this test it doesn't matter that we can't actually sign with it
+        our_key = "[00000001/47h/1h/0h]tpubDAXcJ7s7ZwicqjprRaEWdPoHKrCS215qxGYxpusRLLmJuT69ZSicuGdSfyvyKpvUNYBW1s2U3NSrT6vrCYB9e6nZUEvrqnwXPF8ArTCRXMY"
+
+        res = wallet.importdescriptors([{
+            "desc": descsum_create(f"wsh(multi(2,{device_key}/<0;1>/*,{our_key}/<0;1>/*))"),
+            "active": True,
+            "timestamp": "now"
+        }])
+        assert(res[0]["success"] and res[0]["success"])
+
+        self.log.debug(wallet.listdescriptors())
+
+        res = wallet.registerpolicy()
+        hmac = res["hmac"]
+
+        assert_equal(hmac, "0000000000000000000000000000000000000000000000000000000000000000")
+
+        info = wallet.getwalletinfo()
+        assert_equal(info["bip388"][0]["hmac"], hmac)
+
+        # Make sure it's persisted
+        self.nodes[1].unloadwallet("hww_policy")
+        self.nodes[1].loadwallet("hww_policy")
+        wallet = self.nodes[1].get_wallet_rpc('hww_policy')
+
+        info = wallet.getwalletinfo()
+        assert_equal(info["bip388"][0]["hmac"], hmac)
+
 
 if __name__ == '__main__':
     WalletSignerTest(__file__).main()
