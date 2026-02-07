@@ -964,7 +964,7 @@ public:
 
     std::optional<BlockRef> waitTipChanged(uint256 current_tip, MillisecondsDouble timeout) override
     {
-        return WaitTipChanged(chainman(), notifications(), current_tip, timeout);
+        return WaitTipChanged(chainman(), notifications(), current_tip, timeout, m_interrupt_mining);
     }
 
     std::unique_ptr<BlockTemplate> createNewBlock(const BlockCreateOptions& options, bool cooldown) override
@@ -982,16 +982,21 @@ public:
             // forever if no block was mined in the past day.
             while (chainman().IsInitialBlockDownload()) {
                 maybe_tip = waitTipChanged(maybe_tip->hash, MillisecondsDouble{1000});
-                if (!maybe_tip) return {};
+                if (!maybe_tip || chainman().m_interrupt || WITH_LOCK(notifications().m_tip_block_mutex, return m_interrupt_mining)) return {};
             }
 
             // Also wait during the final catch-up moments after IBD.
-            if (!CooldownIfHeadersAhead(chainman(), notifications(), *maybe_tip)) return {};
+            if (!CooldownIfHeadersAhead(chainman(), notifications(), *maybe_tip, m_interrupt_mining)) return {};
         }
 
         BlockAssembler::Options assemble_options{options};
         ApplyArgsManOptions(*Assert(m_node.args), assemble_options);
         return std::make_unique<BlockTemplateImpl>(assemble_options, BlockAssembler{chainman().ActiveChainstate(), context()->mempool.get(), assemble_options}.CreateNewBlock(), m_node);
+    }
+
+    void interrupt() override
+    {
+        InterruptWait(notifications(), m_interrupt_mining);
     }
 
     bool checkBlock(const CBlock& block, const node::BlockCheckOptions& options, std::string& reason, std::string& debug) override
@@ -1006,6 +1011,8 @@ public:
     NodeContext* context() override { return &m_node; }
     ChainstateManager& chainman() { return *Assert(m_node.chainman); }
     KernelNotifications& notifications() { return *Assert(m_node.notifications); }
+    // Treat as if guarded by notifications().m_tip_block_mutex
+    bool m_interrupt_mining{false};
     NodeContext& m_node;
 };
 } // namespace
