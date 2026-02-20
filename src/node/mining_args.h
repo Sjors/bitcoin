@@ -10,6 +10,7 @@
 #include <util/result.h>
 
 #include <cstddef>
+#include <string>
 
 class ArgsManager;
 
@@ -42,6 +43,15 @@ struct MiningArgs {
  * @param[in,out] mining_args The MiningArgs to modify according to \p args.
  */
 [[nodiscard]] util::Result<void> ReadMiningArgs(const ArgsManager& args, MiningArgs& mining_args);
+
+/** Check that block_max_weight does not exceed consensus limits. */
+[[nodiscard]] util::Result<void> CheckBlockMaxWeight(size_t block_max_weight, const std::string& arg_name = "");
+
+/** Check that block_reserved_weight is within allowed bounds. */
+[[nodiscard]] util::Result<void> CheckBlockReservedWeight(size_t block_reserved_weight, const std::string& arg_name = "");
+
+/** Check that coinbase_output_max_additional_sigops does not exceed consensus limits. */
+[[nodiscard]] util::Result<void> CheckCoinbaseOutputMaxAdditionalSigops(size_t sigops, const std::string& arg_name = "");
 
 } // namespace node
 

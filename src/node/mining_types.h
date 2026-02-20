@@ -12,7 +12,6 @@
 #define BITCOIN_NODE_MINING_TYPES_H
 
 #include <consensus/amount.h>
-#include <consensus/consensus.h>
 #include <policy/policy.h>
 #include <primitives/transaction.h>
 #include <script/script.h>

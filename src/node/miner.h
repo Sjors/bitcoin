@@ -7,7 +7,6 @@
 #define BITCOIN_NODE_MINER_H
 
 #include <consensus/amount.h>
-#include <interfaces/types.h>
 #include <node/mining_args.h>
 #include <node/mining_types.h>
 #include <primitives/block.h>
@@ -31,6 +30,9 @@ namespace Consensus {
 struct Params;
 } // namespace Consensus
 class uint256;
+namespace interfaces {
+struct BlockRef;
+} // namespace interfaces
 
 using interfaces::BlockRef;
 
