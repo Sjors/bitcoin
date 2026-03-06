@@ -22,16 +22,44 @@
 #include <policy/policy.h>
 #include <pow.h>
 #include <primitives/transaction.h>
+#include <script/script.h>
 #include <util/moneystr.h>
 #include <util/signalinterrupt.h>
+#include <util/string.h>
 #include <util/time.h>
 #include <validation.h>
 
 #include <algorithm>
-#include <utility>
 #include <numeric>
+#include <utility>
 
 namespace node {
+
+std::optional<int> GetBIP34Height(const CTransactionRef& coinbase,
+                                  const Consensus::Params& consensus_params)
+{
+    if (!coinbase || coinbase->vin.empty()) return std::nullopt;
+
+    const CScript& script_sig{coinbase->vin.at(0).scriptSig};
+    CScript::const_iterator pc{script_sig.begin()};
+    opcodetype opcode;
+    std::vector<unsigned char> pushed_data;
+    if (!script_sig.GetOp(pc, opcode, pushed_data)) return std::nullopt;
+
+    int height;
+    if (opcode == OP_0) {
+        height = 0;
+    } else if (opcode >= OP_1 && opcode <= OP_16) {
+        height = CScript::DecodeOP_N(opcode);
+    } else try {
+        height = CScriptNum(pushed_data, /*fRequireMinimal=*/true).getint();
+    } catch (const scriptnum_error&) {
+        return std::nullopt;
+    }
+
+    if (height < consensus_params.BIP34Height) return std::nullopt;
+    return height - 1;
+}
 
 int64_t GetMinimumTime(const CBlockIndex* pindexPrev, const int64_t difficulty_adjustment_interval)
 {

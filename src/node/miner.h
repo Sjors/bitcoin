@@ -184,6 +184,10 @@ std::optional<BlockRef> WaitTipChanged(ChainstateManager& chainman, KernelNotifi
  * @returns false if interrupted.
  */
 bool CooldownIfHeadersAhead(ChainstateManager& chainman, KernelNotifications& kernel_notifications, const BlockRef& last_tip, bool& interrupt_mining);
+
+/** Return the previous-block height implied by a BIP34 coinbase commitment, if
+ * one is present and reliably enforced on this chain. */
+std::optional<int> GetBIP34Height(const CTransactionRef& coinbase, const Consensus::Params& consensus_params);
 } // namespace node
 
 #endif // BITCOIN_NODE_MINER_H

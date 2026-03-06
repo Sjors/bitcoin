@@ -7,10 +7,13 @@
 #include <common/system.h>
 #include <consensus/consensus.h>
 #include <consensus/merkle.h>
+#include <consensus/params.h>
 #include <consensus/tx_verify.h>
 #include <interfaces/mining.h>
 #include <node/miner.h>
 #include <policy/policy.h>
+#include <primitives/transaction.h>
+#include <script/script.h>
 #include <test/util/random.h>
 #include <test/util/transaction_utils.h>
 #include <test/util/txmempool.h>
@@ -106,6 +109,29 @@ static std::unique_ptr<CBlockIndex> CreateBlockIndex(int nHeight, CBlockIndex* a
     index->nHeight = nHeight;
     index->pprev = active_chain_tip;
     return index;
+}
+
+BOOST_AUTO_TEST_CASE(get_bip34_height)
+{
+    const auto make_coinbase = [](const CScript& script_sig) {
+        CMutableTransaction tx;
+        tx.vin.resize(1);
+        tx.vin[0].scriptSig = script_sig;
+        return MakeTransactionRef(std::move(tx));
+    };
+
+    Consensus::Params params{};
+    params.BIP34Height = 1;
+
+    BOOST_CHECK_EQUAL(node::GetBIP34Height(make_coinbase(CScript() << OP_1), params), 0);
+    BOOST_CHECK_EQUAL(node::GetBIP34Height(make_coinbase(CScript() << OP_16), params), 15);
+    BOOST_CHECK_EQUAL(node::GetBIP34Height(make_coinbase(CScript() << CScriptNum{17}), params), 16);
+    BOOST_CHECK(!node::GetBIP34Height(make_coinbase(CScript() << OP_0), params).has_value());
+
+    params.BIP34Height = 100;
+    BOOST_CHECK(!node::GetBIP34Height(make_coinbase(CScript() << OP_1), params).has_value());
+    BOOST_CHECK(!node::GetBIP34Height(make_coinbase(CScript() << CScriptNum{99}), params).has_value());
+    BOOST_CHECK_EQUAL(node::GetBIP34Height(make_coinbase(CScript() << CScriptNum{100}), params), 99);
 }
 
 // Test suite for ancestor feerate transaction selection.
