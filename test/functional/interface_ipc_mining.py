@@ -317,6 +317,12 @@ class IPCMiningTest(BitcoinTestFramework):
                     assert_equal(e.description, "remote exception: std::exception: getCoinbaseTx is unavailable for externally generated templates")
                     assert_equal(e.type, "FAILED")
 
+            self.log.debug("unknownTxPos() should report mempool misses")
+            known_tx = self.miniwallet.send_self_transfer(from_node=self.nodes[0])
+            async with destroying((await mining.collectTxs(ctx, [ser_uint256(int(known_tx['wtxid'], 16)), ser_uint256(1)])).result, ctx) as tx_collection:
+                unknown_pos = list((await tx_collection.unknownTxPos(ctx)).result)
+                assert_equal(unknown_pos, [1])
+
         asyncio.run(capnp.run(async_routine()))
 
     def run_ipc_option_override_test(self):

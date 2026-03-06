@@ -114,6 +114,9 @@ class TxCollection
 public:
     virtual ~TxCollection() = default;
 
+    //! Return the zero-based positions of transactions that are still missing.
+    virtual std::vector<uint32_t> unknownTxPos() = 0;
+
     /**
      * Construct a block template using the collected transactions in their
      * requested order.

@@ -956,6 +956,12 @@ public:
           m_node(node)
     {
     }
+
+    std::vector<uint32_t> unknownTxPos() override
+    {
+        return m_collected_txs.UnknownTxPos();
+    }
+
     std::unique_ptr<BlockTemplate> makeTemplate(uint256 prevhash,
                                                 CTransactionRef coinbase,
                                                 std::string& reason,

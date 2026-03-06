@@ -112,11 +112,25 @@ CollectedTxs::CollectedTxs(std::vector<Wtxid> wtxids, NodeContext& node)
     : m_wtxids(std::move(wtxids)),
       m_node(node)
 {
+    CTxMemPool& mempool{*Assert(m_node.mempool)};
+    LOCK(mempool.cs);
     for (const auto& wtxid : m_wtxids) {
-        if (!m_transactions.emplace(wtxid, nullptr).second) {
+        const auto it{mempool.GetIter(wtxid)};
+        CTransactionRef tx{it ? (*it)->GetSharedTx() : nullptr};
+        if (!m_transactions.emplace(wtxid, std::move(tx)).second) {
             throw std::runtime_error(strprintf("duplicate wtxid %s", wtxid.ToString()));
         }
     }
+}
+std::vector<uint32_t> CollectedTxs::UnknownTxPos() const
+{
+    std::vector<uint32_t> result;
+    for (size_t i = 0; i < m_wtxids.size(); ++i) {
+        const auto it{m_transactions.find(m_wtxids.at(i))};
+        Assume(it != m_transactions.end());
+        if (!it->second) result.push_back(static_cast<uint32_t>(i));
+    }
+    return result;
 }
 std::unique_ptr<CBlockTemplate> CollectedTxs::MakeTemplate(const uint256& prevhash,
                                                            const CTransactionRef& coinbase,

@@ -218,6 +218,8 @@ class CollectedTxs
 {
 public:
     CollectedTxs(std::vector<Wtxid> wtxids, NodeContext& node);
+    /** Return zero-based positions for requested transactions that are still missing. */
+    std::vector<uint32_t> UnknownTxPos() const;
     std::unique_ptr<CBlockTemplate> MakeTemplate(const uint256& prevhash,
                                                  const CTransactionRef& coinbase,
                                                  std::string& reason,

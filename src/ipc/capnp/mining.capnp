@@ -31,6 +31,7 @@ interface Mining $Proxy.wrap("interfaces::Mining") {
 interface TxCollection $Proxy.wrap("interfaces::TxCollection") {
     destroy @0 (context :Proxy.Context) -> ();
     makeTemplate @1 (context: Proxy.Context, prevhash: Data, coinbase: Data) -> (reason: Text, debug: Text, result: BlockTemplate);
+    unknownTxPos @2 (context: Proxy.Context) -> (result: List(UInt32));
 }
 
 interface BlockTemplate $Proxy.wrap("interfaces::BlockTemplate") {
