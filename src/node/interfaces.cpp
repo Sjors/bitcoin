@@ -922,6 +922,7 @@ public:
         InterruptWait(notifications(), m_interrupt_wait);
     }
 
+private:
     const BlockAssembler::Options m_assemble_options;
 
     const std::unique_ptr<CBlockTemplate> m_block_template;
