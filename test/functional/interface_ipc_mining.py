@@ -42,10 +42,12 @@ from test_framework.ipc_util import (
     destroying,
     load_capnp_modules,
     make_mining_ctx,
+    mining_collect_txs,
     mining_create_block_template,
     mining_get_block,
     mining_get_coinbase_tx,
     mining_wait_next_template,
+    tx_collection_unknown_pos,
     wait_and_do,
 )
 
@@ -66,7 +68,7 @@ class IPCMiningTest(BitcoinTestFramework):
         self.num_nodes = 3
 
     def setup_nodes(self):
-        self.extra_init = [{"ipcbind": True}, {}, {"ipcbind": True}]
+        self.extra_init = [{"ipcbind": True}, {"ipcbind": True}, {"ipcbind": True}]
         super().setup_nodes()
         # Use this function to also load the capnp modules (we cannot use set_test_params for this,
         # as it is being called before knowing whether capnp is available).
@@ -320,13 +322,20 @@ class IPCMiningTest(BitcoinTestFramework):
                 await wait_and_do(wait_for_block(), template6.interruptWait())
 
         asyncio.run(capnp.run(async_routine()))
+        # This test adds transactions to the mempool without mining them.
+        # Confirm them so later tests start from a clean mempool.
+        self.generate(self.nodes[0], 1)
 
     def run_tx_collection_test(self):
         """Test TxCollection behavior."""
         self.log.info("Running TxCollection test")
 
         async def async_routine():
+            node = self.nodes[0]
+            remote_node = self.nodes[1]
             ctx0, mining0 = await make_mining_ctx(self)
+            ctx1, mining1 = await make_mining_ctx(self, node_index=1)
+            remote_wallet = MiniWallet(remote_node)
 
             self.log.debug("collectTxs() should reject duplicate wtxids")
             try:
@@ -340,7 +349,51 @@ class IPCMiningTest(BitcoinTestFramework):
             async with destroying((await mining0.collectTxs(ctx0, [])).result, ctx0):
                 pass
 
+            self.log.debug("Run the TxCollection workflow")
+            self.sync_blocks()
+            remote_wallet.rescan_utxos()
+            self.log.debug("Create a transaction that is shared by both mempools before disconnecting")
+            shared_tx = remote_wallet.send_self_transfer(
+                from_node=remote_node,
+                fee_rate=10,
+                confirmed_only=True,
+            )
+            self.sync_mempools()
+
+            # Keep the mempools separate for the rest of the test. Remote
+            # blocks will be relayed explicitly later instead of reconnecting.
+            self.disconnect_nodes(0, 1)
+
+            async with AsyncExitStack() as stack:
+                self.log.debug("Create a second transaction that stays only in the remote mempool")
+                missing_tx = remote_wallet.send_self_transfer(
+                    from_node=remote_node,
+                    utxo_to_spend=shared_tx["new_utxo"],
+                    fee_rate=10,
+                )
+
+                self.log.debug("Remote node builds the reference template that node will reconstruct")
+                remote_template = await mining_create_block_template(mining1, stack, ctx1, self.default_block_create_options)
+                assert remote_template is not None
+                remote_block = await mining_get_block(remote_template, ctx1)
+                assert_equal([tx.wtxid_hex for tx in remote_block.vtx[1:]], [shared_tx["wtxid"], missing_tx["wtxid"]])
+
+                requested_wtxids = [tx.wtxid for tx in remote_block.vtx[1:]]
+                tx_collection = await mining_collect_txs(mining0, stack, ctx0, requested_wtxids)
+
+                # The first transaction is already in node's mempool, but
+                # the child transaction only exists on the disconnected
+                # remote node.
+                assert_equal(await tx_collection_unknown_pos(tx_collection, ctx0), [1])
+
+            self.connect_nodes(0, 1)
+            self.generate(remote_node, 1, sync_fun=self.no_op)
+            self.sync_blocks()
+
         asyncio.run(capnp.run(async_routine()))
+        # Test cleanup
+        self.sync_blocks()
+        self.miniwallet.rescan_utxos()
 
     def run_ipc_option_override_test(self):
         self.log.info("Running IPC option override test")
