@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace node {
@@ -91,6 +92,25 @@ public:
     virtual void interruptWait() = 0;
 };
 
+/**
+ * Collect transactions in a client-specified order and later assemble and
+ * validate them as a block template.
+ *
+ * Usage is a four-step flow:
+ * 1. Call Mining::collectTxs() with the requested wtxids in final block order.
+ * 2. The implementation looks up each wtxid in the local mempool and records
+ *    any transactions that are already available.
+ * 3. Use unknownTxPos() to learn which positions are still missing, then
+ *    provide those transactions with addMissingTxs().
+ * 4. Once all requested transactions are available, call makeTemplate() to
+ *    validate the requested prevhash and build a block template.
+ */
+class TxCollection
+{
+public:
+    virtual ~TxCollection() = default;
+};
+
 //! Interface giving clients (RPC, Stratum v2 Template Provider in the future)
 //! ability to create block templates.
 class Mining
@@ -153,6 +173,12 @@ public:
      * For signets the challenge verification is skipped when check_pow is false.
      */
     virtual bool checkBlock(const CBlock& block, const node::BlockCheckOptions& options, std::string& reason, std::string& debug) = 0;
+
+    /**
+     * Look up transactions by witness id and keep references to any that are
+     * currently in the mempool.
+     */
+    virtual std::unique_ptr<TxCollection> collectTxs(const std::vector<Wtxid>& wtxids) = 0;
 
     //! Get internal node context. Useful for RPC and testing,
     //! but not accessible across processes.

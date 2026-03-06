@@ -81,6 +81,7 @@ using interfaces::Handler;
 using interfaces::MakeSignalHandler;
 using interfaces::Mining;
 using interfaces::Node;
+using interfaces::TxCollection;
 using interfaces::WalletLoader;
 using kernel::ChainstateRole;
 using node::BlockAssembler;
@@ -933,6 +934,18 @@ private:
     NodeContext& m_node;
 };
 
+class TxCollectionImpl : public TxCollection
+{
+public:
+    TxCollectionImpl(std::vector<Wtxid> wtxids, NodeContext& node)
+        : m_collected_txs(std::move(wtxids), node)
+    {
+    }
+
+private:
+    node::CollectedTxs m_collected_txs;
+};
+
 class MinerImpl : public Mining
 {
 public:
@@ -1007,6 +1020,11 @@ public:
         reason = state.GetRejectReason();
         debug = state.GetDebugMessage();
         return state.IsValid();
+    }
+
+    std::unique_ptr<TxCollection> collectTxs(const std::vector<Wtxid>& wtxids) override
+    {
+        return std::make_unique<TxCollectionImpl>(wtxids, m_node);
     }
 
     NodeContext* context() override { return &m_node; }

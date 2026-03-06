@@ -281,6 +281,27 @@ class IPCMiningTest(BitcoinTestFramework):
 
         asyncio.run(capnp.run(async_routine()))
 
+    def run_tx_collection_test(self):
+        """Test basic TxCollection construction and destruction."""
+        self.log.info("Running TxCollection test")
+
+        async def async_routine():
+            ctx, mining = await self.make_mining_ctx()
+
+            self.log.debug("collectTxs() should reject duplicate wtxids")
+            try:
+                await mining.collectTxs(ctx, [ser_uint256(1), ser_uint256(1)])
+                raise AssertionError("collectTxs unexpectedly accepted duplicate wtxids")
+            except capnp.lib.capnp.KjException as e:
+                assert_equal(e.description, f"remote exception: std::exception: duplicate wtxid {ser_uint256(1)[::-1].hex()}")
+                assert_equal(e.type, "FAILED")
+
+            self.log.debug("Create and destroy an empty collection")
+            async with destroying((await mining.collectTxs(ctx, [])).result, ctx):
+                pass
+
+        asyncio.run(capnp.run(async_routine()))
+
     def run_ipc_option_override_test(self):
         self.log.info("Running IPC option override test")
         # Set an absurd reserved weight. `-blockreservedweight` is RPC-only, so
@@ -402,6 +423,7 @@ class IPCMiningTest(BitcoinTestFramework):
         self.run_mining_interface_test()
         self.run_early_startup_test()
         self.run_block_template_test()
+        self.run_tx_collection_test()
         self.run_coinbase_and_submission_test()
         self.run_ipc_option_override_test()
 

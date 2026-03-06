@@ -23,6 +23,7 @@
 #include <pow.h>
 #include <primitives/transaction.h>
 #include <script/script.h>
+#include <util/hasher.h>
 #include <util/moneystr.h>
 #include <util/signalinterrupt.h>
 #include <util/string.h>
@@ -31,6 +32,8 @@
 
 #include <algorithm>
 #include <numeric>
+#include <stdexcept>
+#include <unordered_map>
 #include <utility>
 
 namespace node {
@@ -103,6 +106,16 @@ bool AnalyzePrevHash(const uint256& requested_prevhash,
         return false;
     }
     return true;
+}
+
+CollectedTxs::CollectedTxs(std::vector<Wtxid> wtxids, NodeContext&)
+    : m_wtxids(std::move(wtxids))
+{
+    for (const auto& wtxid : m_wtxids) {
+        if (!m_transactions.emplace(wtxid, nullptr).second) {
+            throw std::runtime_error(strprintf("duplicate wtxid %s", wtxid.ToString()));
+        }
+    }
 }
 
 int64_t GetMinimumTime(const CBlockIndex* pindexPrev, const int64_t difficulty_adjustment_interval)

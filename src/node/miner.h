@@ -11,12 +11,14 @@
 #include <policy/policy.h>
 #include <primitives/block.h>
 #include <txmempool.h>
+#include <util/hasher.h>
 #include <util/feefrac.h>
 
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 #include <boost/multi_index/identity.hpp>
 #include <boost/multi_index/indexed_by.hpp>
@@ -37,6 +39,7 @@ using interfaces::BlockRef;
 
 namespace node {
 class KernelNotifications;
+struct NodeContext;
 
 static const bool DEFAULT_PRINT_MODIFIED_FEE = false;
 
@@ -209,6 +212,19 @@ bool AnalyzePrevHash(const uint256& requested_prevhash,
                      const BlockRef& current_tip,
                      std::string& reason,
                      std::string& debug);
+
+/** Internal implementation backing interfaces::TxCollection. */
+class CollectedTxs
+{
+public:
+    CollectedTxs(std::vector<Wtxid> wtxids, NodeContext& node);
+
+private:
+    /** Requested transaction order as provided by the client. */
+    std::vector<Wtxid> m_wtxids;
+    /** Collected transactions keyed by wtxid. */
+    std::unordered_map<Wtxid, CTransactionRef, SaltedWtxidHasher> m_transactions;
+};
 } // namespace node
 
 #endif // BITCOIN_NODE_MINER_H
