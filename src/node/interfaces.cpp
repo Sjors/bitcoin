@@ -962,6 +962,11 @@ public:
         return m_collected_txs.UnknownTxPos();
     }
 
+    void addMissingTxs(const std::vector<CTransactionRef>& txs) override
+    {
+        m_collected_txs.AddMissingTxs(txs);
+    }
+
     std::unique_ptr<BlockTemplate> makeTemplate(uint256 prevhash,
                                                 CTransactionRef coinbase,
                                                 std::string& reason,

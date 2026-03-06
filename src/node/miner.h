@@ -220,6 +220,8 @@ public:
     CollectedTxs(std::vector<Wtxid> wtxids, NodeContext& node);
     /** Return zero-based positions for requested transactions that are still missing. */
     std::vector<uint32_t> UnknownTxPos() const;
+    /** Add transactions matching previously requested wtxids. Throws on null or unexpected transactions. */
+    void AddMissingTxs(const std::vector<CTransactionRef>& txs);
     std::unique_ptr<CBlockTemplate> MakeTemplate(const uint256& prevhash,
                                                  const CTransactionRef& coinbase,
                                                  std::string& reason,

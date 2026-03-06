@@ -132,6 +132,18 @@ std::vector<uint32_t> CollectedTxs::UnknownTxPos() const
     }
     return result;
 }
+void CollectedTxs::AddMissingTxs(const std::vector<CTransactionRef>& txs)
+{
+    for (const auto& tx : txs) {
+        if (!tx) throw std::runtime_error("unexpected null transaction");
+        const auto it{m_transactions.find(tx->GetWitnessHash())};
+        if (it == m_transactions.end()) {
+            throw std::runtime_error(strprintf("unexpected wtxid %s", tx->GetWitnessHash().ToString()));
+        }
+        if (it->second) continue;
+        it->second = tx;
+    }
+}
 std::unique_ptr<CBlockTemplate> CollectedTxs::MakeTemplate(const uint256& prevhash,
                                                            const CTransactionRef& coinbase,
                                                            std::string& reason,

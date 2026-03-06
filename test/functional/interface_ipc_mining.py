@@ -288,6 +288,12 @@ class IPCMiningTest(BitcoinTestFramework):
         async def async_routine():
             ctx, mining = await self.make_mining_ctx()
             current_tip = bytes((await mining.getTip(ctx)).result.hash)
+            local_wallet = MiniWallet(self.nodes[0], tag_name="tx_collection")
+            self.miniwallet.send_to(from_node=self.nodes[0], scriptPubKey=local_wallet.get_output_script(), amount=COIN)
+            local_wallet.rescan_utxos()
+            unexpected_wallet = MiniWallet(self.nodes[0], tag_name="tx_collection_unexpected")
+            self.miniwallet.send_to(from_node=self.nodes[0], scriptPubKey=unexpected_wallet.get_output_script(), amount=COIN)
+            unexpected_wallet.rescan_utxos()
 
             self.log.debug("collectTxs() should reject duplicate wtxids")
             try:
@@ -318,10 +324,25 @@ class IPCMiningTest(BitcoinTestFramework):
                     assert_equal(e.type, "FAILED")
 
             self.log.debug("unknownTxPos() should report mempool misses")
-            known_tx = self.miniwallet.send_self_transfer(from_node=self.nodes[0])
-            async with destroying((await mining.collectTxs(ctx, [ser_uint256(int(known_tx['wtxid'], 16)), ser_uint256(1)])).result, ctx) as tx_collection:
+            known_tx = local_wallet.send_self_transfer(from_node=self.nodes[0])
+            missing_tx = local_wallet.create_self_transfer()
+            async with destroying((await mining.collectTxs(ctx, [ser_uint256(int(known_tx['wtxid'], 16)), ser_uint256(int(missing_tx['wtxid'], 16))])).result, ctx) as tx_collection:
                 unknown_pos = list((await tx_collection.unknownTxPos(ctx)).result)
                 assert_equal(unknown_pos, [1])
+
+                self.log.debug("addMissingTxs() should fill requested missing transactions")
+                await tx_collection.addMissingTxs(ctx, [missing_tx["tx"].serialize()])
+                unknown_pos = list((await tx_collection.unknownTxPos(ctx)).result)
+                assert_equal(unknown_pos, [])
+
+                self.log.debug("addMissingTxs() should reject unknown transactions")
+                unexpected_tx = unexpected_wallet.create_self_transfer()
+                try:
+                    await tx_collection.addMissingTxs(ctx, [unexpected_tx["tx"].serialize()])
+                    raise AssertionError("addMissingTxs unexpectedly accepted an unknown wtxid")
+                except capnp.lib.capnp.KjException as e:
+                    assert_equal(e.description, f"remote exception: std::exception: unexpected wtxid {unexpected_tx['wtxid']}")
+                    assert_equal(e.type, "FAILED")
 
         asyncio.run(capnp.run(async_routine()))
 
@@ -375,14 +396,16 @@ class IPCMiningTest(BitcoinTestFramework):
 
         async def async_routine():
             ctx, mining = await self.make_mining_ctx()
+            coinbase_wallet = MiniWallet(self.nodes[0], tag_name="coinbase_test")
+            coinbase_wallet.rescan_utxos()
 
             current_block_height = self.nodes[0].getchaintips()[0]["height"]
             check_opts = self.capnp_modules['mining'].BlockCheckOptions()
 
             async with destroying((await mining.createNewBlock(ctx, self.default_block_create_options)).result, ctx) as template:
                 block = await mining_get_block(template, ctx)
-                balance = self.miniwallet.get_balance()
-                coinbase = await self.build_coinbase_test(template, ctx, self.miniwallet)
+                balance = coinbase_wallet.get_balance()
+                coinbase = await self.build_coinbase_test(template, ctx, coinbase_wallet)
                 # Reduce payout for balance comparison simplicity
                 coinbase.vout[0].nValue = COIN
                 block.vtx[0] = coinbase
@@ -431,8 +454,8 @@ class IPCMiningTest(BitcoinTestFramework):
             # Check that the other node accepts the block
             assert_equal(self.nodes[0].getchaintips()[0], self.nodes[1].getchaintips()[0])
 
-            self.miniwallet.rescan_utxos()
-            assert_equal(self.miniwallet.get_balance(), balance + 1)
+            coinbase_wallet.rescan_utxos()
+            assert_equal(coinbase_wallet.get_balance(), balance + 1)
             self.log.debug("Check block should fail now, since it is a duplicate")
             check = await mining.checkBlock(ctx, block.serialize(), check_opts)
             assert_equal(check.result, False)

@@ -117,6 +117,9 @@ public:
     //! Return the zero-based positions of transactions that are still missing.
     virtual std::vector<uint32_t> unknownTxPos() = 0;
 
+    //! Add transactions that were missing from the initial collection.
+    virtual void addMissingTxs(const std::vector<CTransactionRef>& txs) = 0;
+
     /**
      * Construct a block template using the collected transactions in their
      * requested order.
