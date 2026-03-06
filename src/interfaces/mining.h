@@ -38,12 +38,15 @@ public:
     // Block contains a dummy coinbase transaction that should not be used.
     virtual CBlock getBlock() = 0;
 
-    // Fees per transaction, not including coinbase transaction.
+    // Fees per transaction, not including coinbase transaction. Throws for
+    // templates constructed via TxCollection::makeTemplate().
     virtual std::vector<CAmount> getTxFees() = 0;
-    // Sigop cost per transaction, not including coinbase transaction.
+    // Sigop cost per transaction, not including coinbase transaction. Throws
+    // for templates constructed via TxCollection::makeTemplate().
     virtual std::vector<int64_t> getTxSigops() = 0;
 
-    /** Return fields needed to construct a coinbase transaction */
+    /** Return fields needed to construct a coinbase transaction.
+     * Throws for templates constructed via TxCollection::makeTemplate(). */
     virtual node::CoinbaseTx getCoinbaseTx() = 0;
 
     /**
@@ -82,7 +85,8 @@ public:
      * @returns a new BlockTemplate or nothing if the timeout occurs.
      *
      * On testnet this will additionally return a template with difficulty 1 if
-     * the tip is more than 20 minutes old.
+     * the tip is more than 20 minutes old. Throws for templates constructed
+     * via TxCollection::makeTemplate().
      */
     virtual std::unique_ptr<BlockTemplate> waitNext(node::BlockWaitOptions options = {}) = 0;
 
@@ -109,6 +113,28 @@ class TxCollection
 {
 public:
     virtual ~TxCollection() = default;
+
+    /**
+     * Construct a block template using the collected transactions in their
+     * requested order.
+     *
+     * Requires all requested transactions to be present, and prevhash to
+     * match the current tip.
+     *
+     * The resulting block is validated with the same final TestBlockValidity()
+     * call used by checkBlock(), with the proof-of-work and merkle-root checks
+     * disabled.
+     *
+     * @param[in] prevhash hash of the tip the template must build on top of
+     * @param[in] coinbase complete coinbase transaction (including witness)
+     * @param[out] reason  failure reason
+     * @param[out] debug   more detailed rejection reason
+     * @returns            block template on success, otherwise nullptr
+     */
+    virtual std::unique_ptr<BlockTemplate> makeTemplate(uint256 prevhash,
+                                                        CTransactionRef coinbase,
+                                                        std::string& reason,
+                                                        std::string& debug) = 0;
 };
 
 //! Interface giving clients (RPC, Stratum v2 Template Provider in the future)

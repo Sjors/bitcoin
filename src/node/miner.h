@@ -218,12 +218,17 @@ class CollectedTxs
 {
 public:
     CollectedTxs(std::vector<Wtxid> wtxids, NodeContext& node);
+    std::unique_ptr<CBlockTemplate> MakeTemplate(const uint256& prevhash,
+                                                 const CTransactionRef& coinbase,
+                                                 std::string& reason,
+                                                 std::string& debug);
 
 private:
     /** Requested transaction order as provided by the client. */
     std::vector<Wtxid> m_wtxids;
     /** Collected transactions keyed by wtxid. */
     std::unordered_map<Wtxid, CTransactionRef, SaltedWtxidHasher> m_transactions;
+    NodeContext& m_node;
 };
 } // namespace node
 

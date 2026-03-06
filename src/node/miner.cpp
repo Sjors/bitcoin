@@ -108,8 +108,9 @@ bool AnalyzePrevHash(const uint256& requested_prevhash,
     return true;
 }
 
-CollectedTxs::CollectedTxs(std::vector<Wtxid> wtxids, NodeContext&)
-    : m_wtxids(std::move(wtxids))
+CollectedTxs::CollectedTxs(std::vector<Wtxid> wtxids, NodeContext& node)
+    : m_wtxids(std::move(wtxids)),
+      m_node(node)
 {
     for (const auto& wtxid : m_wtxids) {
         if (!m_transactions.emplace(wtxid, nullptr).second) {
@@ -117,7 +118,17 @@ CollectedTxs::CollectedTxs(std::vector<Wtxid> wtxids, NodeContext&)
         }
     }
 }
-
+std::unique_ptr<CBlockTemplate> CollectedTxs::MakeTemplate(const uint256& prevhash,
+                                                           const CTransactionRef& coinbase,
+                                                           std::string& reason,
+                                                           std::string& debug)
+{
+    return BlockAssembler{
+        Assert(m_node.chainman)->ActiveChainstate(),
+        Assert(m_node.mempool).get(),
+        BlockAssembler::Options{BlockCreateOptions{.use_mempool = false}},
+    }.CreateNewBlock();
+}
 int64_t GetMinimumTime(const CBlockIndex* pindexPrev, const int64_t difficulty_adjustment_interval)
 {
     int64_t min_time{pindexPrev->GetMedianTimePast() + 1};

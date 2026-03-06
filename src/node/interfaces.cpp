@@ -868,9 +868,11 @@ class BlockTemplateImpl : public BlockTemplate
 public:
     explicit BlockTemplateImpl(BlockAssembler::Options assemble_options,
                                std::unique_ptr<CBlockTemplate> block_template,
-                               NodeContext& node) : m_assemble_options(std::move(assemble_options)),
-                                                    m_block_template(std::move(block_template)),
-                                                    m_node(node)
+                               NodeContext& node,
+                               bool external = false) : m_assemble_options(std::move(assemble_options)),
+                                                       m_block_template(std::move(block_template)),
+                                                       m_external(external),
+                                                       m_node(node)
     {
         assert(m_block_template);
     }
@@ -887,16 +889,19 @@ public:
 
     std::vector<CAmount> getTxFees() override
     {
+        ThrowIfExternal("getTxFees");
         return m_block_template->vTxFees;
     }
 
     std::vector<int64_t> getTxSigops() override
     {
+        ThrowIfExternal("getTxSigops");
         return m_block_template->vTxSigOpsCost;
     }
 
     CoinbaseTx getCoinbaseTx() override
     {
+        ThrowIfExternal("getCoinbaseTx");
         return m_block_template->m_coinbase_tx;
     }
 
@@ -913,8 +918,9 @@ public:
 
     std::unique_ptr<BlockTemplate> waitNext(BlockWaitOptions options) override
     {
+        ThrowIfExternal("waitNext");
         auto new_template = WaitAndCreateNewBlock(chainman(), notifications(), m_node.mempool.get(), m_block_template, options, m_assemble_options, m_interrupt_wait);
-        if (new_template) return std::make_unique<BlockTemplateImpl>(m_assemble_options, std::move(new_template), m_node);
+        if (new_template) return std::make_unique<BlockTemplateImpl>(m_assemble_options, std::move(new_template), m_node, m_external);
         return nullptr;
     }
 
@@ -924,10 +930,18 @@ public:
     }
 
 private:
+    void ThrowIfExternal(const char* method_name)
+    {
+        if (m_external) {
+            throw std::runtime_error(strprintf("%s is unavailable for externally generated templates", method_name));
+        }
+    }
+
     const BlockAssembler::Options m_assemble_options;
 
     const std::unique_ptr<CBlockTemplate> m_block_template;
 
+    const bool m_external;
     bool m_interrupt_wait{false};
     ChainstateManager& chainman() { return *Assert(m_node.chainman); }
     KernelNotifications& notifications() { return *Assert(m_node.notifications); }
@@ -938,12 +952,22 @@ class TxCollectionImpl : public TxCollection
 {
 public:
     TxCollectionImpl(std::vector<Wtxid> wtxids, NodeContext& node)
-        : m_collected_txs(std::move(wtxids), node)
+        : m_collected_txs(std::move(wtxids), node),
+          m_node(node)
     {
     }
-
+    std::unique_ptr<BlockTemplate> makeTemplate(uint256 prevhash,
+                                                CTransactionRef coinbase,
+                                                std::string& reason,
+                                                std::string& debug) override
+    {
+        auto block_template{m_collected_txs.MakeTemplate(prevhash, coinbase, reason, debug)};
+        if (!block_template) return nullptr;
+        return std::make_unique<BlockTemplateImpl>(BlockAssembler::Options{}, std::move(block_template), m_node, /*external=*/true);
+    }
 private:
     node::CollectedTxs m_collected_txs;
+    NodeContext& m_node;
 };
 
 class MinerImpl : public Mining

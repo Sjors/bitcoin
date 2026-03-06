@@ -282,11 +282,12 @@ class IPCMiningTest(BitcoinTestFramework):
         asyncio.run(capnp.run(async_routine()))
 
     def run_tx_collection_test(self):
-        """Test basic TxCollection construction and destruction."""
+        """Test basic TxCollection construction and makeTemplate scaffold."""
         self.log.info("Running TxCollection test")
 
         async def async_routine():
             ctx, mining = await self.make_mining_ctx()
+            current_tip = bytes((await mining.getTip(ctx)).result.hash)
 
             self.log.debug("collectTxs() should reject duplicate wtxids")
             try:
@@ -296,9 +297,25 @@ class IPCMiningTest(BitcoinTestFramework):
                 assert_equal(e.description, f"remote exception: std::exception: duplicate wtxid {ser_uint256(1)[::-1].hex()}")
                 assert_equal(e.type, "FAILED")
 
-            self.log.debug("Create and destroy an empty collection")
-            async with destroying((await mining.collectTxs(ctx, [])).result, ctx):
-                pass
+            async with AsyncExitStack() as stack:
+                self.log.debug("Create and destroy an empty collection")
+                tx_collection = await stack.enter_async_context(destroying((await mining.collectTxs(ctx, [])).result, ctx))
+                base_template = await mining_create_block_template(mining, stack, ctx, self.default_block_create_options)
+                coinbase = await self.build_coinbase_test(base_template, ctx, self.miniwallet)
+                response = await tx_collection.makeTemplate(ctx, current_tip, coinbase.serialize())
+                assert_equal(response.reason, "")
+                assert_equal(response.debug, "")
+                template = await stack.enter_async_context(destroying(response.result, ctx))
+                block = await mining_get_block(template, ctx)
+                assert_equal(len(block.vtx), 1)
+
+                self.log.debug("Externally generated templates should not expose miner-owned metadata")
+                try:
+                    await template.getCoinbaseTx(ctx)
+                    raise AssertionError("getCoinbaseTx unexpectedly succeeded on external template")
+                except capnp.lib.capnp.KjException as e:
+                    assert_equal(e.description, "remote exception: std::exception: getCoinbaseTx is unavailable for externally generated templates")
+                    assert_equal(e.type, "FAILED")
 
         asyncio.run(capnp.run(async_routine()))
 
