@@ -61,6 +61,50 @@ std::optional<int> GetBIP34Height(const CTransactionRef& coinbase,
     return height - 1;
 }
 
+bool AnalyzePrevHash(const uint256& requested_prevhash,
+                     const std::optional<int>& requested_height,
+                     const BlockRef& current_tip,
+                     std::string& reason,
+                     std::string& debug)
+{
+    if (requested_prevhash == current_tip.hash) return true;
+    if (!requested_height) {
+        reason = "inconclusive";
+        debug = strprintf("requested prevhash %s does not match current tip %s and coinbase height is unavailable or pre-BIP34",
+                          requested_prevhash.ToString(),
+                          current_tip.hash.ToString());
+        return false;
+    }
+
+    if (*requested_height < current_tip.height) {
+        reason = "stale-prevblk";
+        debug = strprintf("requested tip %s at height %d is below current tip %s at height %d",
+                          requested_prevhash.ToString(),
+                          *requested_height,
+                          current_tip.hash.ToString(),
+                          current_tip.height);
+        return false;
+    }
+    if (*requested_height == current_tip.height && requested_prevhash != current_tip.hash) {
+        reason = "bad-prevblk";
+        debug = strprintf("requested tip %s does not match current tip %s at height %d",
+                          requested_prevhash.ToString(),
+                          current_tip.hash.ToString(),
+                          current_tip.height);
+        return false;
+    }
+    if (*requested_height > current_tip.height) {
+        reason = "inconclusive-tip-too-new";
+        debug = strprintf("requested tip %s at height %d is above current tip %s at height %d",
+                          requested_prevhash.ToString(),
+                          *requested_height,
+                          current_tip.hash.ToString(),
+                          current_tip.height);
+        return false;
+    }
+    return true;
+}
+
 int64_t GetMinimumTime(const CBlockIndex* pindexPrev, const int64_t difficulty_adjustment_interval)
 {
     int64_t min_time{pindexPrev->GetMedianTimePast() + 1};

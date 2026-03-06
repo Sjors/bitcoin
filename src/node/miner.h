@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 
 #include <boost/multi_index/identity.hpp>
 #include <boost/multi_index/indexed_by.hpp>
@@ -188,6 +189,26 @@ bool CooldownIfHeadersAhead(ChainstateManager& chainman, KernelNotifications& ke
 /** Return the previous-block height implied by a BIP34 coinbase commitment, if
  * one is present and reliably enforced on this chain. */
 std::optional<int> GetBIP34Height(const CTransactionRef& coinbase, const Consensus::Params& consensus_params);
+
+/**
+ * Classify whether a requested prevhash is usable on top of the current tip.
+ *
+ * When @p requested_height is lower than @p current_tip.height, this only
+ * compares heights and does not verify that @p requested_prevhash is actually
+ * on the active chain.
+ *
+ * @param[in] requested_prevhash prevhash requested by the client
+ * @param[in] requested_height previous-block height implied by the coinbase, if known
+ * @param[in] current_tip current active tip
+ * @param[out] reason classification for rejected prevhashes
+ * @param[out] debug more detailed explanation of the rejection
+ * @returns true if @p requested_prevhash matches @p current_tip.hash, otherwise false
+ */
+bool AnalyzePrevHash(const uint256& requested_prevhash,
+                     const std::optional<int>& requested_height,
+                     const BlockRef& current_tip,
+                     std::string& reason,
+                     std::string& debug);
 } // namespace node
 
 #endif // BITCOIN_NODE_MINER_H

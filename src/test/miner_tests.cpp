@@ -134,6 +134,30 @@ BOOST_AUTO_TEST_CASE(get_bip34_height)
     BOOST_CHECK_EQUAL(node::GetBIP34Height(make_coinbase(CScript() << CScriptNum{100}), params), 99);
 }
 
+BOOST_AUTO_TEST_CASE(analyze_prevhash)
+{
+    const interfaces::BlockRef current_tip{
+        .hash = uint256{1},
+        .height = 100,
+    };
+    std::string reason;
+    std::string debug;
+
+    BOOST_CHECK(node::AnalyzePrevHash(current_tip.hash, 100, current_tip, reason, debug));
+
+    BOOST_CHECK(!node::AnalyzePrevHash(uint256{2}, std::nullopt, current_tip, reason, debug));
+    BOOST_CHECK_EQUAL(reason, "inconclusive");
+
+    BOOST_CHECK(!node::AnalyzePrevHash(uint256{3}, 99, current_tip, reason, debug));
+    BOOST_CHECK_EQUAL(reason, "stale-prevblk");
+
+    BOOST_CHECK(!node::AnalyzePrevHash(uint256{4}, 100, current_tip, reason, debug));
+    BOOST_CHECK_EQUAL(reason, "bad-prevblk");
+
+    BOOST_CHECK(!node::AnalyzePrevHash(uint256{5}, 101, current_tip, reason, debug));
+    BOOST_CHECK_EQUAL(reason, "inconclusive-tip-too-new");
+}
+
 // Test suite for ancestor feerate transaction selection.
 // Implemented as an additional function, rather than a separate test case,
 // to allow reusing the blockchain created in CreateNewBlock_validity.
