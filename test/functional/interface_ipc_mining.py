@@ -35,12 +35,14 @@ from test_framework.wallet import MiniWallet
 from test_framework.p2p import P2PInterface
 from test_framework.ipc_util import (
     destroying,
+    mining_collect_txs,
     mining_create_block_template,
     load_capnp_modules,
     make_capnp_init_ctx,
     mining_get_block,
     mining_get_coinbase_tx,
     mining_wait_next_template,
+    tx_collection_unknown_pos,
     wait_and_do,
 )
 
@@ -61,7 +63,7 @@ class IPCMiningTest(BitcoinTestFramework):
         self.num_nodes = 2
 
     def setup_nodes(self):
-        self.extra_init = [{"ipcbind": True}, {}]
+        self.extra_init = [{"ipcbind": True}, {"ipcbind": True}]
         super().setup_nodes()
         # Use this function to also load the capnp modules (we cannot use set_test_params for this,
         # as it is being called before knowing whether capnp is available).
@@ -106,9 +108,9 @@ class IPCMiningTest(BitcoinTestFramework):
         coinbase_tx.nLockTime = coinbase_res.lockTime
         return coinbase_tx
 
-    async def make_mining_ctx(self):
+    async def make_mining_ctx(self, node=None):
         """Create IPC context and Mining proxy object."""
-        ctx, init = await make_capnp_init_ctx(self)
+        ctx, init = await make_capnp_init_ctx(self, node)
         self.log.debug("Create Mining proxy object")
         mining = init.makeMining(ctx).result
         return ctx, mining
@@ -282,69 +284,103 @@ class IPCMiningTest(BitcoinTestFramework):
         asyncio.run(capnp.run(async_routine()))
 
     def run_tx_collection_test(self):
-        """Test basic TxCollection construction and makeTemplate scaffold."""
+        """Test the TxCollection workflow across two disconnected nodes.
+
+        The test starts with one transaction that is present in both mempools,
+        then disconnects the nodes and creates a child transaction that remains
+        only in the remote mempool. The remote node proposes a block body by
+        creating its own template and sending the ordered wtxid list and
+        missing transactions to the local node.
+
+        The local node uses collectTxs()/TxCollection to:
+        1. preload any matching mempool transactions,
+        2. report which positions are still missing,
+        3. accept the remaining transactions from the remote node.
+
+              node0 (local)                     node1 (remote)
+            collectTxs(wtxids)        <-     createNewBlock()
+            addMissingTxs(rawtxs)     <-     send missing txs
+        """
         self.log.info("Running TxCollection test")
 
         async def async_routine():
-            ctx, mining = await self.make_mining_ctx()
-            current_tip = bytes((await mining.getTip(ctx)).result.hash)
-            local_wallet = MiniWallet(self.nodes[0], tag_name="tx_collection")
-            self.miniwallet.send_to(from_node=self.nodes[0], scriptPubKey=local_wallet.get_output_script(), amount=COIN)
-            local_wallet.rescan_utxos()
-            unexpected_wallet = MiniWallet(self.nodes[0], tag_name="tx_collection_unexpected")
-            self.miniwallet.send_to(from_node=self.nodes[0], scriptPubKey=unexpected_wallet.get_output_script(), amount=COIN)
-            unexpected_wallet.rescan_utxos()
+            node = self.nodes[0]
+            remote_node = self.nodes[1]
+            ctx0, mining0 = await self.make_mining_ctx(node)
+            ctx1, mining1 = await self.make_mining_ctx(remote_node)
+            remote_wallet = MiniWallet(remote_node)
 
             self.log.debug("collectTxs() should reject duplicate wtxids")
             try:
-                await mining.collectTxs(ctx, [ser_uint256(1), ser_uint256(1)])
+                await mining0.collectTxs(ctx0, [ser_uint256(1), ser_uint256(1)])
                 raise AssertionError("collectTxs unexpectedly accepted duplicate wtxids")
             except capnp.lib.capnp.KjException as e:
                 assert_equal(e.description, f"remote exception: std::exception: duplicate wtxid {ser_uint256(1)[::-1].hex()}")
                 assert_equal(e.type, "FAILED")
 
+            self.log.debug("Run the main TxCollection workflow across local and remote nodes")
+            self.sync_blocks()
+            if node.getrawmempool():
+                self.log.debug("Clear mempool transactions left over from earlier test phases")
+                self.generate(node, 1, sync_fun=self.no_op)
+                self.sync_blocks()
+            remote_wallet.rescan_utxos()
+            self.log.debug("Create a transaction that is shared by both mempools before disconnecting")
+            shared_tx = remote_wallet.send_self_transfer(
+                from_node=remote_node,
+                fee_rate=10,
+                confirmed_only=True,
+            )
+            self.sync_mempools()
+
+            # Keep the mempools separate for the rest of the test. Remote
+            # blocks will be relayed explicitly later instead of reconnecting.
+            self.disconnect_nodes(0, 1)
+
             async with AsyncExitStack() as stack:
-                self.log.debug("Create and destroy an empty collection")
-                tx_collection = await stack.enter_async_context(destroying((await mining.collectTxs(ctx, [])).result, ctx))
-                base_template = await mining_create_block_template(mining, stack, ctx, self.default_block_create_options)
-                coinbase = await self.build_coinbase_test(base_template, ctx, self.miniwallet)
-                response = await tx_collection.makeTemplate(ctx, current_tip, coinbase.serialize())
-                assert_equal(response.reason, "")
-                assert_equal(response.debug, "")
-                template = await stack.enter_async_context(destroying(response.result, ctx))
-                block = await mining_get_block(template, ctx)
-                assert_equal(len(block.vtx), 1)
+                self.log.debug("Create a second transaction that stays only in the remote mempool")
+                missing_tx = remote_wallet.send_self_transfer(
+                    from_node=remote_node,
+                    utxo_to_spend=shared_tx["new_utxo"],
+                    fee_rate=10,
+                )
 
-                self.log.debug("Externally generated templates should not expose miner-owned metadata")
+                self.log.debug("Remote node builds the reference template that node will reconstruct")
+                remote_template = await mining_create_block_template(mining1, stack, ctx1, self.default_block_create_options)
+                assert remote_template is not None
+                remote_tip_info = await mining1.getTip(ctx1)
+                remote_tip = bytes(remote_tip_info.result.hash)
+                remote_block = await mining_get_block(remote_template, ctx1)
+                assert_equal([tx.wtxid_hex for tx in remote_block.vtx[1:]], [shared_tx["wtxid"], missing_tx["wtxid"]])
+
+                requested_wtxids = [ser_uint256(int(tx.wtxid_hex, 16)) for tx in remote_block.vtx[1:]]
+                raw_txs = [tx.serialize() for tx in remote_block.vtx[1:]]
+                tx_collection = await mining_collect_txs(mining0, stack, ctx0, requested_wtxids)
+
+                # The first transaction is already in node's mempool, but
+                # the child transaction only exists on the disconnected
+                # remote node.
+                assert_equal(await tx_collection_unknown_pos(tx_collection, ctx0), [1])
+
+                self.log.debug("Reject unexpected transactions in addMissingTxs(), without undoing earlier additions")
+                unexpected_tx = remote_wallet.create_self_transfer(fee_rate=10, confirmed_only=True)
                 try:
-                    await template.getCoinbaseTx(ctx)
-                    raise AssertionError("getCoinbaseTx unexpectedly succeeded on external template")
-                except capnp.lib.capnp.KjException as e:
-                    assert_equal(e.description, "remote exception: std::exception: getCoinbaseTx is unavailable for externally generated templates")
-                    assert_equal(e.type, "FAILED")
-
-            self.log.debug("unknownTxPos() should report mempool misses")
-            known_tx = local_wallet.send_self_transfer(from_node=self.nodes[0])
-            missing_tx = local_wallet.create_self_transfer()
-            async with destroying((await mining.collectTxs(ctx, [ser_uint256(int(known_tx['wtxid'], 16)), ser_uint256(int(missing_tx['wtxid'], 16))])).result, ctx) as tx_collection:
-                unknown_pos = list((await tx_collection.unknownTxPos(ctx)).result)
-                assert_equal(unknown_pos, [1])
-
-                self.log.debug("addMissingTxs() should fill requested missing transactions")
-                await tx_collection.addMissingTxs(ctx, [missing_tx["tx"].serialize()])
-                unknown_pos = list((await tx_collection.unknownTxPos(ctx)).result)
-                assert_equal(unknown_pos, [])
-
-                self.log.debug("addMissingTxs() should reject unknown transactions")
-                unexpected_tx = unexpected_wallet.create_self_transfer()
-                try:
-                    await tx_collection.addMissingTxs(ctx, [unexpected_tx["tx"].serialize()])
+                    await tx_collection.addMissingTxs(ctx0, [raw_txs[1], unexpected_tx["tx"].serialize()])
                     raise AssertionError("addMissingTxs unexpectedly accepted an unknown wtxid")
                 except capnp.lib.capnp.KjException as e:
                     assert_equal(e.description, f"remote exception: std::exception: unexpected wtxid {unexpected_tx['wtxid']}")
                     assert_equal(e.type, "FAILED")
+                # The missing transaction should stay added even though the
+                # later unexpected one causes the call to fail.
+                assert_equal(await tx_collection_unknown_pos(tx_collection, ctx0), [])
+
+            self.connect_nodes(0, 1)
+            # Mine the remote transactions so later tests start with empty,
+            # synchronized mempools again.
+            self.generate(remote_node, 1)
 
         asyncio.run(capnp.run(async_routine()))
+        self.miniwallet.rescan_utxos()
 
     def run_ipc_option_override_test(self):
         self.log.info("Running IPC option override test")
