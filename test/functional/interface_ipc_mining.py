@@ -42,6 +42,7 @@ from test_framework.ipc_util import (
     mining_get_block,
     mining_get_coinbase_tx,
     mining_wait_next_template,
+    tx_collection_make_template,
     tx_collection_unknown_pos,
     wait_and_do,
 )
@@ -295,11 +296,23 @@ class IPCMiningTest(BitcoinTestFramework):
         The local node uses collectTxs()/TxCollection to:
         1. preload any matching mempool transactions,
         2. report which positions are still missing,
-        3. accept the remaining transactions from the remote node.
+        3. accept the remaining transactions from the remote node, and
+        4. reconstruct and validate a matching block template locally.
 
               node0 (local)                     node1 (remote)
             collectTxs(wtxids)        <-     createNewBlock()
             addMissingTxs(rawtxs)     <-     send missing txs
+            makeTemplate(prevhash, coinbase)
+                                      <-     tip expectations
+
+        The test compares reconstructed blocks, verifies that miner-owned
+        metadata getters are unavailable on externally generated templates,
+        submits the same solution to both templates, and then syncs the nodes
+        to prove they are identical.
+
+        Before reconstruction on the final tip, the remote node advances to a
+        competing fork while disconnected so the test can also exercise
+        makeTemplate() handling for too-new, competing, and stale prevhashes.
         """
         self.log.info("Running TxCollection test")
 
@@ -332,6 +345,8 @@ class IPCMiningTest(BitcoinTestFramework):
                 confirmed_only=True,
             )
             self.sync_mempools()
+            current_tip_info = await mining0.getTip(ctx0)
+            current_tip = bytes(current_tip_info.result.hash)
 
             # Keep the mempools separate for the rest of the test. Remote
             # blocks will be relayed explicitly later instead of reconnecting.
@@ -357,10 +372,20 @@ class IPCMiningTest(BitcoinTestFramework):
                 raw_txs = [tx.serialize() for tx in remote_block.vtx[1:]]
                 tx_collection = await mining_collect_txs(mining0, stack, ctx0, requested_wtxids)
 
+                # Reuse the remote reference template to construct a valid
+                # coinbase for the early makeTemplate() checks below.
+                coinbase = await self.build_coinbase_test(remote_template, ctx1, self.miniwallet)
+                coinbase.vout[0].nValue = COIN
+
                 # The first transaction is already in node's mempool, but
                 # the child transaction only exists on the disconnected
                 # remote node.
                 assert_equal(await tx_collection_unknown_pos(tx_collection, ctx0), [1])
+
+                self.log.debug("makeTemplate() should fail while transactions are still missing")
+                await tx_collection_make_template(
+                    tx_collection, stack, ctx0, current_tip, coinbase.serialize(), reject_reason="missing-txs"
+                )
 
                 self.log.debug("Reject unexpected transactions in addMissingTxs(), without undoing earlier additions")
                 unexpected_tx = remote_wallet.create_self_transfer(fee_rate=10, confirmed_only=True)
@@ -374,12 +399,107 @@ class IPCMiningTest(BitcoinTestFramework):
                 # later unexpected one causes the call to fail.
                 assert_equal(await tx_collection_unknown_pos(tx_collection, ctx0), [])
 
+                # Mine empty blocks so the reference transactions stay in
+                # both mempools while the tip-handling checks run.
+                future_block = self.generateblock(
+                    remote_node,
+                    output="raw(52)",
+                    transactions=[],
+                    submit=False,
+                    sync_fun=self.no_op,
+                )["hex"]
+                assert_equal(remote_node.submitblock(future_block), None)
+                future_tip_info = await mining1.getTip(ctx1)
+                future_tip = bytes(future_tip_info.result.hash)
+
+                # Update coinbase BIP34 commitment.
+                coinbase.vin[0].scriptSig = CScript([CScriptNum(int(future_tip_info.result.height) + 1)])
+
+                self.log.debug("makeTemplate() should fail before the requested tip arrives")
+                await tx_collection_make_template(
+                    tx_collection, stack, ctx0, future_tip, coinbase.serialize(), reject_reason="inconclusive-tip-too-new"
+                )
+
+                self.log.debug("makeTemplate() should reject an equal-height competing tip")
+                self.generate(node, 1, sync_fun=self.no_op)
+                fork_tip_info = await mining0.getTip(ctx0)
+                fork_tip = bytes(fork_tip_info.result.hash)
+                assert_equal(int(fork_tip_info.result.height), int(future_tip_info.result.height))
+                assert_not_equal(fork_tip, future_tip)
+                await tx_collection_make_template(
+                    tx_collection, stack, ctx0, future_tip, coinbase.serialize(), reject_reason="bad-prevblk"
+                )
+
+                self.log.debug("Extend the remote chain so the local node can reorg to it")
+                final_block = self.generateblock(
+                    remote_node,
+                    output="raw(52)",
+                    transactions=[],
+                    submit=False,
+                    sync_fun=self.no_op,
+                )["hex"]
+                assert_equal(remote_node.submitblock(final_block), None)
+
+                self.log.debug("Relay the remote fork blocks and wait for the local tip to catch up")
+                assert_equal(node.submitblock(future_block), "inconclusive")
+                assert_equal(node.submitblock(final_block), None)
+                self.wait_until(lambda: node.getbestblockhash() == remote_node.getbestblockhash())
+
+                self.log.debug("makeTemplate() should reject a stale tip after the reorg")
+                await tx_collection_make_template(
+                    tx_collection, stack, ctx0, future_tip, coinbase.serialize(), reject_reason="stale-prevblk"
+                )
+
+                self.log.debug("Remote node rebuilds the reference template on the new tip")
+                remote_template = await mining_create_block_template(mining1, stack, ctx1, self.default_block_create_options)
+                assert remote_template is not None
+                remote_tip_info = await mining1.getTip(ctx1)
+                remote_tip = bytes(remote_tip_info.result.hash)
+                remote_block = await mining_get_block(remote_template, ctx1)
+                assert_equal([tx.wtxid_hex for tx in remote_block.vtx[1:]], [shared_tx["wtxid"], missing_tx["wtxid"]])
+
+                refreshed_template = await mining_create_block_template(mining0, stack, ctx0, self.default_block_create_options)
+                assert refreshed_template is not None
+                coinbase = await self.build_coinbase_test(refreshed_template, ctx0, self.miniwallet)
+                coinbase.vout[0].nValue = COIN
+                template = await tx_collection_make_template(tx_collection, stack, ctx0, remote_tip, coinbase.serialize())
+                local_block = await mining_get_block(template, ctx0)
+
+                assert_equal([tx.wtxid_hex for tx in local_block.vtx[1:]], [tx.wtxid_hex for tx in remote_block.vtx[1:]])
+
+                self.log.debug("Externally generated templates should not expose miner-owned metadata")
+                for method_name, method in (
+                    ("getCoinbaseTx", template.getCoinbaseTx),
+                    ("getTxFees", template.getTxFees),
+                    ("getTxSigops", template.getTxSigops),
+                ):
+                    try:
+                        await method(ctx0)
+                        raise AssertionError(f"{method_name} unexpectedly succeeded on external template")
+                    except capnp.lib.capnp.KjException as e:
+                        assert_equal(e.description, f"remote exception: std::exception: {method_name} is unavailable for externally generated templates")
+                        assert_equal(e.type, "FAILED")
+
+                self.log.debug("Solve the reconstructed block and submit the same solution to both templates")
+                local_block.solve()
+                version = local_block.nVersion
+                time = local_block.nTime
+                nonce = local_block.nNonce
+                coinbase = local_block.vtx[0].serialize()
+
+                submitted_local = (await template.submitSolution(ctx0, version, time, nonce, coinbase)).result
+                assert_equal(submitted_local, True)
+
+                submitted_remote = (await remote_template.submitSolution(ctx1, version, time, nonce, coinbase)).result
+                assert_equal(submitted_remote, True)
+                assert_equal(node.getbestblockhash(), remote_node.getbestblockhash())
+
             self.connect_nodes(0, 1)
-            # Mine the remote transactions so later tests start with empty,
-            # synchronized mempools again.
-            self.generate(remote_node, 1)
+            self.sync_blocks()
 
         asyncio.run(capnp.run(async_routine()))
+        # Test cleanup
+        self.sync_blocks()
         self.miniwallet.rescan_utxos()
 
     def run_ipc_option_override_test(self):

@@ -13,6 +13,7 @@ import shutil
 from typing import Optional
 
 from test_framework.messages import CBlock
+from test_framework.util import assert_equal
 
 # Test may be skipped and not have capnp installed
 try:
@@ -129,6 +130,20 @@ async def mining_wait_next_template(template, stack, ctx, opts):
 
 async def tx_collection_unknown_pos(tx_collection, ctx):
     return list((await tx_collection.unknownTxPos(ctx)).result)
+
+
+async def tx_collection_make_template(tx_collection, stack, ctx, prevhash, coinbase, *, reject_reason=None, debug=None):
+    response = await tx_collection.makeTemplate(ctx, prevhash, coinbase)
+    if reject_reason is not None:
+        assert_equal(response._has("result"), False)
+        assert_equal(response.reason, reject_reason)
+        if debug is not None:
+            assert_equal(response.debug, debug)
+        return None
+    assert_equal(response._has("result"), True)
+    assert_equal(response.reason, "")
+    assert_equal(response.debug, "")
+    return await stack.enter_async_context(destroying(response.result, ctx))
 
 
 async def mining_get_block(block_template, ctx):

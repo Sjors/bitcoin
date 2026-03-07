@@ -149,11 +149,40 @@ std::unique_ptr<CBlockTemplate> CollectedTxs::MakeTemplate(const uint256& prevha
                                                            std::string& reason,
                                                            std::string& debug)
 {
-    return BlockAssembler{
-        Assert(m_node.chainman)->ActiveChainstate(),
-        Assert(m_node.mempool).get(),
+    if (!UnknownTxPos().empty()) {
+        reason = "missing-txs";
+        debug = strprintf("collected transaction(s) still missing");
+        return nullptr;
+    }
+    ChainstateManager& chainman{*Assert(m_node.chainman)};
+    LOCK(chainman.GetMutex());
+    const auto current_tip{GetTip(chainman)};
+    const auto requested_height{GetBIP34Height(coinbase, chainman.GetParams().GetConsensus())};
+    if (!current_tip || !AnalyzePrevHash(prevhash, requested_height, *current_tip, reason, debug)) return nullptr;
+    auto block_template = BlockAssembler{
+        chainman.ActiveChainstate(),
+        m_node.mempool.get(),
         BlockAssembler::Options{BlockCreateOptions{.use_mempool = false}},
     }.CreateNewBlock();
+    if (!block_template) return nullptr;
+
+    for (const auto& wtxid : m_wtxids) {
+        const auto it{m_transactions.find(wtxid)};
+        Assume(it != m_transactions.end());
+        Assume(it->second);
+        block_template->block.vtx.push_back(it->second);
+    }
+
+    AddMerkleRootAndCoinbase(block_template->block, coinbase, block_template->block.nVersion, block_template->block.nTime, block_template->block.nNonce);
+    RegenerateCommitments(block_template->block, chainman);
+
+    BlockValidationState state{TestBlockValidity(chainman.ActiveChainstate(), block_template->block, /*check_pow=*/false, /*check_merkle_root=*/false)};
+    if (!state.IsValid()) {
+        reason = state.GetRejectReason();
+        debug = state.GetDebugMessage();
+        return nullptr;
+    }
+    return block_template;
 }
 int64_t GetMinimumTime(const CBlockIndex* pindexPrev, const int64_t difficulty_adjustment_interval)
 {

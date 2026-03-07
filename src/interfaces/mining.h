@@ -131,9 +131,20 @@ public:
      * call used by checkBlock(), with the proof-of-work and merkle-root checks
      * disabled.
      *
+     * Possible @p reason values:
+     * - `missing-txs`: one or more requested transactions have not been
+     *   provided yet
+     * - `stale-prevblk`: the requested prevhash is behind the current tip
+     * - `bad-prevblk`: the requested prevhash conflicts with the current tip at
+     *   the same height
+     * - `inconclusive-tip-too-new`: the requested prevhash builds on
+     *   a tip that is ahead of the node's current tip
+     * - otherwise BIP-22 style
+     *
+     *
      * @param[in] prevhash hash of the tip the template must build on top of
      * @param[in] coinbase complete coinbase transaction (including witness)
-     * @param[out] reason  failure reason
+     * @param[out] reason  failure reason; see above
      * @param[out] debug   more detailed rejection reason
      * @returns            block template on success, otherwise nullptr
      */
