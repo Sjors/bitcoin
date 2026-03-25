@@ -106,6 +106,14 @@ class IPCMiningTest(BitcoinTestFramework):
         coinbase_tx.nLockTime = coinbase_res.lockTime
         return coinbase_tx
 
+    async def assert_create_fails(self, ctx, mining, opts, expected_msg):
+        """Assert that createNewBlock fails with the expected remote exception."""
+        try:
+            await mining.createNewBlock(ctx, opts)
+            raise AssertionError("createNewBlock unexpectedly succeeded")
+        except capnp.lib.capnp.KjException as e:
+            assert_capnp_failed(e, f"remote exception: std::exception: {expected_msg}")
+
     def run_mining_interface_test(self):
         """Test Mining interface methods."""
         self.log.info("Running Mining interface test")
@@ -322,11 +330,8 @@ class IPCMiningTest(BitcoinTestFramework):
 
             self.log.debug("Enforce minimum reserved weight for IPC clients too")
             opts.blockReservedWeight = 0
-            try:
-                await mining.createNewBlock(ctx, opts)
-                raise AssertionError("createNewBlock unexpectedly succeeded")
-            except capnp.lib.capnp.KjException as e:
-                assert_capnp_failed(e, "remote exception: std::exception: block_reserved_weight (0) must be at least 2000 weight units")
+            await self.assert_create_fails(ctx, mining, opts,
+                "block_reserved_weight (0) must be at least 2000 weight units")
 
         asyncio.run(capnp.run(async_routine()))
 
