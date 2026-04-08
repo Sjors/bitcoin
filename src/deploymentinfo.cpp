@@ -14,6 +14,10 @@ const std::array<VBDeploymentInfo,Consensus::MAX_VERSION_BITS_DEPLOYMENTS> Versi
         .gbt_optional_rule = true,
     },
     VBDeploymentInfo{
+        .name = "testdummy2",
+        .gbt_optional_rule = true,
+    },
+    VBDeploymentInfo{
         .name = "taproot",
         .gbt_optional_rule = true,
     },

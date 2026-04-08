@@ -23,6 +23,8 @@ static const int32_t VERSIONBITS_TOP_BITS = 0x20000000UL;
 static const int32_t VERSIONBITS_TOP_MASK = 0xE0000000UL;
 /** Total bits available for versionbits warnings and live deployments */
 static const int32_t VERSIONBITS_NUM_BITS = 5;
+/** Version bit 0 flags that this block uses OP_RETURN signalling */
+static const int32_t VERSIONBITS_DEPLOYMENT_OPRETURN_FLAG = 1 << 0;
 
 /** Opaque type for BIP9 state. See versionbits_impl.h for details. */
 enum class ThresholdState : uint8_t;
@@ -71,7 +73,8 @@ struct BIP9GBTStatus {
     std::map<std::string, const Info, std::less<>> signalling, locked_in, active;
 };
 
-/** Scan a block for all known BIP9 deployment signals. */
+/** Scan a block for all known deployment signals across both BIP9 version bits
+ *  and coinbase OP_RETURN tags. */
 Consensus::DeploymentSignals GetDeploymentSignals(const CBlock& block, const Consensus::Params& params);
 
 /** BIP 9 allows multiple softforks to be deployed in parallel. We cache

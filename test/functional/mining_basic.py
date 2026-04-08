@@ -54,6 +54,7 @@ DIFFICULTY_ADJUSTMENT_INTERVAL = 144
 MAX_FUTURE_BLOCK_TIME = 2 * 3600
 MAX_TIMEWARP = 600
 VERSIONBITS_TOP_BITS = 0x20000000
+VERSIONBITS_DEPLOYMENT_OPRETURN_FLAG = 1 << 0
 VERSIONBITS_DEPLOYMENT_TESTDUMMY_BIT = 28
 DEFAULT_BLOCK_MIN_TX_FEE = 1 # default `-blockmintxfee` setting [sat/kvB]
 
@@ -84,6 +85,13 @@ class MiningTest(BitcoinTestFramework):
         self.restart_node(0, extra_args=[f'-mocktime={t}'])
         self.connect_nodes(0, 1)
         assert_equal(VERSIONBITS_TOP_BITS + (1 << VERSIONBITS_DEPLOYMENT_TESTDUMMY_BIT), self.nodes[0].getblocktemplate(NORMAL_GBT_REQUEST_PARAMS)['version'])
+        self.restart_node(0, extra_args=[f'-mocktime={t}', '-vbparams=testdummy:999999999999:999999999999', '-vbparams=testdummy2:0:999999999999'])
+        self.connect_nodes(0, 1)
+        # testdummy2 uses OP_RETURN signalling, so getblocktemplate only sets
+        # the shared version bit 0 flag. Returning the required coinbase
+        # OP_RETURN tag would need an extension to BIP22.
+        assert_equal(VERSIONBITS_TOP_BITS + VERSIONBITS_DEPLOYMENT_OPRETURN_FLAG, self.nodes[0].getblocktemplate(NORMAL_GBT_REQUEST_PARAMS)['version'])
+        assert_equal(self.nodes[0].getdeploymentinfo()['deployments']['testdummy2']['bip9']['bit'], 29)
         self.restart_node(0)
         self.connect_nodes(0, 1)
 

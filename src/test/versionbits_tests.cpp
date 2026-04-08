@@ -5,6 +5,8 @@
 #include <chain.h>
 #include <chainparams.h>
 #include <consensus/params.h>
+#include <consensus/validation.h>
+#include <script/script.h>
 #include <test/util/random.h>
 #include <test/util/common.h>
 #include <test/util/setup_common.h>
@@ -52,10 +54,34 @@ struct Deployments
         never = normal; never.nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE;
     }
 };
+
+/** Deployments that use OP_RETURN signalling instead of per-deployment version bits */
+struct OPReturnDeployments
+{
+    const Consensus::BIP9Deployment normal{
+        .bit = Consensus::MIN_OP_RETURN_SIGNAL,
+        .nStartTime = TestTime(10000),
+        .nTimeout = TestTime(20000),
+        .signal_tag = "BIP-9999",
+        .min_activation_height = 0,
+        .period = 1000,
+        .threshold = 900,
+    };
+    Consensus::BIP9Deployment always, never, delayed;
+    OPReturnDeployments()
+    {
+        delayed = normal; delayed.min_activation_height = 15000;
+        always = normal; always.nStartTime = Consensus::BIP9Deployment::ALWAYS_ACTIVE;
+        never = normal; never.nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE;
+    }
+};
 }
 
 #define CHECKERS 6
 
+using DeploymentSignals = Consensus::DeploymentSignals;
+
+template<typename DeploymentSet = Deployments>
 class VersionBitsTester
 {
     FastRandomContext& m_rng;
@@ -66,7 +92,7 @@ class VersionBitsTester
     const int32_t nVersionBase{0};
 
     // Setup BIP9Deployment structs for the checkers
-    const Deployments test_deployments;
+    const DeploymentSet test_deployments;
 
     // 6 independent checkers for the same bit.
     // The first one performs all checks, the second only 50%, the third only 25%, etc...
@@ -106,7 +132,7 @@ public:
          Reset();
     }
 
-    VersionBitsTester& Mine(unsigned int height, int32_t nTime, int32_t nVersion)
+    VersionBitsTester& Mine(unsigned int height, int32_t nTime, int32_t nVersion, DeploymentSignals deployment_signals = {})
     {
         while (vpblock.size() < height) {
             CBlockIndex* pindex = new CBlockIndex();
@@ -117,10 +143,13 @@ public:
             if ((pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) {
                 // Manually populate m_deployment_signals because normal block
                 // connection is bypassed.
-                for (std::size_t bit = 0; bit < Consensus::DeploymentSignals{}.size(); ++bit) {
+                for (std::size_t bit = 0; bit < static_cast<std::size_t>(Consensus::MIN_OP_RETURN_SIGNAL); ++bit) {
                     if ((pindex->nVersion & (uint32_t{1} << bit)) != 0) {
                         pindex->m_deployment_signals.set(bit);
                     }
+                }
+                if ((pindex->nVersion & VERSIONBITS_DEPLOYMENT_OPRETURN_FLAG) != 0) {
+                    pindex->m_deployment_signals |= deployment_signals;
                 }
             }
             pindex->BuildSkip();
@@ -449,6 +478,132 @@ void check_computeblockversion(VersionBitsCache& versionbitscache, const Consens
 }
 }; // struct BlockVersionTest
 
+/** Test OP_RETURN signalling: version bit 0 as flag, signal in m_deployment_signals.
+ *  Mirrors the structure of the existing versionbits_test above, substituting
+ *  the signalling mechanism. */
+BOOST_AUTO_TEST_CASE(versionbits_opreturn_signal)
+{
+    DeploymentSignals SIG;
+    SIG.set(Consensus::MIN_OP_RETURN_SIGNAL);
+    // Version for signalling blocks: top bits + bit 0 flag
+    // (nVersionBase is already set to VERSIONBITS_TOP_BITS)
+    const int32_t V_SIG = 0x01;  // bit 0 set
+    const int32_t V_NONE = 0;    // no signal bits
+
+    for (int i = 0; i < 64; i++) {
+        // DEFINED -> STARTED after timeout reached -> FAILED
+        VersionBitsTester<OPReturnDeployments>(m_rng, VERSIONBITS_TOP_BITS).TestDefined().TestStateSinceHeight(0)
+                           .Mine(1, TestTime(1), V_SIG, SIG).TestDefined().TestStateSinceHeight(0)
+                           .Mine(11, TestTime(11), V_SIG, SIG).TestDefined().TestStateSinceHeight(0)
+                           .Mine(989, TestTime(989), V_SIG, SIG).TestDefined().TestStateSinceHeight(0)
+                           .Mine(999, TestTime(20000), V_SIG, SIG).TestDefined().TestStateSinceHeight(0)
+                           .Mine(1000, TestTime(20000), V_NONE).TestStarted().TestStateSinceHeight(1000) // Hit started, stop signalling
+                           .Mine(1999, TestTime(30001), V_NONE).TestStarted().TestStateSinceHeight(1000)
+                           .Mine(2000, TestTime(30002), V_SIG, SIG).TestFailed().TestStateSinceHeight(2000) // Timed out
+                           .Mine(2001, TestTime(30003), V_SIG, SIG).TestFailed().TestStateSinceHeight(2000)
+                           .Mine(2999, TestTime(30004), V_SIG, SIG).TestFailed().TestStateSinceHeight(2000)
+                           .Mine(3000, TestTime(30005), V_SIG, SIG).TestFailed().TestStateSinceHeight(2000)
+                           .Mine(4000, TestTime(30006), V_SIG, SIG).TestFailed().TestStateSinceHeight(2000)
+
+        // DEFINED -> STARTED -> FAILED (insufficient signals)
+                           .Reset().TestDefined().TestStateSinceHeight(0)
+                           .Mine(1, TestTime(1), V_NONE).TestDefined().TestStateSinceHeight(0)
+                           .Mine(1000, TestTime(10000) - 1, V_SIG, SIG).TestDefined().TestStateSinceHeight(0)
+                           .Mine(2000, TestTime(10000), V_SIG, SIG).TestStarted().TestStateSinceHeight(2000)
+                           .Mine(2051, TestTime(10010), V_NONE).TestStarted().TestStateSinceHeight(2000) // 51 old blocks
+                           .Mine(2950, TestTime(10020), V_SIG, SIG).TestStarted().TestStateSinceHeight(2000) // 899 new blocks
+                           .Mine(3000, TestTime(20000), V_NONE).TestFailed().TestStateSinceHeight(3000)
+                           .Mine(4000, TestTime(20010), V_SIG, SIG).TestFailed().TestStateSinceHeight(3000)
+
+        // DEFINED -> STARTED -> LOCKEDIN after timeout reached -> ACTIVE
+                           .Reset().TestDefined().TestStateSinceHeight(0)
+                           .Mine(1, TestTime(1), V_NONE).TestDefined().TestStateSinceHeight(0)
+                           .Mine(1000, TestTime(10000) - 1, V_SIG, SIG).TestDefined().TestStateSinceHeight(0)
+                           .Mine(2000, TestTime(10000), V_SIG, SIG).TestStarted().TestStateSinceHeight(2000)
+                           .Mine(2999, TestTime(30000), V_SIG, SIG).TestStarted().TestStateSinceHeight(2000) // 999 new blocks
+                           .Mine(3000, TestTime(30000), V_SIG, SIG).TestLockedIn().TestStateSinceHeight(3000) // 1000 signalling
+                           .Mine(3999, TestTime(30001), V_NONE).TestLockedIn().TestStateSinceHeight(3000)
+                           .Mine(4000, TestTime(30002), V_NONE).TestActiveDelayed().TestStateSinceHeight(4000, 3000)
+                           .Mine(14333, TestTime(30003), V_NONE).TestActiveDelayed().TestStateSinceHeight(4000, 3000)
+                           .Mine(24000, TestTime(40000), V_NONE).TestActive().TestStateSinceHeight(4000, 15000)
+
+        // Test that wrong signal types don't count:
+        //  - version bit 0 without OP_RETURN signal -> no signal
+        //  - BIP9 version bit 8 (0x100) without OP_RETURN -> no signal
+        //  - OP_RETURN signal without version bit 0 -> no signal
+                           .Reset().TestDefined().TestStateSinceHeight(0)
+                           .Mine(1, TestTime(1), V_NONE).TestDefined().TestStateSinceHeight(0)
+                           .Mine(1000, TestTime(10000) - 1, V_NONE).TestDefined().TestStateSinceHeight(0)
+                           .Mine(2000, TestTime(10000), V_NONE).TestStarted().TestStateSinceHeight(2000)
+                           // Version bit 0 set but no OP_RETURN signal -> doesn't count
+                           .Mine(3000, TestTime(10010), V_SIG, {}).TestStarted().TestStateSinceHeight(2000)
+                           // BIP9 version bit 8 set, no OP_RETURN -> doesn't count
+                           .Mine(4000, TestTime(10020), 0x100, {}).TestStarted().TestStateSinceHeight(2000)
+                           // OP_RETURN signal set but no version bit 0 -> doesn't count
+                           .Mine(5000, TestTime(10030), V_NONE, SIG).TestStarted().TestStateSinceHeight(2000)
+                           // Finally, both version bit 0 AND OP_RETURN -> signals!
+                           .Mine(6000, TestTime(10040), V_SIG, SIG).TestLockedIn().TestStateSinceHeight(6000)
+        ;
+    }
+}
+
+BOOST_AUTO_TEST_CASE(versionbits_opreturn_signal_parsing)
+{
+    Consensus::Params params;
+    params.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY2] = {
+        .bit = Consensus::MIN_OP_RETURN_SIGNAL,
+        .signal_tag = "BIP-9999",
+    };
+    DeploymentSignals SIG;
+    SIG.set(Consensus::MIN_OP_RETURN_SIGNAL);
+
+    CMutableTransaction coinbase;
+    coinbase.vout.emplace_back(0, CScript{} << OP_RETURN << std::vector<uint8_t>{'B', 'I', 'P', '-', '9', '9', '9', '9'});
+    coinbase.vout.emplace_back(0, CScript{} << OP_RETURN << std::vector<uint8_t>{'B', 'I', 'P', '-', '0', '0', '0', '1'});
+    coinbase.vout.emplace_back(0, CScript{} << OP_TRUE);
+
+    CBlock block;
+    block.nVersion = VERSIONBITS_TOP_BITS | VERSIONBITS_DEPLOYMENT_OPRETURN_FLAG;
+    block.vtx.push_back(MakeTransactionRef(std::move(coinbase)));
+
+    BOOST_CHECK(GetDeploymentSignals(block, params) == SIG);
+
+    CMutableTransaction non_signalling_coinbase;
+    non_signalling_coinbase.vout.emplace_back(0, CScript{} << OP_RETURN << std::vector<uint8_t>{'B', 'I', 'P', '-', '0', '0', '0', '1'});
+
+    CBlock non_signalling_block;
+    non_signalling_block.nVersion = VERSIONBITS_TOP_BITS;
+    non_signalling_block.vtx.push_back(MakeTransactionRef(std::move(non_signalling_coinbase)));
+
+    BOOST_CHECK(GetDeploymentSignals(non_signalling_block, params).none());
+}
+
+BOOST_AUTO_TEST_CASE(versionbits_opreturn_computeblockversion)
+{
+    VersionBitsCache versionbitscache;
+    DeploymentSignals SIG;
+    SIG.set(Consensus::MIN_OP_RETURN_SIGNAL);
+
+    ArgsManager args;
+    args.ForceSetArg("-vbparams", "testdummy2:1199145601:1230767999"); // January 1, 2008 - December 31, 2008
+    const auto chain_params = CreateChainParams(args, ChainType::REGTEST);
+    auto params = chain_params->GetConsensus();
+    params.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = Consensus::BIP9Deployment::NEVER_ACTIVE;
+    params.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY2].period = 1000;
+    params.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY2].threshold = 900;
+
+    VersionBitsTester<OPReturnDeployments> chain(m_rng, VERSIONBITS_TOP_BITS);
+    CBlockIndex* last_block = chain.Mine(1000, TestTime(10000), 0).Tip();
+    BOOST_CHECK_EQUAL(versionbitscache.ComputeBlockVersion(last_block, params), VERSIONBITS_TOP_BITS | VERSIONBITS_DEPLOYMENT_OPRETURN_FLAG);
+
+    last_block = chain.Mine(2000, TestTime(10000), VERSIONBITS_DEPLOYMENT_OPRETURN_FLAG, SIG).Tip();
+    BOOST_CHECK_EQUAL(versionbitscache.ComputeBlockVersion(last_block, params), VERSIONBITS_TOP_BITS | VERSIONBITS_DEPLOYMENT_OPRETURN_FLAG);
+
+    last_block = chain.Mine(3000, TestTime(10000), 0).Tip();
+    BOOST_CHECK_EQUAL(versionbitscache.ComputeBlockVersion(last_block, params) & VERSIONBITS_DEPLOYMENT_OPRETURN_FLAG, 0);
+    BOOST_CHECK(versionbitscache.IsActiveAfter(last_block, params, Consensus::DEPLOYMENT_TESTDUMMY2));
+}
+
 BOOST_FIXTURE_TEST_CASE(versionbits_computeblockversion, BlockVersionTest)
 {
     VersionBitsCache vbcache;
@@ -469,16 +624,22 @@ BOOST_FIXTURE_TEST_CASE(versionbits_computeblockversion, BlockVersionTest)
             const uint32_t dep_mask{uint32_t{1} << dep_info.bit};
             BOOST_CHECK(!(chain_all_vbits & dep_mask));
             chain_all_vbits |= dep_mask;
-            BOOST_CHECK(0 <= dep_info.bit && dep_info.bit < VERSIONBITS_MAX_NUM_BITS);
+            BOOST_CHECK(0 <= dep_info.bit);
             if (chain_type != ChainType::REGTEST) {
-                if (dep == Consensus::DEPLOYMENT_TESTDUMMY) {
+                if (dep == Consensus::DEPLOYMENT_TESTDUMMY ||
+                    dep == Consensus::DEPLOYMENT_TESTDUMMY2) {
                     BOOST_CHECK_EQUAL(dep_info.nStartTime, Consensus::BIP9Deployment::NEVER_ACTIVE);
                     BOOST_CHECK_EQUAL(dep_info.nTimeout, Consensus::BIP9Deployment::NO_TIMEOUT);
-                } else {
+                } else if (dep_info.signal_tag.empty()) {
                     BOOST_CHECK(dep_info.bit < VERSIONBITS_NUM_BITS);
                 }
             }
-            check_computeblockversion(vbcache, chainParams->GetConsensus(), dep);
+            if (dep_info.signal_tag.empty()) {
+                BOOST_CHECK(dep_info.bit < VERSIONBITS_MAX_NUM_BITS);
+                check_computeblockversion(vbcache, chainParams->GetConsensus(), dep);
+            } else {
+                BOOST_CHECK_EQUAL(dep_info.bit, Consensus::MIN_OP_RETURN_SIGNAL);
+            }
         }
     }
 
@@ -499,6 +660,14 @@ BOOST_FIXTURE_TEST_CASE(versionbits_computeblockversion, BlockVersionTest)
         args.ForceSetArg("-vbparams", "testdummy:1199145601:1230767999:403200"); // January 1, 2008 - December 31, 2008, min act height 403200
         const auto chainParams = CreateChainParams(args, ChainType::REGTEST);
         check_computeblockversion(vbcache, chainParams->GetConsensus(), Consensus::DEPLOYMENT_TESTDUMMY);
+    }
+
+    {
+        ArgsManager args;
+        args.ForceSetArg("-vbparams", "testdummy2:1199145601:1230767999"); // January 1, 2008 - December 31, 2008
+        const auto chainParams = CreateChainParams(args, ChainType::REGTEST);
+        BOOST_CHECK_EQUAL(chainParams->GetConsensus().vDeployments[Consensus::DEPLOYMENT_TESTDUMMY2].bit, Consensus::MIN_OP_RETURN_SIGNAL);
+        BOOST_CHECK_EQUAL(chainParams->GetConsensus().vDeployments[Consensus::DEPLOYMENT_TESTDUMMY2].signal_tag, "BIP-9999");
     }
 }
 

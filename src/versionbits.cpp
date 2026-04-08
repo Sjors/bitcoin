@@ -5,9 +5,12 @@
 #include <consensus/params.h>
 #include <deploymentinfo.h>
 #include <kernel/chainparams.h>
+#include <script/script.h>
 #include <util/check.h>
 #include <versionbits.h>
 #include <versionbits_impl.h>
+
+#include <string_view>
 
 using enum ThresholdState;
 
@@ -32,9 +35,38 @@ Consensus::DeploymentSignals GetDeploymentSignals(const CBlock& block, const Con
     Consensus::DeploymentSignals signals;
     for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++i) {
         const auto& dep = params.vDeployments[i];
-        if ((block.nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS &&
-            (block.nVersion & (uint32_t{1} << dep.bit)) != 0) {
-            signals.set(static_cast<std::size_t>(dep.bit));
+        if (dep.signal_tag.empty()) {
+            // Standard BIP9 signalling: the deployment is identified directly
+            // by its version bit in the block header.
+            if ((block.nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS &&
+                (block.nVersion & (uint32_t{1} << dep.bit)) != 0) {
+                signals.set(static_cast<std::size_t>(dep.bit));
+            }
+            continue;
+        }
+
+        // Proof-of-concept OP_RETURN signalling: version bit 0 is a shared
+        // flag, and the specific deployment is selected by a coinbase tag.
+        if (((block.nVersion & VERSIONBITS_TOP_MASK) != VERSIONBITS_TOP_BITS) ||
+            ((block.nVersion & VERSIONBITS_DEPLOYMENT_OPRETURN_FLAG) == 0) ||
+            block.vtx.empty()) {
+            continue;
+        }
+
+        for (const auto& vout : block.vtx[0]->vout) {
+            if (vout.scriptPubKey.size() < 2) continue;
+            if (vout.scriptPubKey[0] != OP_RETURN) continue;
+            // Extract pushed data: OP_RETURN <len> <data>
+            // For tags up to 75 bytes, the push is a single-byte length.
+            if (vout.scriptPubKey.size() < 3) continue;
+            unsigned int len = vout.scriptPubKey[1];
+            if (len == 0 || len > 75) continue;
+            if (vout.scriptPubKey.size() < 2 + len) continue;
+            std::string_view data(reinterpret_cast<const char*>(&vout.scriptPubKey[2]), len);
+            if (data == dep.signal_tag) {
+                signals.set(static_cast<std::size_t>(dep.bit));
+                break;
+            }
         }
     }
     return signals;
@@ -295,8 +327,15 @@ static int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensu
 {
     int32_t nVersion = VERSIONBITS_TOP_BITS;
 
-    ForEachSignallingDeployment(pindexPrev, params, caches, [&](Consensus::DeploymentPos, const VersionBitsConditionChecker& checker) {
-        nVersion |= checker.Mask();
+    ForEachSignallingDeployment(pindexPrev, params, caches, [&](Consensus::DeploymentPos pos, const VersionBitsConditionChecker& checker) {
+        if (!params.vDeployments[pos].signal_tag.empty()) {
+            // OP_RETURN signalling: set shared bit 0 flag.
+            // The actual signal goes in a coinbase OP_RETURN output.
+            nVersion |= VERSIONBITS_DEPLOYMENT_OPRETURN_FLAG;
+        } else {
+            // BIP9 version-bit signalling: set the deployment's version bit.
+            nVersion |= checker.Mask();
+        }
     });
 
     return nVersion;

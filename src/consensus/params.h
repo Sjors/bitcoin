@@ -10,8 +10,10 @@
 #include <uint256.h>
 
 #include <array>
+#include <cassert>
 #include <bitset>
 #include <chrono>
+#include <cstddef>
 #include <limits>
 #include <map>
 #include <vector>
@@ -34,24 +36,40 @@ constexpr bool ValidDeployment(BuriedDeployment dep) { return dep <= DEPLOYMENT_
 
 enum DeploymentPos : uint16_t {
     DEPLOYMENT_TESTDUMMY,
+    // This test deployment uses OP_RETURN-based signalling.
+    DEPLOYMENT_TESTDUMMY2,
     DEPLOYMENT_TAPROOT, // Deployment of Schnorr/Taproot (BIPs 340-342)
     // NOTE: Also add new deployments to VersionBitsDeploymentInfo in deploymentinfo.cpp
     MAX_VERSION_BITS_DEPLOYMENTS
 };
 constexpr bool ValidDeployment(DeploymentPos dep) { return dep < MAX_VERSION_BITS_DEPLOYMENTS; }
-/** Total number of deployment signals that can be tracked. */
-constexpr std::size_t MAX_DEPLOYMENT_SIGNALS{29};
+/** Number assigned to the first OP_RETURN deployment signal. This keeps the
+ *  alternative signalling mechanism numbered after the original BIP9 bits,
+ *  so BIP9 version-bit signals remain in the range [0, MIN_OP_RETURN_SIGNAL). */
+constexpr int MIN_OP_RETURN_SIGNAL{29};
+/** Number of known OP_RETURN deployment tags in this proof of concept. */
+constexpr std::size_t MAX_OP_RETURN_SIGNALS{1};
+/** Total number of tracked deployment signals across both mechanisms. */
+constexpr std::size_t MAX_DEPLOYMENT_SIGNALS{
+    static_cast<std::size_t>(MIN_OP_RETURN_SIGNAL) + MAX_OP_RETURN_SIGNALS};
 
 /**
- * Struct for each individual consensus rule change using BIP9.
+ * Struct for each individual consensus rule change using BIP9-style threshold logic.
  */
 struct BIP9Deployment {
-    /** Bit position to select the particular bit in nVersion. */
-    int bit{28};
+    /** Bit position to select the particular bit in nVersion.
+     *  When signal_tag is set, this is the externally visible OP_RETURN signal
+     *  number instead, starting at MIN_OP_RETURN_SIGNAL, and version bit 0 is
+     *  used as a shared flag. */
+    int bit{1};
     /** Start MedianTime for version bits miner confirmation. Can be a date in the past */
     int64_t nStartTime{NEVER_ACTIVE};
     /** Timeout/expiry MedianTime for the deployment attempt. */
     int64_t nTimeout{NEVER_ACTIVE};
+    /** If set, this deployment uses OP_RETURN signalling instead of per-deployment version bits.
+     *  The coinbase must contain an OP_RETURN output pushing this exact tag
+     *  (e.g. "BIP-9999"), and version bit 0 must be set in the header. */
+    std::string signal_tag{};
     /** If lock in occurs, delay activation until at least this block
      *  height.  Note that activation will only occur on a retarget
      *  boundary.

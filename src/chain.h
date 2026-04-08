@@ -151,8 +151,9 @@ public:
     //! (memory only) Maximum nTime in the chain up to and including this block.
     unsigned int nTimeMax{0};
 
-    //! (memory only) Known deployment signals present in this block.
-    //! Populated during block connection or when loading block index entries.
+    //! (memory only) Known deployment signals present in this block, across
+    //! both BIP9 version bits and coinbase OP_RETURN tags. Populated during
+    //! block connection or when loading block index entries.
     Consensus::DeploymentSignals m_deployment_signals{};
 
     explicit CBlockIndex(const CBlockHeader& block)
