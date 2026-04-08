@@ -40,6 +40,7 @@
 #include <util/time.h>
 #include <util/translation.h>
 #include <validation.h>
+#include <versionbits.h>
 
 #include <cerrno>
 #include <compare>
@@ -144,6 +145,17 @@ bool BlockTreeDB::LoadBlockIndexGuts(const Consensus::Params& consensusParams, s
                 pindexNew->nNonce         = diskindex.nNonce;
                 pindexNew->nStatus        = diskindex.nStatus;
                 pindexNew->nTx            = diskindex.nTx;
+                if (diskindex.m_have_deployment_signals) {
+                    pindexNew->m_deployment_signals = diskindex.m_deployment_signals;
+                } else {
+                    CBlock block;
+                    block.nVersion = pindexNew->nVersion;
+                    block.hashMerkleRoot = pindexNew->hashMerkleRoot;
+                    block.nTime = pindexNew->nTime;
+                    block.nBits = pindexNew->nBits;
+                    block.nNonce = pindexNew->nNonce;
+                    pindexNew->m_deployment_signals = GetDeploymentSignals(block, consensusParams);
+                }
 
                 if (!CheckProofOfWork(pindexNew->GetBlockHash(), pindexNew->nBits, consensusParams)) {
                     LogError("%s: CheckProofOfWork failed: %s\n", __func__, pindexNew->ToString());

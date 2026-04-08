@@ -21,7 +21,7 @@ static const int32_t VERSIONBITS_LAST_OLD_BLOCK_VERSION = 4;
 static const int32_t VERSIONBITS_TOP_BITS = 0x20000000UL;
 /** What bitmask determines whether versionbits is in use */
 static const int32_t VERSIONBITS_TOP_MASK = 0xE0000000UL;
-/** Total bits available for versionbits */
+/** Total bits available for versionbits warnings and live deployments */
 static const int32_t VERSIONBITS_NUM_BITS = 5;
 
 /** Opaque type for BIP9 state. See versionbits_impl.h for details. */
@@ -70,6 +70,9 @@ struct BIP9GBTStatus {
     };
     std::map<std::string, const Info, std::less<>> signalling, locked_in, active;
 };
+
+/** Scan a block for all known BIP9 deployment signals. */
+Consensus::DeploymentSignals GetDeploymentSignals(const CBlock& block, const Consensus::Params& params);
 
 /** BIP 9 allows multiple softforks to be deployed in parallel. We cache
  *  per-period state for every one of them. */

@@ -151,6 +151,10 @@ public:
     //! (memory only) Maximum nTime in the chain up to and including this block.
     unsigned int nTimeMax{0};
 
+    //! (memory only) Known deployment signals present in this block.
+    //! Populated during block connection or when loading block index entries.
+    Consensus::DeploymentSignals m_deployment_signals{};
+
     explicit CBlockIndex(const CBlockHeader& block)
         : nVersion{block.nVersion},
           hashMerkleRoot{block.hashMerkleRoot},
@@ -323,9 +327,11 @@ class CDiskBlockIndex : public CBlockIndex
      * SerParams can be used if the field requires any meaning in the future.
      **/
     static constexpr int DUMMY_VERSION = 259900;
+    static constexpr int DEPLOYMENT_SIGNALS_VERSION = DUMMY_VERSION + 1;
 
 public:
     uint256 hashPrev;
+    bool m_have_deployment_signals{false};
 
     CDiskBlockIndex()
     {
@@ -335,12 +341,13 @@ public:
     explicit CDiskBlockIndex(const CBlockIndex* pindex) : CBlockIndex(*pindex)
     {
         hashPrev = (pprev ? pprev->GetBlockHash() : uint256());
+        m_have_deployment_signals = true;
     }
 
     SERIALIZE_METHODS(CDiskBlockIndex, obj)
     {
         LOCK(::cs_main);
-        int _nVersion = DUMMY_VERSION;
+        int _nVersion = DEPLOYMENT_SIGNALS_VERSION;
         READWRITE(VARINT_MODE(_nVersion, VarIntMode::NONNEGATIVE_SIGNED));
 
         READWRITE(VARINT_MODE(obj.nHeight, VarIntMode::NONNEGATIVE_SIGNED));
@@ -357,6 +364,13 @@ public:
         READWRITE(obj.nTime);
         READWRITE(obj.nBits);
         READWRITE(obj.nNonce);
+        if (_nVersion >= DEPLOYMENT_SIGNALS_VERSION) {
+            std::string deployment_signals;
+            SER_WRITE(obj, deployment_signals = obj.m_deployment_signals.to_string());
+            READWRITE(deployment_signals);
+            SER_READ(obj, obj.m_deployment_signals = Consensus::DeploymentSignals{deployment_signals});
+            SER_READ(obj, obj.m_have_deployment_signals = true);
+        }
     }
 
     uint256 ConstructBlockHash() const

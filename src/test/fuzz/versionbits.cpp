@@ -47,12 +47,13 @@ private:
     std::vector<std::unique_ptr<CBlockIndex>> m_blocks;
     const uint32_t m_start_time;
     const uint32_t m_interval;
+    const int m_signal_bit;
     const int32_t m_signal;
     const int32_t m_no_signal;
 
 public:
-    Blocks(uint32_t start_time, uint32_t interval, int32_t signal, int32_t no_signal)
-        : m_start_time{start_time}, m_interval{interval}, m_signal{signal}, m_no_signal{no_signal} {}
+    Blocks(uint32_t start_time, uint32_t interval, int signal_bit, int32_t signal, int32_t no_signal)
+        : m_start_time{start_time}, m_interval{interval}, m_signal_bit{signal_bit}, m_signal{signal}, m_no_signal{no_signal} {}
 
     size_t size() const { return m_blocks.size(); }
 
@@ -71,6 +72,10 @@ public:
         auto current_block = std::make_unique<CBlockIndex>(header);
         current_block->pprev = tip();
         current_block->nHeight = m_blocks.size();
+        if ((header.nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS &&
+            (header.nVersion & (uint32_t{1} << m_signal_bit)) != 0) {
+            current_block->m_deployment_signals.set(static_cast<std::size_t>(m_signal_bit));
+        }
         current_block->BuildSkip();
 
         return m_blocks.emplace_back(std::move(current_block)).get();
@@ -113,9 +118,6 @@ FUZZ_TARGET(versionbits, .init = initialize)
     const int32_t ver_nosignal = fuzzed_data_provider.ConsumeIntegral<int32_t>();
     if (ver_nosignal < 0) return; // negative values are uninteresting
 
-    // Now that we have chosen time and versions, setup to mine blocks
-    Blocks blocks(block_start_time, interval, ver_signal, ver_nosignal);
-
     const bool always_active_test = fuzzed_data_provider.ConsumeBool();
     const bool never_active_test = !always_active_test && fuzzed_data_provider.ConsumeBool();
 
@@ -152,10 +154,15 @@ FUZZ_TARGET(versionbits, .init = initialize)
         return dep;
     }()};
     TestConditionChecker checker(dep);
+    Blocks blocks(block_start_time, interval, dep.bit, ver_signal, ver_nosignal);
+    const auto signals_version{[&](int32_t version) {
+        return (version & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS &&
+               (version & (uint32_t{1} << dep.bit)) != 0;
+    }};
 
     // Early exit if the versions don't signal sensibly for the deployment
-    if (!checker.Condition(ver_signal)) return;
-    if (checker.Condition(ver_nosignal)) return;
+    if (!signals_version(ver_signal)) return;
+    if (signals_version(ver_nosignal)) return;
 
     // TOP_BITS should ensure version will be positive and meet min
     // version requirement
@@ -219,7 +226,7 @@ FUZZ_TARGET(versionbits, .init = initialize)
         CBlockIndex* current_block = blocks.mine_block(signal);
 
         // verify that signalling attempt was interpreted correctly
-        assert(checker.Condition(current_block->nVersion) == signal);
+        assert(current_block->m_deployment_signals.test(static_cast<std::size_t>(dep.bit)) == signal);
 
         // state and since don't change within the period
         const ThresholdState state = checker.GetStateFor(current_block);
@@ -257,7 +264,7 @@ FUZZ_TARGET(versionbits, .init = initialize)
     bool signal = (signalling_mask >> (period % 32)) & 1;
     if (signal) ++blocks_sig;
     CBlockIndex* current_block = blocks.mine_block(signal);
-    assert(checker.Condition(current_block->nVersion) == signal);
+    assert(current_block->m_deployment_signals.test(static_cast<std::size_t>(dep.bit)) == signal);
 
     const BIP9Stats stats = checker.GetStateStatisticsFor(current_block);
     assert(stats.period == period);

@@ -106,13 +106,23 @@ public:
          Reset();
     }
 
-    VersionBitsTester& Mine(unsigned int height, int32_t nTime, int32_t nVersion) {
+    VersionBitsTester& Mine(unsigned int height, int32_t nTime, int32_t nVersion)
+    {
         while (vpblock.size() < height) {
             CBlockIndex* pindex = new CBlockIndex();
             pindex->nHeight = vpblock.size();
             pindex->pprev = Tip();
             pindex->nTime = nTime;
             pindex->nVersion = (nVersionBase | nVersion);
+            if ((pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) {
+                // Manually populate m_deployment_signals because normal block
+                // connection is bypassed.
+                for (uint32_t bit = 0; bit < Consensus::BIP9Deployment::MAX_DEPLOYMENT_SIGNALS; ++bit) {
+                    if ((pindex->nVersion & (uint32_t{1} << bit)) != 0) {
+                        pindex->m_deployment_signals |= uint32_t{1} << bit;
+                    }
+                }
+            }
             pindex->BuildSkip();
             vpblock.push_back(pindex);
         }

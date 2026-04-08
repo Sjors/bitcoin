@@ -2331,6 +2331,10 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
 
     m_chainman.num_blocks_total++;
 
+    // Populate the block's BIP9 deployment signal cache.
+    // This must happen before any deployment status checks for this block.
+    pindex->m_deployment_signals = GetDeploymentSignals(block, params.GetConsensus());
+
     // Special case for the genesis block, skipping connection of its transactions
     // (its coinbase is unspendable)
     if (block_hash == params.GetConsensus().hashGenesisBlock) {

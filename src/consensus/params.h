@@ -11,6 +11,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <limits>
 #include <map>
 #include <vector>
@@ -43,6 +44,8 @@ constexpr bool ValidDeployment(DeploymentPos dep) { return dep < MAX_VERSION_BIT
  * Struct for each individual consensus rule change using BIP9.
  */
 struct BIP9Deployment {
+    /** Total number of version-bit signals that can be tracked. */
+    static constexpr uint32_t MAX_DEPLOYMENT_SIGNALS{29};
     /** Bit position to select the particular bit in nVersion. */
     int bit{28};
     /** Start MedianTime for version bits miner confirmation. Can be a date in the past */
@@ -77,6 +80,8 @@ struct BIP9Deployment {
      *  prior to deploying it on some or all networks. */
     static constexpr int64_t NEVER_ACTIVE = -2;
 };
+
+using DeploymentSignals = uint32_t;
 
 /**
  * Parameters that influence chain consensus.
