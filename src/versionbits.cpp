@@ -13,12 +13,12 @@ using enum ThresholdState;
 
 Consensus::DeploymentSignals GetDeploymentSignals(const CBlock& block, const Consensus::Params& params)
 {
-    Consensus::DeploymentSignals signals{0};
+    Consensus::DeploymentSignals signals;
     for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; ++i) {
         const auto& dep = params.vDeployments[i];
         if ((block.nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS &&
             (block.nVersion & (uint32_t{1} << dep.bit)) != 0) {
-            signals |= uint32_t{1} << dep.bit;
+            signals.set(static_cast<std::size_t>(dep.bit));
         }
     }
     return signals;

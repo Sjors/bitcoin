@@ -67,7 +67,7 @@ protected:
 
     bool Condition(const CBlockIndex* pindex) const override
     {
-        return (pindex->m_deployment_signals & Mask()) != 0;
+        return pindex->m_deployment_signals.test(static_cast<std::size_t>(dep.bit));
     }
 
 public:

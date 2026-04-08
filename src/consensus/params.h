@@ -10,8 +10,8 @@
 #include <uint256.h>
 
 #include <array>
+#include <bitset>
 #include <chrono>
-#include <cstdint>
 #include <limits>
 #include <map>
 #include <vector>
@@ -39,13 +39,13 @@ enum DeploymentPos : uint16_t {
     MAX_VERSION_BITS_DEPLOYMENTS
 };
 constexpr bool ValidDeployment(DeploymentPos dep) { return dep < MAX_VERSION_BITS_DEPLOYMENTS; }
+/** Total number of deployment signals that can be tracked. */
+constexpr std::size_t MAX_DEPLOYMENT_SIGNALS{29};
 
 /**
  * Struct for each individual consensus rule change using BIP9.
  */
 struct BIP9Deployment {
-    /** Total number of version-bit signals that can be tracked. */
-    static constexpr uint32_t MAX_DEPLOYMENT_SIGNALS{29};
     /** Bit position to select the particular bit in nVersion. */
     int bit{28};
     /** Start MedianTime for version bits miner confirmation. Can be a date in the past */
@@ -81,7 +81,7 @@ struct BIP9Deployment {
     static constexpr int64_t NEVER_ACTIVE = -2;
 };
 
-using DeploymentSignals = uint32_t;
+using DeploymentSignals = std::bitset<MAX_DEPLOYMENT_SIGNALS>;
 
 /**
  * Parameters that influence chain consensus.

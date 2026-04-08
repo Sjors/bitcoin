@@ -117,9 +117,9 @@ public:
             if ((pindex->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS) {
                 // Manually populate m_deployment_signals because normal block
                 // connection is bypassed.
-                for (uint32_t bit = 0; bit < Consensus::BIP9Deployment::MAX_DEPLOYMENT_SIGNALS; ++bit) {
+                for (std::size_t bit = 0; bit < Consensus::DeploymentSignals{}.size(); ++bit) {
                     if ((pindex->nVersion & (uint32_t{1} << bit)) != 0) {
-                        pindex->m_deployment_signals |= uint32_t{1} << bit;
+                        pindex->m_deployment_signals.set(bit);
                     }
                 }
             }
