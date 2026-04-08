@@ -11,6 +11,22 @@
 
 using enum ThresholdState;
 
+template <typename Callback>
+static void ForEachSignallingDeployment(const CBlockIndex* pindexPrev,
+                                        const Consensus::Params& params,
+                                        std::array<ThresholdConditionCache, Consensus::MAX_VERSION_BITS_DEPLOYMENTS>& caches,
+                                        Callback&& callback)
+{
+    for (int i = 0; i < static_cast<int>(Consensus::MAX_VERSION_BITS_DEPLOYMENTS); ++i) {
+        const auto pos{static_cast<Consensus::DeploymentPos>(i)};
+        VersionBitsConditionChecker checker(params, pos);
+        const auto state{checker.GetStateFor(pindexPrev, caches[pos])};
+        if (state == ThresholdState::STARTED || state == ThresholdState::LOCKED_IN) {
+            callback(pos, checker);
+        }
+    }
+}
+
 Consensus::DeploymentSignals GetDeploymentSignals(const CBlock& block, const Consensus::Params& params)
 {
     Consensus::DeploymentSignals signals;
@@ -279,14 +295,9 @@ static int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensu
 {
     int32_t nVersion = VERSIONBITS_TOP_BITS;
 
-    for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
-        Consensus::DeploymentPos pos = static_cast<Consensus::DeploymentPos>(i);
-        VersionBitsConditionChecker checker(params, pos);
-        ThresholdState state = checker.GetStateFor(pindexPrev, caches[pos]);
-        if (state == ThresholdState::LOCKED_IN || state == ThresholdState::STARTED) {
-            nVersion |= checker.Mask();
-        }
-    }
+    ForEachSignallingDeployment(pindexPrev, params, caches, [&](Consensus::DeploymentPos, const VersionBitsConditionChecker& checker) {
+        nVersion |= checker.Mask();
+    });
 
     return nVersion;
 }
