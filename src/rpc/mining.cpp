@@ -1018,9 +1018,16 @@ static RPCHelpMan getblocktemplate()
         result.pushKV("signet_challenge", HexStr(consensusParams.signet_challenge));
     }
 
-    if (auto coinbase{block_template->getCoinbaseTx()}; coinbase.required_outputs.size() > 0) {
-        CHECK_NONFATAL(coinbase.required_outputs.size() == 1); // Only one output is currently expected
-        result.pushKV("default_witness_commitment", HexStr(coinbase.required_outputs[0].scriptPubKey));
+    if (auto coinbase{block_template->getCoinbaseTx()}; !coinbase.required_outputs.empty()) {
+        // BIP141 uses the highest output index if multiple outputs match the
+        // witness commitment pattern, so scan from the back.
+        for (auto it = coinbase.required_outputs.rbegin(); it != coinbase.required_outputs.rend(); ++it) {
+            const auto& required_output{*it};
+            if (IsWitnessCommitmentOutput(required_output)) {
+                result.pushKV("default_witness_commitment", HexStr(required_output.scriptPubKey));
+                break;
+            }
+        }
     }
 
     return result;
