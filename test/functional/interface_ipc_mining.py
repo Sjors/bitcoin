@@ -24,6 +24,7 @@ from test_framework.messages import (
 from test_framework.script import (
     CScript,
     CScriptNum,
+    OP_RETURN,
 )
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
@@ -96,8 +97,8 @@ class IPCMiningTest(BitcoinTestFramework):
         coinbase_tx.vout = [CTxOut()]
         coinbase_tx.vout[0].scriptPubKey = miniwallet.get_output_script()
         coinbase_tx.vout[0].nValue = coinbase_res.blockRewardRemaining
-        # Add SegWit OP_RETURN. This is currently always present even for
-        # empty blocks, but this may change.
+        # Append any required coinbase outputs, such as the witness
+        # commitment and deployment signalling OP_RETURNs.
         for output_data in coinbase_res.requiredOutputs:
             output = CTxOut()
             output.deserialize(BytesIO(output_data))
@@ -396,6 +397,39 @@ class IPCMiningTest(BitcoinTestFramework):
 
         asyncio.run(capnp.run(async_routine()))
 
+    def run_opreturn_required_outputs_test(self):
+        self.log.info("Running OP_RETURN required_outputs test")
+        self.restart_node(0, extra_args=[
+            '-vbparams=testdummy:999999999999:999999999999',
+            '-vbparams=testdummy2:0:999999999999',
+        ])
+
+        async def async_routine():
+            ctx, mining = await self.make_mining_ctx()
+
+            async with AsyncExitStack() as stack:
+                template = await mining_create_block_template(mining, stack, ctx, self.default_block_create_options)
+                assert template is not None
+
+                coinbase_res = await mining_get_coinbase_tx(template, ctx)
+                assert_equal(len(coinbase_res.requiredOutputs), 2)
+
+                signal_output = CTxOut()
+                signal_output.deserialize(BytesIO(coinbase_res.requiredOutputs[0]))
+                assert_equal(signal_output.nValue, 0)
+                assert_equal(signal_output.scriptPubKey.hex(), CScript([OP_RETURN, b"BIP-9999"]).hex())
+
+                witness_output = CTxOut()
+                witness_output.deserialize(BytesIO(coinbase_res.requiredOutputs[1]))
+                assert_equal(witness_output.nValue, 0)
+                # getblocktemplate only exposes the witness commitment today.
+                assert_equal(
+                    witness_output.scriptPubKey.hex(),
+                    self.nodes[0].getblocktemplate({"rules": ["segwit"]})["default_witness_commitment"],
+                )
+
+        asyncio.run(capnp.run(async_routine()))
+
     def run_test(self):
         self.miniwallet = MiniWallet(self.nodes[0])
         self.default_block_create_options = self.capnp_modules['mining'].BlockCreateOptions()
@@ -404,6 +438,7 @@ class IPCMiningTest(BitcoinTestFramework):
         self.run_block_template_test()
         self.run_coinbase_and_submission_test()
         self.run_ipc_option_override_test()
+        self.run_opreturn_required_outputs_test()
 
 
 if __name__ == '__main__':

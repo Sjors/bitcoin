@@ -347,6 +347,20 @@ int32_t VersionBitsCache::ComputeBlockVersion(const CBlockIndex* pindexPrev, con
     return ::ComputeBlockVersion(pindexPrev, params, m_caches);
 }
 
+std::vector<std::string> VersionBitsCache::GetRequiredSignalTags(const CBlockIndex* pindexPrev, const Consensus::Params& params)
+{
+    LOCK(m_mutex);
+
+    std::vector<std::string> signal_tags;
+    ForEachSignallingDeployment(pindexPrev, params, m_caches, [&](Consensus::DeploymentPos pos, const VersionBitsConditionChecker&) {
+        const auto& signal_tag{params.vDeployments[pos].signal_tag};
+        if (!signal_tag.empty()) {
+            signal_tags.push_back(signal_tag);
+        }
+    });
+    return signal_tags;
+}
+
 void VersionBitsCache::Clear()
 {
     LOCK(m_mutex);

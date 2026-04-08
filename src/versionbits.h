@@ -11,6 +11,7 @@
 #include <array>
 #include <map>
 #include <optional>
+#include <string>
 #include <vector>
 
 class CChainParams;
@@ -96,6 +97,9 @@ public:
 
     /** Determine what nVersion a new block should use */
     int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
+    /** Return the OP_RETURN deployment tags required in the next block's coinbase. */
+    std::vector<std::string> GetRequiredSignalTags(const CBlockIndex* pindexPrev, const Consensus::Params& params) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
     /** Check for unknown activations
      *  Returns a vector containing the bit number used for signalling and a bool

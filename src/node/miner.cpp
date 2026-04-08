@@ -22,10 +22,12 @@
 #include <policy/policy.h>
 #include <pow.h>
 #include <primitives/transaction.h>
+#include <script/script.h>
 #include <util/moneystr.h>
 #include <util/signalinterrupt.h>
 #include <util/time.h>
 #include <validation.h>
+#include <versionbits.h>
 
 #include <algorithm>
 #include <utility>
@@ -195,6 +197,13 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock()
     Assert(nHeight > 0);
     coinbaseTx.nLockTime = static_cast<uint32_t>(nHeight - 1);
     coinbase_tx.lock_time = coinbaseTx.nLockTime;
+
+    if ((pblock->nVersion & VERSIONBITS_TOP_MASK) == VERSIONBITS_TOP_BITS &&
+        (pblock->nVersion & VERSIONBITS_DEPLOYMENT_OPRETURN_FLAG) != 0) {
+        for (const auto& signal_tag : m_chainstate.m_chainman.m_versionbitscache.GetRequiredSignalTags(pindexPrev, chainparams.GetConsensus())) {
+            coinbase_tx.required_outputs.emplace_back(0, CScript{} << OP_RETURN << std::vector<unsigned char>{signal_tag.begin(), signal_tag.end()});
+        }
+    }
 
     pblock->vtx[0] = MakeTransactionRef(std::move(coinbaseTx));
     m_chainstate.m_chainman.GenerateCoinbaseCommitment(*pblock, pindexPrev);
