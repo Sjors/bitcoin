@@ -17,6 +17,18 @@ static constexpr int NO_WITNESS_COMMITMENT{-1};
 /** Minimum size of a witness commitment structure. Defined in BIP 141. **/
 static constexpr size_t MINIMUM_WITNESS_COMMITMENT{38};
 
+/** Check whether a coinbase output matches the SegWit witness commitment pattern. */
+inline bool IsWitnessCommitmentOutput(const CTxOut& vout)
+{
+    return vout.scriptPubKey.size() >= MINIMUM_WITNESS_COMMITMENT &&
+           vout.scriptPubKey[0] == OP_RETURN &&
+           vout.scriptPubKey[1] == 0x24 &&
+           vout.scriptPubKey[2] == 0xaa &&
+           vout.scriptPubKey[3] == 0x21 &&
+           vout.scriptPubKey[4] == 0xa9 &&
+           vout.scriptPubKey[5] == 0xed;
+}
+
 /** A "reason" why a transaction was invalid, suitable for determining whether the
   * provider of the transaction should be banned/ignored/disconnected/etc.
   */
@@ -150,13 +162,7 @@ inline int GetWitnessCommitmentIndex(const CBlock& block)
     if (!block.vtx.empty()) {
         for (size_t o = 0; o < block.vtx[0]->vout.size(); o++) {
             const CTxOut& vout = block.vtx[0]->vout[o];
-            if (vout.scriptPubKey.size() >= MINIMUM_WITNESS_COMMITMENT &&
-                vout.scriptPubKey[0] == OP_RETURN &&
-                vout.scriptPubKey[1] == 0x24 &&
-                vout.scriptPubKey[2] == 0xaa &&
-                vout.scriptPubKey[3] == 0x21 &&
-                vout.scriptPubKey[4] == 0xa9 &&
-                vout.scriptPubKey[5] == 0xed) {
+            if (IsWitnessCommitmentOutput(vout)) {
                 commitpos = o;
             }
         }
