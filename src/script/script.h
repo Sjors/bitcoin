@@ -27,6 +27,9 @@
 // Maximum number of bytes pushable to the stack
 static const unsigned int MAX_SCRIPT_ELEMENT_SIZE = 520;
 
+// Maximum number of bytes pushable to the stack for tapscript v1 (leaf version 0xc2)
+static constexpr unsigned int MAX_SCRIPT_ELEMENT_SIZE_TAPSCRIPT_V1 = 4096;
+
 // Maximum number of non-push operations per script
 static const int MAX_OPS_PER_SCRIPT = 201;
 

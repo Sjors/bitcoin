@@ -229,6 +229,9 @@ struct ScriptExecutionData
     //! How much validation weight is left (decremented for every successful non-empty signature check).
     int64_t m_validation_weight_left;
 
+    //! Maximum script element size for this execution (0 means use default MAX_SCRIPT_ELEMENT_SIZE).
+    unsigned int m_max_script_element_size = 0;
+
     //! The hash of the corresponding output
     std::optional<uint256> m_output_hash;
 };
@@ -240,6 +243,7 @@ static constexpr size_t WITNESS_V1_TAPROOT_SIZE = 32;
 
 static constexpr uint8_t TAPROOT_LEAF_MASK = 0xfe;
 static constexpr uint8_t TAPROOT_LEAF_TAPSCRIPT = 0xc0;
+static constexpr uint8_t TAPROOT_LEAF_TAPSCRIPT_V1 = 0xc2;
 static constexpr size_t TAPROOT_CONTROL_BASE_SIZE = 33;
 static constexpr size_t TAPROOT_CONTROL_NODE_SIZE = 32;
 static constexpr size_t TAPROOT_CONTROL_MAX_NODE_COUNT = 128;

@@ -34,6 +34,7 @@ from test_framework.script import (
     CScriptOp,
     hash256,
     LEAF_VERSION_TAPSCRIPT,
+    LEAF_VERSION_TAPSCRIPT_V1,
     LegacySignatureMsg,
     LOCKTIME_THRESHOLD,
     MAX_SCRIPT_ELEMENT_SIZE,
@@ -786,7 +787,7 @@ def spenders_taproot_active():
     # Reusing the scripts above, test that various features affect the sighash.
     add_spender(spenders, "sighash/annex", tap=tap, leaf="pk_codesep", key=secs[1], hashtype=hashtype, standard=False, **SINGLE_SIG, annex=bytes([ANNEX_TAG]), failure={"sighash": override(default_sighash, annex=None)}, **ERR_SCHNORR_SIG)
     add_spender(spenders, "sighash/script", tap=tap, leaf="pk_codesep", key=secs[1], **common, **SINGLE_SIG, failure={"sighash": override(default_sighash, script_taproot=tap.leaves["codesep_pk"].script)}, **ERR_SCHNORR_SIG)
-    add_spender(spenders, "sighash/leafver", tap=tap, leaf="pk_codesep", key=secs[1], **common, **SINGLE_SIG, failure={"sighash": override(default_sighash, leafversion=random.choice([x & 0xFE for x in range(0x100) if x & 0xFE != LEAF_VERSION_TAPSCRIPT]))}, **ERR_SCHNORR_SIG)
+    add_spender(spenders, "sighash/leafver", tap=tap, leaf="pk_codesep", key=secs[1], **common, **SINGLE_SIG, failure={"sighash": override(default_sighash, leafversion=random.choice([x & 0xFE for x in range(0x100) if x & 0xFE not in (LEAF_VERSION_TAPSCRIPT, LEAF_VERSION_TAPSCRIPT_V1)]))}, **ERR_SCHNORR_SIG)
     add_spender(spenders, "sighash/scriptpath", tap=tap, leaf="pk_codesep", key=secs[1], **common, **SINGLE_SIG, failure={"sighash": override(default_sighash, leaf=None)}, **ERR_SCHNORR_SIG)
     add_spender(spenders, "sighash/keypath", tap=tap, key=secs[0], **common, failure={"sighash": override(default_sighash, leaf="pk_codesep")}, **ERR_SCHNORR_SIG)
 
@@ -1144,8 +1145,8 @@ def spenders_taproot_active():
 
     # Future leaf versions
     for leafver in range(0, 0x100, 2):
-        if leafver == LEAF_VERSION_TAPSCRIPT or leafver == ANNEX_TAG:
-            # Skip the defined LEAF_VERSION_TAPSCRIPT, and the ANNEX_TAG which is not usable as leaf version
+        if leafver == LEAF_VERSION_TAPSCRIPT or leafver == LEAF_VERSION_TAPSCRIPT_V1 or leafver == ANNEX_TAG:
+            # Skip defined leaf versions and the ANNEX_TAG which is not usable as leaf version
             continue
         scripts = [
             ("bare_c0", CScript([OP_NOP])),
@@ -1313,7 +1314,7 @@ def spenders_taproot_nonstandard():
     sec = generate_privkey()
     pub, _ = compute_xonly_pubkey(sec)
     scripts = [
-        ("future_leaf", CScript([pub, OP_CHECKSIG]), 0xc2),
+        ("future_leaf", CScript([pub, OP_CHECKSIG]), 0xc4),
         ("op_success", CScript([pub, OP_CHECKSIG, OP_0, OP_IF, CScriptOp(0x50), OP_ENDIF])),
     ]
     tap = taproot_construct(pub, scripts)
