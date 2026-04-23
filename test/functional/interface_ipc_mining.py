@@ -67,7 +67,7 @@ class IPCMiningTest(BitcoinTestFramework):
         # as it is being called before knowing whether capnp is available).
         self.capnp_modules = load_capnp_modules(self.config)
 
-    async def build_coinbase_test(self, template, ctx, miniwallet):
+    async def build_coinbase_test(self, template, ctx, miniwallet, *, with_mempool=False):
         self.log.debug("Build coinbase transaction using getCoinbaseTx()")
         assert template is not None
         coinbase_res = await mining_get_coinbase_tx(template, ctx)
@@ -104,6 +104,16 @@ class IPCMiningTest(BitcoinTestFramework):
             coinbase_tx.vout.append(output)
 
         coinbase_tx.nLockTime = coinbase_res.lockTime
+        if with_mempool:
+            # Verify the coinbase reward accounts for mempool transaction fees.
+            txfees = await template.getTxFees(ctx)
+            total_fees = sum(txfees.result)
+            # blockRewardRemaining = base subsidy + total fees from mempool txs
+            expected_reward = coinbase_res.blockRewardRemaining - total_fees
+            # The template is for the next block; at non-halving heights the
+            # subsidy is the same as the current tip's.
+            stats = self.nodes[0].getblockstats(current_block_height, ["subsidy"])
+            assert_equal(expected_reward, stats["subsidy"])
         return coinbase_tx
 
     def run_mining_interface_test(self):
@@ -390,20 +400,82 @@ class IPCMiningTest(BitcoinTestFramework):
                 submitted = (await template.submitSolution(ctx, block.nVersion, block.nTime, block.nNonce, coinbase.serialize())).result
                 assert_equal(submitted, True)
 
-            self.log.debug("Block should propagate")
-            # Check that the IPC node actually updates its own chain
-            assert_equal(self.nodes[0].getchaintips()[0]["height"], current_block_height + 1)
-            # Stalls if a regression causes submitSolution() to accept an invalid block:
-            self.sync_all()
-            # Check that the other node accepts the block
-            assert_equal(self.nodes[0].getchaintips()[0], self.nodes[1].getchaintips()[0])
-
-            self.miniwallet.rescan_utxos()
-            assert_equal(self.miniwallet.get_balance(), balance + 1)
+            self.check_block_propagated(current_block_height, balance)
             self.log.debug("Check block should fail now, since it is a duplicate")
             check = await mining.checkBlock(ctx, block.serialize(), check_opts)
             assert_equal(check.result, False)
             assert_equal(check.reason, "inconclusive-not-best-prevblk")
+
+        asyncio.run(capnp.run(async_routine()))
+
+    def check_block_propagated(self, current_block_height, balance, *, mempool_txids=None):
+        """Common post-submission verification: chain height, cross-node sync, balance."""
+        self.log.debug("Block should propagate")
+        assert_equal(self.nodes[0].getchaintips()[0]["height"], current_block_height + 1)
+        self.sync_all()
+        assert_equal(self.nodes[0].getchaintips()[0], self.nodes[1].getchaintips()[0])
+
+        if mempool_txids is not None:
+            # Verify the block contains the expected mempool transactions in order
+            submitted_block = self.nodes[0].getblock(self.nodes[0].getbestblockhash())
+            assert_equal(len(submitted_block["tx"]), 1 + len(mempool_txids))
+            self.log.debug("Verify mempool transactions are in the submitted block in order")
+            assert_equal(submitted_block["tx"][1:], mempool_txids)
+
+        self.miniwallet.rescan_utxos()
+        assert_equal(self.miniwallet.get_balance(), balance + 1)
+
+    def run_coinbase_and_mempool_test(self):
+        """Test coinbase construction (getCoinbaseTx) with mempool transactions in the template."""
+        self.log.info("Running coinbase construction with mempool transactions test")
+
+        async def async_routine():
+            ctx, mining = await make_mining_ctx(self)
+
+            current_block_height = self.nodes[0].getchaintips()[0]["height"]
+
+            self.log.debug("Verify mempool is empty before adding transactions")
+            assert_equal(self.nodes[0].getmempoolinfo()["size"], 0)
+
+            self.log.debug("Send transactions to fill the mempool")
+            self.miniwallet.send_self_transfer(fee_rate=10, from_node=self.nodes[0])
+            self.miniwallet.send_self_transfer(fee_rate=15, from_node=self.nodes[0])
+            self.sync_all()
+
+            async with AsyncExitStack() as stack:
+                self.log.debug("Create a block template with mempool transactions")
+                template = await mining_create_block_template(mining, stack, ctx, self.default_block_create_options)
+                assert template is not None
+                block = await mining_get_block(template, ctx)
+                # Should have coinbase + 2 mempool transactions = 3
+                assert_equal(len(block.vtx), 3)
+
+                self.log.debug("Verify template inspectors show mempool transactions")
+                txfees = await template.getTxFees(ctx)
+                assert_equal(len(txfees.result), 2)
+                txsigops = await template.getTxSigops(ctx)
+                assert_equal(len(txsigops.result), 2)
+
+                balance = self.miniwallet.get_balance()
+
+                self.log.debug("Build coinbase using getCoinbaseTx()")
+                coinbase = await self.build_coinbase_test(template, ctx, self.miniwallet, with_mempool=True)
+
+                self.log.debug("Replace the coinbase and reconstruct the block")
+                # Reduce payout for balance comparison simplicity
+                coinbase.vout[0].nValue = COIN
+                block.vtx[0] = coinbase
+                block.hashMerkleRoot = block.calc_merkle_root()
+
+                original_mempool_txs = [block.vtx[1], block.vtx[2]]
+
+                self.log.debug("Submit solution")
+                block.solve()
+                submitted = (await template.submitSolution(ctx, block.nVersion, block.nTime, block.nNonce, coinbase.serialize())).result
+                assert_equal(submitted, True)
+
+            mempool_txids = [tx.txid_hex for tx in original_mempool_txs]
+            self.check_block_propagated(current_block_height, balance, mempool_txids=mempool_txids)
 
         asyncio.run(capnp.run(async_routine()))
 
@@ -414,6 +486,7 @@ class IPCMiningTest(BitcoinTestFramework):
         self.run_early_startup_test()
         self.run_block_template_test()
         self.run_coinbase_and_submission_test()
+        self.run_coinbase_and_mempool_test()
         self.run_ipc_option_override_test()
 
 
