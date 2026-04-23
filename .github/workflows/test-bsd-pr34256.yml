@@ -1,0 +1,172 @@
+# Throwaway workflow to sanity-check PR #34256 on FreeBSD.
+# Boots a FreeBSD VM, builds a minimal bitcoind, runs the two functional tests
+# the PR enables on POSIX (feature_bind_extra.py and rpc_bind.py), and then
+# applies two source-level mutations to the PR's BSD code path to confirm the
+# tests actually catch breakage. Not intended to be merged.
+
+name: Test BSD (PR 34256 sanity)
+
+on:
+  push:
+    branches:
+      - '2026/04/test-bsd'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  freebsd:
+    name: FreeBSD ${{ matrix.release }} - functional tests + mutations
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ['15.0']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & test in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: ${{ matrix.release }}
+          usesh: true
+          sync: rsync
+          copyback: false
+          prepare: |
+            pkg install -y cmake ninja boost-libs libevent python311 pkgconf git lsof
+            ln -sf /usr/local/bin/python3.11 /usr/local/bin/python3
+          run: |
+            set -eu
+
+            # The host's checkout is rsync'd into the VM but owned by a
+            # different uid; tell git not to refuse operating on it.
+            git config --global --add safe.directory "$(pwd)"
+
+            echo "=== Versions ==="
+            freebsd-version
+            uname -a
+            cc --version | head -1
+            cmake --version | head -1
+            python3 --version
+            lsof -v 2>&1 | head -3 || true
+
+            echo "=== Configure ==="
+            # Minimal configuration: just need bitcoind for the two tests.
+            cmake -S . -B build -G Ninja \
+              -DBUILD_DAEMON=ON \
+              -DBUILD_CLI=ON \
+              -DBUILD_GUI=OFF \
+              -DBUILD_TESTS=OFF \
+              -DBUILD_BENCH=OFF \
+              -DBUILD_FUZZ_BINARY=OFF \
+              -DBUILD_KERNEL_LIB=OFF \
+              -DBUILD_UTIL_CHAINSTATE=OFF \
+              -DBUILD_TX=OFF \
+              -DBUILD_UTIL=OFF \
+              -DBUILD_WALLET_TOOL=OFF \
+              -DENABLE_WALLET=OFF \
+              -DENABLE_IPC=OFF \
+              -DENABLE_EXTERNAL_SIGNER=OFF \
+              -DWITH_ZMQ=OFF \
+              -DWITH_USDT=OFF \
+              -DWITH_QRENCODE=OFF
+
+            echo "=== Build ==="
+            cmake --build build -j "$(sysctl -n hw.ncpu)" --target bitcoind bitcoin-cli
+
+            ulimit -n 4096 || true
+
+            NETUTIL=test/functional/test_framework/netutil.py
+
+            run_tests() {
+              build/test/functional/test_runner.py --tmpdir=./tmp_run \
+                feature_bind_extra \
+                'rpc_bind.py --ipv4' \
+                'rpc_bind.py --ipv6' \
+                'rpc_bind.py --nonloopback'
+            }
+
+            run_scenario() {
+              label=$1
+              expect=$2  # pass | fail
+              echo
+              echo "============================================================"
+              echo "Scenario: $label  (expect: $expect)"
+              echo "============================================================"
+              rm -rf ./tmp_run
+              mkdir -p ./tmp_run
+              set +e
+              run_tests
+              rc=$?
+              set -e
+              echo "Scenario '$label' exit=$rc"
+              if [ "$expect" = pass ] && [ "$rc" -ne 0 ]; then
+                echo "FAIL: expected pass but tests failed"
+                exit 1
+              fi
+              if [ "$expect" = fail ] && [ "$rc" -eq 0 ]; then
+                echo "FAIL: expected mutation to be caught but tests passed"
+                exit 1
+              fi
+              echo "OK: scenario '$label' behaved as expected"
+            }
+
+            NETUTIL_ORIG="$(mktemp)"
+            cp "${NETUTIL}" "${NETUTIL_ORIG}"
+
+            apply_mutation_A() {
+              # Shift parsed port by +1 in the BSD lsof parser of get_bind_addrs().
+              # 'int(port)' appears exactly once in netutil.py.
+              sed -i.bak 's/int(port)/int(port) + 1/' "${NETUTIL}"
+              rm -f "${NETUTIL}.bak"
+            }
+
+            apply_mutation_B() {
+              # Make all_interfaces() return [] on BSD by inserting an early-return
+              # right after the ifconfig invocation.
+              awk '
+                {print}
+                /^        output = subprocess\.check_output\(\["ifconfig", "-au"\], text=True\)$/ {
+                  print "        return []  # MUTATION"
+                }
+              ' "${NETUTIL}" > "${NETUTIL}.new"
+              mv "${NETUTIL}.new" "${NETUTIL}"
+            }
+
+            show_diff() {
+              echo "--- mutation diff ---"
+              diff -u "${NETUTIL_ORIG}" "${NETUTIL}" | sed -n '1,40p' || true
+              echo "---------------------"
+            }
+
+            revert_mutation() {
+              cp "${NETUTIL_ORIG}" "${NETUTIL}"
+            }
+
+            # ------------------------------------------------------------------
+            # Scenario 1: baseline (no mutation) -> must pass.
+            # ------------------------------------------------------------------
+            run_scenario "baseline" pass
+
+            # ------------------------------------------------------------------
+            # Scenario 2: shift port by +1 in get_bind_addrs(). All four tests
+            # should fail.
+            # ------------------------------------------------------------------
+            apply_mutation_A
+            show_diff
+            run_scenario "mutation A: get_bind_addrs port + 1" fail
+            revert_mutation
+
+            # ------------------------------------------------------------------
+            # Scenario 3: make all_interfaces() return [] on BSD path. The new
+            # explicit guard in rpc_bind.py should turn this into AssertionError.
+            # ------------------------------------------------------------------
+            apply_mutation_B
+            show_diff
+            run_scenario "mutation B: all_interfaces returns []" fail
+            revert_mutation
+
+            echo
+            echo "All scenarios behaved as expected."
