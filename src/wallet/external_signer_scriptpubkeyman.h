@@ -61,6 +61,22 @@ public:
   std::optional<common::PSBTError> FillPSBT(PartiallySignedTransaction& psbt, const PrecomputedTransactionData& txdata, const common::PSBTFillOptions& options, int* n_signed = nullptr) const override;
 
   /**
+   * Sign a PSBT through an external signer using a registered descriptor.
+   * @param[in,out] psbt          PSBT to fill / sign
+   * @param[in]     txdata        precomputed sighash data
+   * @param[in]     options       how to fill the PSBT (sign, finalize, sighash_type, ...)
+   * @param[out]    n_signed      number of inputs signed by this SPKM
+   * @param[in]     signer        external signer to talk to
+   * @param[in]     registration  opaque value returned by `registerdescriptor`
+   */
+  std::optional<common::PSBTError> FillPSBTRegistered(PartiallySignedTransaction& psbt,
+                                                      const PrecomputedTransactionData& txdata,
+                                                      common::PSBTFillOptions options,
+                                                      int* n_signed,
+                                                      ExternalSigner& signer,
+                                                      const std::string& registration) const;
+
+  /**
    * Register a descriptor with an external signer.
    * @param[in] name        descriptor name to display on the signer
    * @param[in] descriptor  combined multipath descriptor
