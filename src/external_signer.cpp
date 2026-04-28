@@ -140,3 +140,38 @@ bool ExternalSigner::SignTransaction(PartiallySignedTransaction& psbtx, std::str
 
     return true;
 }
+
+bool ExternalSigner::SignTransactionRegistered(PartiallySignedTransaction& psbtx,
+                                               const std::string& registration,
+                                               std::string& error)
+{
+    // Serialize the PSBT
+    DataStream ssTx{};
+    ssTx << psbtx;
+
+    const std::vector<std::string> command = Cat(m_command, Cat({"--stdin", "--fingerprint", m_fingerprint}, NetworkArg()));
+
+    // The registration is base64 encoded by HWI and therefore contains no
+    // whitespace for shlex to split when the command is read from stdin.
+    const std::string stdinStr = "signtx " + EncodeBase64(ssTx.str()) + " --registration " + registration;
+
+    const UniValue signer_result = RunCommandParseJSON(command, stdinStr);
+
+    if (signer_result.find_value("error").isStr()) {
+        error = signer_result.find_value("error").get_str();
+        return false;
+    }
+    if (!signer_result.find_value("psbt").isStr()) {
+        error = "Unexpected result from signer";
+        return false;
+    }
+
+    util::Result<PartiallySignedTransaction> signer_psbtx = DecodeBase64PSBT(signer_result.find_value("psbt").get_str());
+    if (!signer_psbtx) {
+        error = strprintf("TX decode failed %s", util::ErrorString(signer_psbtx).original);
+        return false;
+    }
+
+    psbtx = *signer_psbtx;
+    return true;
+}
