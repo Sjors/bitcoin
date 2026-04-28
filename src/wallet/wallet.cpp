@@ -2227,7 +2227,7 @@ bool CWallet::SignTransaction(CMutableTransaction& tx, const std::map<COutPoint,
     return false;
 }
 
-std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& complete, std::optional<int> sighash_type, bool sign, bool bip32derivs, size_t * n_signed, bool finalize) const
+std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bool& complete, std::optional<int> sighash_type, bool sign, bool bip32derivs, size_t * n_signed, bool finalize)
 {
     if (n_signed) {
         *n_signed = 0;
@@ -2257,10 +2257,74 @@ std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, bo
 
     const PrecomputedTransactionData txdata = PrecomputePSBTData(psbtx);
 
+    // BIP388: if a wallet policy is registered with the external signer,
+    // dispatch the policy-mode signing path once (covers all of this
+    // wallet's policy descriptors at once). Mirrors the BIP388 detection
+    // block in CWallet::DisplayAddress, but hoisted out of the per-SPKM
+    // loop so we don't shell out to the device once per SPKM.
+    bool policy_dispatched = false;
+    if (sign && !m_bip388.empty()) {
+        ExternalSignerScriptPubKeyMan* policy_spk_man = nullptr;
+        for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
+            auto* candidate = dynamic_cast<ExternalSignerScriptPubKeyMan*>(spk_man);
+            if (candidate && IsCandidateForBIP388Policy(*candidate)) {
+                policy_spk_man = candidate;
+                break;
+            }
+        }
+        if (policy_spk_man) {
+            auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
+            if (signer) {
+                const BIP388* matching_hmac{nullptr};
+                for (const auto& entry : m_bip388) {
+                    if (entry.fingerprint == signer->m_fingerprint) {
+                        matching_hmac = &entry;
+                        break;
+                    }
+                }
+                if (matching_hmac) {
+                    const auto policy{DerivePolicy(/*spk_pair=*/std::nullopt)};
+                    if (!policy) {
+                        return PSBTError::EXTERNAL_SIGNER_FAILED;
+                    }
+                    int n_signed_policy = 0;
+                    auto policy_err = policy_spk_man->FillPSBTPolicy(psbtx, txdata,
+                                                                     sighash_type,
+                                                                     sign,
+                                                                     bip32derivs,
+                                                                     &n_signed_policy,
+                                                                     finalize,
+                                                                     *signer,
+                                                                     matching_hmac->name,
+                                                                     policy->first,
+                                                                     policy->second,
+                                                                     matching_hmac->hmac);
+                    if (policy_err) {
+                        return policy_err;
+                    }
+                    if (n_signed) {
+                        (*n_signed) += n_signed_policy;
+                    }
+                    policy_dispatched = true;
+                }
+            }
+        }
+    }
+
     // Fill in information from ScriptPubKeyMans
     for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
         int n_signed_this_spkm = 0;
-        const auto error{spk_man->FillPSBT(psbtx, txdata, sighash_type, sign, bip32derivs, &n_signed_this_spkm, finalize)};
+        std::optional<PSBTError> error;
+
+        // If we already dispatched the BIP388 policy above, skip every
+        // ExternalSignerScriptPubKeyMan in this loop: the policy call
+        // covered the policy descriptor's SPKMs, and the device would
+        // reject anything else.
+        if (sign && policy_dispatched && dynamic_cast<ExternalSignerScriptPubKeyMan*>(spk_man) != nullptr) {
+            continue;
+        }
+
+        error = spk_man->FillPSBT(psbtx, txdata, sighash_type, sign, bip32derivs, &n_signed_this_spkm, finalize);
         if (error) {
             return error;
         }

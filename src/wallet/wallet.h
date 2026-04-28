@@ -720,7 +720,7 @@ public:
                   bool sign = true,
                   bool bip32derivs = true,
                   size_t* n_signed = nullptr,
-                  bool finalize = true) const;
+                  bool finalize = true);
 
     /**
      * Submit the transaction to the node's mempool and then relay to peers.
