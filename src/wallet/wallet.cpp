@@ -2226,84 +2226,167 @@ std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, co
     }
     const PrecomputedTransactionData& txdata = *txdata_res;
 
-    // BIP388: if a wallet policy is registered with the external signer,
-    // dispatch the policy-mode signing path once (covers all of this
-    // wallet's policy descriptors at once). Mirrors the BIP388 detection
-    // block in CWallet::DisplayAddress, but hoisted out of the per-SPKM
-    // loop so we don't shell out to the device once per SPKM.
-    bool policy_dispatched = false;
-    if (options.sign && !m_bip388.empty()) {
-        ExternalSignerScriptPubKeyMan* policy_spk_man = nullptr;
+    // One signing pass: dispatch any registered BIP388 policy first
+    // (covers all of this wallet's policy descriptors at once), then
+    // every remaining ScriptPubKeyMan. Returns either a PSBTError or
+    // `complete` set to whether every input is now signed.
+    auto fill_pass = [&](PartiallySignedTransaction& target) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet) -> std::optional<PSBTError> {
+        // BIP388: if a wallet policy is registered with the external
+        // signer, dispatch the policy-mode signing path once. Mirrors
+        // the BIP388 detection block in CWallet::DisplayAddress, but
+        // hoisted out of the per-SPKM loop so we don't shell out to
+        // the device once per SPKM.
+        bool policy_dispatched = false;
+        if (options.sign && !m_bip388.empty()) {
+            ExternalSignerScriptPubKeyMan* policy_spk_man = nullptr;
+            for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
+                auto* candidate = dynamic_cast<ExternalSignerScriptPubKeyMan*>(spk_man);
+                if (candidate && IsCandidateForBIP388Policy(*candidate)) {
+                    policy_spk_man = candidate;
+                    break;
+                }
+            }
+            if (policy_spk_man) {
+                auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
+                if (signer) {
+                    const BIP388* matching_policy{nullptr};
+                    for (const auto& entry : m_bip388) {
+                        if (entry.fingerprint == signer->m_fingerprint) {
+                            matching_policy = &entry;
+                            break;
+                        }
+                    }
+                    if (matching_policy) {
+                        const auto policy{DerivePolicy(/*spk_pair=*/std::nullopt)};
+                        if (!policy) {
+                            return PSBTError::EXTERNAL_SIGNER_FAILED;
+                        }
+                        int n_signed_policy = 0;
+                        auto policy_err = policy_spk_man->FillPSBTPolicy(target, txdata,
+                                                                         options,
+                                                                         &n_signed_policy,
+                                                                         *signer,
+                                                                         matching_policy->name,
+                                                                         policy->first,
+                                                                         policy->second,
+                                                                         matching_policy->hmac);
+                        if (policy_err) {
+                            return policy_err;
+                        }
+                        if (n_signed) {
+                            (*n_signed) += n_signed_policy;
+                        }
+                        policy_dispatched = true;
+                    }
+                }
+            }
+        }
+
+        // Fill in information from ScriptPubKeyMans
         for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
-            auto* candidate = dynamic_cast<ExternalSignerScriptPubKeyMan*>(spk_man);
-            if (candidate && IsCandidateForBIP388Policy(*candidate)) {
-                policy_spk_man = candidate;
-                break;
+            int n_signed_this_spkm = 0;
+            // If we already dispatched the BIP388 policy above, skip
+            // every ExternalSignerScriptPubKeyMan in this loop: the
+            // policy call covered the policy descriptor's SPKMs, and
+            // the device would reject anything else.
+            if (options.sign && policy_dispatched && dynamic_cast<ExternalSignerScriptPubKeyMan*>(spk_man) != nullptr) {
+                continue;
+            }
+
+            const auto error{spk_man->FillPSBT(target, txdata, options, &n_signed_this_spkm)};
+            if (error) {
+                return error;
+            }
+
+            if (n_signed) {
+                (*n_signed) += n_signed_this_spkm;
             }
         }
-        if (policy_spk_man) {
-            auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
-            if (signer) {
-                const BIP388* matching_policy{nullptr};
-                for (const auto& entry : m_bip388) {
-                    if (entry.fingerprint == signer->m_fingerprint) {
-                        matching_policy = &entry;
-                        break;
-                    }
-                }
-                if (matching_policy) {
-                    const auto policy{DerivePolicy(/*spk_pair=*/std::nullopt)};
-                    if (!policy) {
-                        return PSBTError::EXTERNAL_SIGNER_FAILED;
-                    }
-                    int n_signed_policy = 0;
-                    auto policy_err = policy_spk_man->FillPSBTPolicy(psbtx, txdata,
-                                                                     options,
-                                                                     &n_signed_policy,
-                                                                     *signer,
-                                                                     matching_policy->name,
-                                                                     policy->first,
-                                                                     policy->second,
-                                                                     matching_policy->hmac);
-                    if (policy_err) {
-                        return policy_err;
-                    }
-                    if (n_signed) {
-                        (*n_signed) += n_signed_policy;
-                    }
-                    policy_dispatched = true;
-                }
+
+        RemoveUnnecessaryTransactions(target);
+
+        // Complete if every input is now signed
+        complete = true;
+        for (size_t i = 0; i < target.inputs.size(); ++i) {
+            complete &= PSBTInputSignedAndVerified(target, i, &txdata);
+        }
+        return {};
+    };
+
+    if (auto err = fill_pass(psbtx)) {
+        return err;
+    }
+
+    // Multi-round signing flows (e.g. MuSig2) need a second sign pass:
+    // the first only exchanged pub nonces, so the PSBT isn't complete
+    // yet. Only retry when round 2 is actually feasible -- i.e. every
+    // input that participates in a MuSig2 session has a complete set
+    // of pub nonces from every expected participant. If some cosigner
+    // is offline (no nonces yet), there's nothing the device can do
+    // in round 2 and we shouldn't waste a confirmation prompt; just
+    // hand back the round-1 PSBT for out-of-band exchange. Likewise
+    // for non-MuSig2 flows we skip the retry: there's no known one-
+    // pass-incomplete case there.
+    //
+    // We can't pair PSBT_IN_MUSIG2_PARTICIPANT_PUBKEYS entries to
+    // PSBT_IN_MUSIG2_PUB_NONCE entries by aggregate pubkey: the former
+    // stores the pre-tweak aggregate while the latter stores the
+    // post-tweak one (after BIP32 derivations and the BIP86 taproot
+    // tweak). Use a structural check instead: per input, require at
+    // least one pubnonces group per participants entry, and each
+    // group to have at least as many nonces as the largest
+    // participants list.
+    auto musig2_round2_ready = [](const PartiallySignedTransaction& p) {
+        bool any_musig2{false};
+        for (const auto& input : p.inputs) {
+            if (input.m_musig2_participants.empty()) continue;
+            any_musig2 = true;
+            if (input.m_musig2_pubnonces.size() < input.m_musig2_participants.size()) return false;
+            size_t max_participants{0};
+            for (const auto& [_, parts] : input.m_musig2_participants) {
+                max_participants = std::max(max_participants, parts.size());
+            }
+            for (const auto& [_, nonces] : input.m_musig2_pubnonces) {
+                if (nonces.size() < max_participants) return false;
             }
         }
-    }
-
-    // Fill in information from ScriptPubKeyMans
-    for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
-        int n_signed_this_spkm = 0;
-        // If we already dispatched the BIP388 policy above, skip every
-        // ExternalSignerScriptPubKeyMan in this loop: the policy call
-        // covered the policy descriptor's SPKMs, and the device would
-        // reject anything else.
-        if (options.sign && policy_dispatched && dynamic_cast<ExternalSignerScriptPubKeyMan*>(spk_man) != nullptr) {
-            continue;
+        return any_musig2;
+    };
+    if (options.sign && !complete && musig2_round2_ready(psbtx)) {
+        PartiallySignedTransaction probe = psbtx;
+        bool probe_complete = complete;
+        std::optional<PSBTError> probe_err;
+        try {
+            probe_err = fill_pass(probe);
+        } catch (...) {
+            // Swallow: any error in the optional second round just
+            // means we hand back the round-1 PSBT.
         }
-
-        const auto error{spk_man->FillPSBT(psbtx, txdata, options, &n_signed_this_spkm)};
-        if (error) {
-            return error;
+        // fill_pass writes through to outer `complete`. When the
+        // round-2 attempt errored, preserve the round-1 PSBT and the
+        // round-1 `complete` flag. Otherwise keep the probe even if
+        // the PSBT isn't yet complete: any partial-signature or
+        // pubnonce contribution that round 2 produced is real signing
+        // work, and discarding it would orphan the corresponding
+        // single-use MuSig2 secnonce that fill_pass already consumed
+        // out of m_musig2_secnonces.
+        //
+        // BIP327 safety: this is not a secnonce-reuse risk. The
+        // wallet's m_musig2_secnonces map is held by reference inside
+        // the FlatSigningProvider, so DeleteMuSig2Session in
+        // CreateMuSig2PartialSig mutates the wallet state regardless
+        // of whether we keep or discard the probe PSBT. The deletion
+        // happens exactly once per (script_pubkey, part_pubkey,
+        // sighash) session and SetMuSig2SecNonce asserts on duplicate
+        // inserts, so the wallet cannot regenerate a secnonce for a
+        // session it has already signed. Preserving the probe's psig
+        // just lets a subsequent FillPSBT call observe the work
+        // instead of silently losing it.
+        if (!probe_err) {
+            psbtx = std::move(probe);
+        } else {
+            complete = probe_complete;
         }
-
-        if (n_signed) {
-            (*n_signed) += n_signed_this_spkm;
-        }
-    }
-
-    RemoveUnnecessaryTransactions(psbtx);
-
-    // Complete if every input is now signed
-    complete = true;
-    for (size_t i = 0; i < psbtx.inputs.size(); ++i) {
-        complete &= PSBTInputSignedAndVerified(psbtx, i, &txdata);
     }
 
     return {};
