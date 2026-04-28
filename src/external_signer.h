@@ -81,6 +81,20 @@ public:
     //! `signtx` command and PSBT via stdin.
     //! @param[in,out] psbt  PartiallySignedTransaction to be signed
     bool SignTransaction(PartiallySignedTransaction& psbt, std::string& error);
+
+    //! Sign a PartiallySignedTransaction using a previously registered
+    //! descriptor. Used for descriptors (e.g. MuSig2) that require
+    //! on-device registration before signing.
+    //!
+    //! Pipes `signtx <base64> --registration <registration>` to the
+    //! signer's stdin.
+    //!
+    //! @param[in,out] psbt         PSBT to be signed
+    //! @param[in] registration     opaque value returned by `registerdescriptor`
+    //! @param[out] error           populated on failure
+    bool SignTransactionRegistered(PartiallySignedTransaction& psbt,
+                                   const std::string& registration,
+                                   std::string& error);
 };
 
 #endif // BITCOIN_EXTERNAL_SIGNER_H
