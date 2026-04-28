@@ -2733,6 +2733,29 @@ util::Result<void> CWallet::DisplayAddress(const CTxDestination& dest)
         }
         auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
         if (!signer) throw std::runtime_error(util::ErrorString(signer).original);
+
+        // If the matched SPKM is part of a registered descriptor, ask the
+        // device to display the address using its opaque registration.
+        if (IsCandidateForDescriptorRegistration(*signer_spk_man)) {
+            const ExternalSignerRegistration* matching_registration{nullptr};
+            for (const auto& entry : m_external_signer_registrations) {
+                if (entry.fingerprint == signer->m_fingerprint) {
+                    matching_registration = &entry;
+                    break;
+                }
+            }
+            if (matching_registration) {
+                const auto index{signer_spk_man->GetScriptPubKeyIndex(scriptPubKey)};
+                if (!index) return util::Error{_("Could not locate address in script pub key map")};
+                const std::optional<bool> internal{IsInternalScriptPubKeyMan(signer_spk_man)};
+                if (!internal) return util::Error{_("Could not determine receive/change chain for address")};
+                return signer_spk_man->DisplayAddressRegistered(dest, *signer,
+                                                                matching_registration->registration,
+                                                                *internal,
+                                                                static_cast<uint32_t>(*index));
+            }
+        }
+
         return signer_spk_man->DisplayAddress(dest, *signer);
     }
     return util::Error{_("There is no ScriptPubKeyManager for this address")};
