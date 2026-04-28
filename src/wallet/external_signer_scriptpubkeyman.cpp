@@ -149,6 +149,62 @@ std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBT(PartiallySigned
     return {};
 }
 
+std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBTPolicy(PartiallySignedTransaction& psbt,
+                                                                       const PrecomputedTransactionData& txdata,
+                                                                       std::optional<int> sighash_type,
+                                                                       bool sign,
+                                                                       bool bip32derivs,
+                                                                       int* n_signed,
+                                                                       bool finalize,
+                                                                       ExternalSigner& signer,
+                                                                       const std::string& name,
+                                                                       const std::string& descriptor_template,
+                                                                       const std::vector<std::string>& keys_info,
+                                                                       const std::string& hmac) const
+{
+    if (!sign) {
+        return DescriptorScriptPubKeyMan::FillPSBT(psbt, txdata, sighash_type, false, bip32derivs, n_signed, finalize);
+    }
+
+    // First let the local descriptor signer contribute (e.g. for a
+    // MuSig2 cosigner whose xprv lives in this wallet). It will add
+    // its own pub-nonce in round 1 and its partial signature in round
+    // 2; in single-sig mode it'll just sign with the local xprv. The
+    // signer below works around the Ledger app's quirk of refusing to
+    // run a round when another participant's data is already in the
+    // input, by stashing those entries in hwi-rs before talking to
+    // the device.
+    if (auto err = DescriptorScriptPubKeyMan::FillPSBT(psbt, txdata, sighash_type, true, bip32derivs, n_signed, /*finalize=*/false)) {
+        return err;
+    }
+
+    // Already complete if every input is now signed.
+    bool complete = true;
+    for (const auto& input : psbt.inputs) {
+        complete &= PSBTInputSigned(input);
+    }
+    if (complete) return {};
+
+    std::string failure_reason;
+    if (!signer.SignTransactionPolicy(psbt, name, descriptor_template, keys_info, hmac, failure_reason)) {
+        LogWarning("Failed to sign with policy %s: %s\n", name, failure_reason);
+        return PSBTError::EXTERNAL_SIGNER_FAILED;
+    }
+    // For multi-round flows like MuSig2, the local signer above may have
+    // contributed its share (round 1 pubnonce, round 2 partial signature)
+    // before the external signer added its own. After round 2 both
+    // cosigners' partial signatures are present in the PSBT, but neither
+    // FillPSBT call attempted aggregation -- the local one ran before the
+    // external signer's partial sig was available, and the external signer
+    // doesn't aggregate on its own. When the caller asked for finalization,
+    // run FinalizePSBT to aggregate any complete MuSig2 sessions into a
+    // Schnorr key-path signature. Round 1 (only nonces) is a no-op.
+    if (finalize) {
+        FinalizePSBT(psbt);
+    }
+    return {};
+}
+
 util::Result<std::string> ExternalSignerScriptPubKeyMan::RegisterPolicy(const ExternalSigner& signer,
                                                                         const std::string& name,
                                                                         const std::string& descriptor_template,

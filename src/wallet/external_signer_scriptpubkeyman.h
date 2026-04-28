@@ -60,6 +60,38 @@ class ExternalSignerScriptPubKeyMan : public DescriptorScriptPubKeyMan
   std::optional<common::PSBTError> FillPSBT(PartiallySignedTransaction& psbt, const PrecomputedTransactionData& txdata, std::optional<int> sighash_type = std::nullopt, bool sign = true, bool bip32derivs = false, int* n_signed = nullptr, bool finalize = true) const override;
 
   /**
+   * Sign a PSBT through an external signer scoped to a registered
+   * BIP388 wallet policy. Used for descriptors (e.g. MuSig2) that
+   * require the policy + hmac to be present at sign time so the device
+   * can verify the request against what was registered. Mirrors
+   * `DisplayAddressPolicy` for the signing path.
+   * @param[in,out] psbt                PSBT to fill / sign
+   * @param[in]     txdata              precomputed sighash data
+   * @param[in]     sighash_type        sighash type to use when signing
+   * @param[in]     sign                whether to sign
+   * @param[in]     bip32derivs         whether to fill bip32 derivation info
+   * @param[out]    n_signed            number of inputs signed by this SPKM
+   * @param[in]     finalize            whether to finalize if possible
+   * @param[in]     signer              external signer to talk to
+   * @param[in]     name                registered policy name
+   * @param[in]     descriptor_template BIP388 descriptor template
+   * @param[in]     keys_info           key with origin for each @N participant
+   * @param[in]     hmac                hex hmac the device returned at registration time
+   */
+  std::optional<common::PSBTError> FillPSBTPolicy(PartiallySignedTransaction& psbt,
+                                                  const PrecomputedTransactionData& txdata,
+                                                  std::optional<int> sighash_type,
+                                                  bool sign,
+                                                  bool bip32derivs,
+                                                  int* n_signed,
+                                                  bool finalize,
+                                                  ExternalSigner& signer,
+                                                  const std::string& name,
+                                                  const std::string& descriptor_template,
+                                                  const std::vector<std::string>& keys_info,
+                                                  const std::string& hmac) const;
+
+  /**
    * Register BIP388 wallet policy.
    * @param[in] name policy name to display on the signer
    * @param[in] descriptor_template BIP388 descriptor template
