@@ -43,6 +43,21 @@ public:
   */
  util::Result<void> DisplayAddress(const CTxDestination& dest, const ExternalSigner& signer) const;
 
+  /**
+   * Display an address belonging to a registered descriptor and verify the
+   * device echoes the same address.
+   * @param[in] dest          expected destination
+   * @param[in] signer        external signer to talk to
+   * @param[in] registration  opaque value returned by `registerdescriptor`
+   * @param[in] change        whether `dest` lives on the change chain
+   * @param[in] index         address index within the chain
+   */
+  util::Result<void> DisplayAddressRegistered(const CTxDestination& dest,
+                                              const ExternalSigner& signer,
+                                              const std::string& registration,
+                                              bool change,
+                                              uint32_t index) const;
+
   std::optional<common::PSBTError> FillPSBT(PartiallySignedTransaction& psbt, const PrecomputedTransactionData& txdata, const common::PSBTFillOptions& options, int* n_signed = nullptr) const override;
 
   /**
