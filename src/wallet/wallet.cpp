@@ -2755,6 +2755,39 @@ util::Result<void> CWallet::DisplayAddress(const CTxDestination& dest)
         }
         auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
         if (!signer) throw std::runtime_error(util::ErrorString(signer).original);
+
+        // BIP388: if the matched SPKM is part of a registered policy, ask the
+        // device to display the address using that policy (so it can verify the
+        // descriptor against the previously-stored hmac) rather than falling
+        // back on the single-key descriptor path that InferDescriptor produces.
+        if (IsCandidateForBIP388Policy(*signer_spk_man)) {
+            // TODO: support multiple registered policies on a single wallet by
+            // matching (template, keys) against the stored hmac. For now we
+            // pick the first hmac registered for this signer's fingerprint.
+            const BIP388* matching_hmac{nullptr};
+            for (const auto& entry : m_bip388) {
+                if (entry.fingerprint == signer->m_fingerprint) {
+                    matching_hmac = &entry;
+                    break;
+                }
+            }
+            if (matching_hmac) {
+                const auto policy{DerivePolicy(/*spk_pair=*/std::nullopt)};
+                if (!policy) return util::Error{util::ErrorString(policy)};
+                const auto index{signer_spk_man->GetScriptPubKeyIndex(scriptPubKey)};
+                if (!index) return util::Error{_("Could not locate address in script pub key map")};
+                const std::optional<bool> internal{IsInternalScriptPubKeyMan(signer_spk_man)};
+                if (!internal) return util::Error{_("Could not determine receive/change chain for address")};
+                return signer_spk_man->DisplayAddressPolicy(dest, *signer,
+                                                            matching_hmac->name,
+                                                            policy->first,
+                                                            policy->second,
+                                                            matching_hmac->hmac,
+                                                            *internal,
+                                                            static_cast<uint32_t>(*index));
+            }
+        }
+
         return signer_spk_man->DisplayAddress(dest, *signer);
     }
     return util::Error{_("There is no ScriptPubKeyManager for this address")};
