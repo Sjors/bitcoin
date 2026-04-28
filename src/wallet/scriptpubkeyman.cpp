@@ -1550,6 +1550,14 @@ int32_t DescriptorScriptPubKeyMan::GetEndRange() const
     return m_max_cached_index + 1;
 }
 
+std::optional<int32_t> DescriptorScriptPubKeyMan::GetScriptPubKeyIndex(const CScript& script) const
+{
+    LOCK(cs_desc_man);
+    auto it = m_map_script_pub_keys.find(script);
+    if (it == m_map_script_pub_keys.end()) return std::nullopt;
+    return it->second;
+}
+
 bool DescriptorScriptPubKeyMan::GetDescriptorString(std::string& out, const bool priv) const
 {
     LOCK(cs_desc_man);

@@ -408,6 +408,9 @@ public:
     std::unordered_set<CScript, SaltedSipHasher> GetScriptPubKeys(int32_t minimum_index) const;
     int32_t GetEndRange() const;
 
+    //! Look up the descriptor range index that produced `script`, if any.
+    std::optional<int32_t> GetScriptPubKeyIndex(const CScript& script) const;
+
     [[nodiscard]] bool GetDescriptorString(std::string& out, bool priv) const;
 
     void UpgradeDescriptorCache();
