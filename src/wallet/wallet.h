@@ -715,7 +715,7 @@ public:
     std::optional<common::PSBTError> FillPSBT(PartiallySignedTransaction& psbtx,
                   const common::PSBTFillOptions& options,
                   bool& complete,
-                  size_t* n_signed = nullptr) const;
+                  size_t* n_signed = nullptr);
 
     /**
      * Submit the transaction to the node's mempool and then relay to peers.
