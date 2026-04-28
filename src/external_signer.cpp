@@ -84,6 +84,27 @@ UniValue ExternalSigner::RegisterPolicy(const std::string& name, const std::stri
     return RunCommandParseJSON(command, "");
 }
 
+UniValue ExternalSigner::DisplayAddressPolicy(const std::string& name,
+                                              const std::string& descriptor_template,
+                                              const std::vector<std::string>& keys_info,
+                                              const std::string& hmac,
+                                              bool change,
+                                              uint32_t index) const
+{
+    std::vector<std::string> command = Cat(m_command, Cat(Cat({"--fingerprint", m_fingerprint}, NetworkArg()),
+        {"displayaddress",
+         "--policy-name", name,
+         "--policy-desc", descriptor_template,
+         "--hmac", hmac,
+         "--index", strprintf("%u", index)}));
+    for (const std::string& key_info : keys_info) {
+        command.emplace_back("--key");
+        command.emplace_back(key_info);
+    }
+    if (change) command.emplace_back("--change");
+    return RunCommandParseJSON(command, "");
+}
+
 bool ExternalSigner::SignTransaction(PartiallySignedTransaction& psbtx, std::string& error)
 {
     // Serialize the PSBT
