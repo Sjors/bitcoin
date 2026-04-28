@@ -406,6 +406,9 @@ public:
     int32_t GetEndRange() const;
     void SetMultipathRelatives(const std::vector<uint256>& ids);
 
+    //! Look up the descriptor range index that produced `script`, if any.
+    std::optional<int32_t> GetScriptPubKeyIndex(const CScript& script) const;
+
     [[nodiscard]] bool GetDescriptorString(std::string& out, bool priv) const;
     std::optional<std::string> GetMultipathString(bool priv) const;
 
