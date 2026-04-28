@@ -8,6 +8,7 @@
 #include <common/system.h>
 #include <univalue.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -51,6 +52,23 @@ public:
     //! @param[in] descriptor Descriptor specifying which address to display.
     //!            Must include a public key or xpub, as well as key origin.
     UniValue DisplayAddress(const std::string& descriptor) const;
+
+    //! Display an address from a previously-registered BIP388 wallet policy.
+    //! Calls `<command> displayaddress --policy-name <name> --policy-desc <template>
+    //! --key <k> ... [--hmac <hex>] --index <index> [--change]`.
+    //! @param[in] name                 policy name to display on the signer
+    //! @param[in] descriptor_template  BIP388 descriptor template (with @N placeholders)
+    //! @param[in] keys_info            key with origin for each @N participant
+    //! @param[in] hmac                 optional hex hmac the device returned at registration time
+    //! @param[in] change               whether to show the change-chain address
+    //! @param[in] index                address index within the chain
+    //! @returns                        signer reply, expected to contain `address`
+    UniValue DisplayAddressPolicy(const std::string& name,
+                                  const std::string& descriptor_template,
+                                  const std::vector<std::string>& keys_info,
+                                  const std::optional<std::string>& hmac,
+                                  bool change,
+                                  uint32_t index) const;
 
     //! Get receive and change Descriptor(s) from device for a given account.
     //! Calls `<command> --fingerprint <fingerprint> --chain <chain> getdescriptors
