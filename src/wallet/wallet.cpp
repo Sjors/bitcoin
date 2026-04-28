@@ -2211,7 +2211,7 @@ bool CWallet::SignTransaction(CMutableTransaction& tx, const std::map<COutPoint,
     return false;
 }
 
-std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, const common::PSBTFillOptions& options, bool& complete, size_t* n_signed) const
+std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, const common::PSBTFillOptions& options, bool& complete, size_t* n_signed)
 {
     if (n_signed) {
         *n_signed = 0;
@@ -2242,9 +2242,59 @@ std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, co
     }
     const PrecomputedTransactionData& txdata = *txdata_res;
 
+    // If a descriptor is registered with the external signer, dispatch the
+    // registered signing path once (covers all related descriptors). Mirrors
+    // the registration detection
+    // block in CWallet::DisplayAddress, but hoisted out of the per-SPKM
+    // loop so we don't shell out to the device once per SPKM.
+    bool registration_dispatched = false;
+    if (options.sign && !m_external_signer_registrations.empty()) {
+        ExternalSignerScriptPubKeyMan* registration_spk_man = nullptr;
+        for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
+            auto* candidate = dynamic_cast<ExternalSignerScriptPubKeyMan*>(spk_man);
+            if (candidate && IsCandidateForDescriptorRegistration(*candidate)) {
+                registration_spk_man = candidate;
+                break;
+            }
+        }
+        if (registration_spk_man) {
+            auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
+            if (signer) {
+                const ExternalSignerRegistration* matching_registration{nullptr};
+                for (const auto& entry : m_external_signer_registrations) {
+                    if (entry.fingerprint == signer->m_fingerprint) {
+                        matching_registration = &entry;
+                        break;
+                    }
+                }
+                if (matching_registration) {
+                    int n_signed_registered = 0;
+                    auto registration_err = registration_spk_man->FillPSBTRegistered(psbtx, txdata,
+                                                                                      options,
+                                                                                      &n_signed_registered,
+                                                                                      *signer,
+                                                                                      matching_registration->registration);
+                    if (registration_err) return registration_err;
+                    if (n_signed) {
+                        (*n_signed) += n_signed_registered;
+                    }
+                    registration_dispatched = true;
+                }
+            }
+        }
+    }
+
     // Fill in information from ScriptPubKeyMans
     for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
         int n_signed_this_spkm = 0;
+        // If we already dispatched the registered descriptor above, skip every
+        // ExternalSignerScriptPubKeyMan in this loop: the registration call
+        // covered the registered descriptor's SPKMs, and the device would
+        // reject anything else.
+        if (options.sign && registration_dispatched && dynamic_cast<ExternalSignerScriptPubKeyMan*>(spk_man) != nullptr) {
+            continue;
+        }
+
         const auto error{spk_man->FillPSBT(psbtx, txdata, options, &n_signed_this_spkm)};
         if (error) {
             return error;
