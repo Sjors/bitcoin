@@ -82,6 +82,16 @@ UniValue ExternalSigner::RegisterDescriptor(const std::string& name, const std::
     return RunCommandParseJSON(Cat(m_command, Cat(Cat({"--fingerprint", m_fingerprint}, NetworkArg()), {"registerdescriptor", name, descriptor})), "");
 }
 
+UniValue ExternalSigner::DisplayAddressRegistered(const std::string& registration, bool change, uint32_t index) const
+{
+    std::vector<std::string> command = Cat(m_command, Cat(Cat({"--fingerprint", m_fingerprint}, NetworkArg()),
+        {"displayaddress",
+         "--registration", registration,
+         "--index", strprintf("%u", index)}));
+    if (change) command.emplace_back("--change");
+    return RunCommandParseJSON(command, "");
+}
+
 bool ExternalSigner::SignTransaction(PartiallySignedTransaction& psbtx, std::string& error)
 {
     // Serialize the PSBT
