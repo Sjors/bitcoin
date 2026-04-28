@@ -173,6 +173,44 @@ std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBT(PartiallySigned
     return {};
 }
 
+std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBTRegistered(PartiallySignedTransaction& psbt,
+                                                                           const PrecomputedTransactionData& txdata,
+                                                                           common::PSBTFillOptions options,
+                                                                           int* n_signed,
+                                                                           ExternalSigner& signer,
+                                                                           const std::string& registration) const
+{
+    if (!options.sign) {
+        return DescriptorScriptPubKeyMan::FillPSBT(psbt, txdata, options, n_signed);
+    }
+
+    // First let the local descriptor signer contribute (e.g. for a
+    // MuSig2 cosigner whose xprv lives in this wallet). It will add
+    // its own pub-nonce in round 1 and its partial signature in round
+    // 2; in single-sig mode it'll just sign with the local xprv.
+    common::PSBTFillOptions local_options{options};
+    local_options.finalize = false;
+    if (auto err = DescriptorScriptPubKeyMan::FillPSBT(psbt, txdata, local_options, n_signed)) {
+        return err;
+    }
+
+    bool complete = true;
+    for (const auto& input : psbt.inputs) {
+        complete &= PSBTInputSigned(input);
+    }
+    if (complete) return {};
+
+    std::string failure_reason;
+    if (!signer.SignTransactionRegistered(psbt, registration, failure_reason)) {
+        LogWarning("Failed to sign with registered descriptor: %s\n", failure_reason);
+        return PSBTError::EXTERNAL_SIGNER_FAILED;
+    }
+    if (options.finalize) {
+        FinalizePSBT(psbt);
+    }
+    return {};
+}
+
 util::Result<std::string> ExternalSignerScriptPubKeyMan::RegisterDescriptor(const ExternalSigner& signer,
                                                                             const std::string& name,
                                                                             const std::string& descriptor) const
