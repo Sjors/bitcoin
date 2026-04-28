@@ -90,6 +90,28 @@ public:
     //! `signtx` command and PSBT via stdin.
     //! @param[in,out] psbt  PartiallySignedTransaction to be signed
     bool SignTransaction(PartiallySignedTransaction& psbt, std::string& error);
+
+    //! Sign PartiallySignedTransaction on the device, scoped to a
+    //! previously registered BIP388 wallet policy. Used for non-default
+    //! descriptors (e.g. MuSig2) that require an on-device policy
+    //! registration before signing.
+    //!
+    //! Pipes `signtx <base64> --policy-name <name> --policy-desc <t>
+    //! [--hmac <hex>] --key <k> ...` to the signer's stdin (the leading
+    //! `signtx <base64>` matches `SignTransaction`).
+    //!
+    //! @param[in,out] psbt              PSBT to be signed
+    //! @param[in]     name              policy name shown on the signer
+    //! @param[in]     descriptor_template BIP388 descriptor template
+    //! @param[in]     keys_info         key with origin for each `@N`
+    //! @param[in]     hmac              optional hex hmac returned at registration
+    //! @param[out]    error             populated on failure
+    bool SignTransactionPolicy(PartiallySignedTransaction& psbt,
+                               const std::string& name,
+                               const std::string& descriptor_template,
+                               const std::vector<std::string>& keys_info,
+                               const std::optional<std::string>& hmac,
+                               std::string& error);
 };
 
 #endif // BITCOIN_EXTERNAL_SIGNER_H
