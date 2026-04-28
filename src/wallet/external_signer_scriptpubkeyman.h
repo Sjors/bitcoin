@@ -36,6 +36,27 @@ class ExternalSignerScriptPubKeyMan : public DescriptorScriptPubKeyMan
   */
  util::Result<void> DisplayAddress(const CTxDestination& dest, const ExternalSigner& signer) const;
 
+  /**
+   * Display an address belonging to a registered BIP388 policy and verify the
+   * device echoes the same address.
+   * @param[in] dest                 expected destination
+   * @param[in] signer               external signer to talk to
+   * @param[in] name                 registered policy name
+   * @param[in] descriptor_template  BIP388 descriptor template (with @N placeholders)
+   * @param[in] keys_info            key with origin for each @N participant
+   * @param[in] hmac                 hex hmac the device returned at registration time
+   * @param[in] change               whether `dest` lives on the change chain
+   * @param[in] index                address index within the chain
+   */
+  util::Result<void> DisplayAddressPolicy(const CTxDestination& dest,
+                                          const ExternalSigner& signer,
+                                          const std::string& name,
+                                          const std::string& descriptor_template,
+                                          const std::vector<std::string>& keys_info,
+                                          const std::string& hmac,
+                                          bool change,
+                                          uint32_t index) const;
+
   std::optional<common::PSBTError> FillPSBT(PartiallySignedTransaction& psbt, const PrecomputedTransactionData& txdata, std::optional<int> sighash_type = std::nullopt, bool sign = true, bool bip32derivs = false, int* n_signed = nullptr, bool finalize = true) const override;
 
   /**

@@ -79,6 +79,47 @@ util::Result<void> ExternalSignerScriptPubKeyMan::DisplayAddress(const CTxDestin
     return util::Result<void>();
 }
 
+util::Result<void> ExternalSignerScriptPubKeyMan::DisplayAddressPolicy(const CTxDestination& dest,
+                                                                       const ExternalSigner& signer,
+                                                                       const std::string& name,
+                                                                       const std::string& descriptor_template,
+                                                                       const std::vector<std::string>& keys_info,
+                                                                       const std::string& hmac,
+                                                                       bool change,
+                                                                       uint32_t index) const
+{
+    const UniValue& result{signer.DisplayAddressPolicy(name, descriptor_template, keys_info, hmac, change, index)};
+
+    const UniValue& error = result.find_value("error");
+    if (error.isStr()) return util::Error{strprintf(_("Signer returned error: %s"), error.getValStr())};
+
+    const UniValue& ret_address = result.find_value("address");
+    if (!ret_address.isStr()) return util::Error{_("Signer did not echo address")};
+
+    // Compare the echoed address by witness program rather than by string.
+    // The Ledger Bitcoin app, for instance, encodes addresses with the
+    // testnet "tb1..." HRP even when -chain=regtest is in effect, so a
+    // strict EncodeDestination comparison would spuriously fail. Try each
+    // known chain's params and accept the echo if any of them decodes to
+    // the same scriptPubKey as the requested destination.
+    const CScript expected_script{GetScriptForDestination(dest)};
+    bool address_matches{false};
+    for (const ChainType chain : {ChainType::MAIN, ChainType::TESTNET, ChainType::TESTNET4, ChainType::SIGNET, ChainType::REGTEST}) {
+        std::unique_ptr<const CChainParams> cp = CreateChainParams(gArgs, chain);
+        std::string err;
+        const CTxDestination cand = DecodeDestination(ret_address.getValStr(), *cp, err);
+        if (IsValidDestination(cand) && GetScriptForDestination(cand) == expected_script) {
+            address_matches = true;
+            break;
+        }
+    }
+    if (!address_matches) {
+        return util::Error{strprintf(_("Signer echoed unexpected address %s"), ret_address.getValStr())};
+    }
+
+    return util::Result<void>();
+}
+
 // If sign is true, transaction must previously have been filled
 std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBT(PartiallySignedTransaction& psbt, const PrecomputedTransactionData& txdata, std::optional<int> sighash_type, bool sign, bool bip32derivs, int* n_signed, bool finalize) const
 {
