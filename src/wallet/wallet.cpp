@@ -2769,9 +2769,9 @@ util::Result<std::pair<std::string, std::vector<std::string>>> CWallet::DerivePo
                 if (internal && !change_descriptor.empty()) continue;
 
                 auto spk_man = GetScriptPubKeyMan(type, internal);
-                if (!Assume(spk_man)) continue;
+                if (!spk_man) continue;
                 auto desc_spk_man = dynamic_cast<DescriptorScriptPubKeyMan*>(spk_man);
-                if (!Assume(desc_spk_man)) continue;
+                if (!desc_spk_man) continue;
 
                 if (!IsCandidateForBIP388Policy(*desc_spk_man)) continue;
 
