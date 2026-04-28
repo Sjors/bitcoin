@@ -67,6 +67,33 @@ public:
   std::optional<common::PSBTError> FillPSBT(PartiallySignedTransaction& psbt, const PrecomputedTransactionData& txdata, const common::PSBTFillOptions& options, int* n_signed = nullptr) const override;
 
   /**
+   * Sign a PSBT through an external signer scoped to a registered
+   * BIP388 wallet policy. Used for descriptors (e.g. MuSig2) that
+   * require the policy name to be present at sign time, and may also
+   * use the optional hmac when the signer returns one at registration.
+   * Mirrors
+   * `DisplayAddressPolicy` for the signing path.
+   * @param[in,out] psbt                PSBT to fill / sign
+   * @param[in]     txdata              precomputed sighash data
+   * @param[in]     options             how to fill the PSBT (sign, finalize, sighash_type, ...)
+   * @param[out]    n_signed            number of inputs signed by this SPKM
+   * @param[in]     signer              external signer to talk to
+   * @param[in]     name                registered policy name
+   * @param[in]     descriptor_template BIP388 descriptor template
+   * @param[in]     keys_info           key with origin for each @N participant
+   * @param[in]     hmac                optional hex hmac the device returned at registration time
+   */
+  std::optional<common::PSBTError> FillPSBTPolicy(PartiallySignedTransaction& psbt,
+                                                  const PrecomputedTransactionData& txdata,
+                                                  common::PSBTFillOptions options,
+                                                  int* n_signed,
+                                                  ExternalSigner& signer,
+                                                  const std::string& name,
+                                                  const std::string& descriptor_template,
+                                                  const std::vector<std::string>& keys_info,
+                                                  const std::optional<std::string>& hmac) const;
+
+  /**
    * Register BIP388 wallet policy.
    * @param[in] name policy name to display on the signer
    * @param[in] descriptor_template BIP388 descriptor template
