@@ -154,3 +154,50 @@ bool ExternalSigner::SignTransaction(PartiallySignedTransaction& psbtx, std::str
 
     return true;
 }
+
+bool ExternalSigner::SignTransactionPolicy(PartiallySignedTransaction& psbtx,
+                                           const std::string& name,
+                                           const std::string& descriptor_template,
+                                           const std::vector<std::string>& keys_info,
+                                           const std::string& hmac,
+                                           std::string& error)
+{
+    // Serialize the PSBT
+    DataStream ssTx{};
+    ssTx << psbtx;
+
+    const std::vector<std::string> command = Cat(m_command, Cat({"--stdin", "--fingerprint", m_fingerprint}, NetworkArg()));
+
+    // Mirrors the displayaddress wire format: policy args travel on
+    // the same stdin line as `signtx <base64>`. The signer re-parses
+    // the line through its own arg parser, so we just space-join.
+    std::string stdinStr = "signtx " + EncodeBase64(ssTx.str())
+                         + " --policy-name " + name
+                         + " --policy-desc " + descriptor_template
+                         + " --hmac " + hmac;
+    for (const std::string& key_info : keys_info) {
+        stdinStr += " --key ";
+        stdinStr += key_info;
+    }
+
+    const UniValue signer_result = RunCommandParseJSON(command, stdinStr);
+
+    if (signer_result.find_value("error").isStr()) {
+        error = signer_result.find_value("error").get_str();
+        return false;
+    }
+    if (!signer_result.find_value("psbt").isStr()) {
+        error = "Unexpected result from signer";
+        return false;
+    }
+
+    PartiallySignedTransaction signer_psbtx;
+    std::string signer_psbt_error;
+    if (!DecodeBase64PSBT(signer_psbtx, signer_result.find_value("psbt").get_str(), signer_psbt_error)) {
+        error = strprintf("TX decode failed %s", signer_psbt_error);
+        return false;
+    }
+
+    psbtx = signer_psbtx;
+    return true;
+}
