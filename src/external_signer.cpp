@@ -85,6 +85,17 @@ UniValue ExternalSigner::RegisterDescriptor(const std::string& name, const std::
     return RunCommandParseJSON(Cat(m_command, Cat(Cat({"--fingerprint", m_fingerprint}, NetworkArg()), {"registerdescriptor", name, descriptor})), "");
 }
 
+UniValue ExternalSigner::DisplayAddressRegistered(const std::string& registration, bool change, uint32_t index) const
+{
+    // The registration descriptor combines the chains as <receive;change>,
+    // so the change chain is multipath index 1.
+    return RunCommandParseJSON(Cat(m_command, Cat(Cat({"--fingerprint", m_fingerprint}, NetworkArg()),
+        {"displayaddress",
+         "--registration", registration,
+         "--index", strprintf("%u", index),
+         "--multipath-index", change ? "1" : "0"})), "");
+}
+
 //! Find a sighash type used by the signer that doesn't commit to all outputs;
 //! a signature with SIGHASH_NONE or SIGHASH_SINGLE would let anyone alter
 //! them. SIGHASH_ANYONECANPAY is acceptable, since it only permits adding

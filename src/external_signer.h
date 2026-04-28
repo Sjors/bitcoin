@@ -8,6 +8,7 @@
 #include <common/system.h>
 #include <univalue.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -51,6 +52,15 @@ public:
     //! @param[in] descriptor Descriptor specifying which address to display.
     //!            Must include a public key or xpub, as well as key origin.
     UniValue DisplayAddress(const std::string& descriptor) const;
+
+    //! Display an address from a previously registered descriptor.
+    //! Calls `<command> displayaddress --registration <registration>
+    //! --index <index> --multipath-index <0|1>`.
+    //! @param[in] registration opaque value returned by `registerdescriptor`
+    //! @param[in] change       whether to show the change-chain address
+    //! @param[in] index        address index within the chain
+    //! @returns                signer reply, expected to contain `address`
+    UniValue DisplayAddressRegistered(const std::string& registration, bool change, uint32_t index) const;
 
     //! Get receive and change Descriptor(s) from device for a given account.
     //! Calls `<command> --fingerprint <fingerprint> --chain <chain> getdescriptors
