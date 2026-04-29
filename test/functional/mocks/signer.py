@@ -8,6 +8,8 @@ import sys
 import argparse
 import base64
 import json
+import urllib.parse
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
@@ -179,9 +181,53 @@ def validate_registration(args):
         return False
     return True
 
+def registered_signtx(args):
+    error = read_state("mock_signtx_error")
+    if error is not None:
+        return sys.stdout.write(json.dumps({"error": error}))
+    if not validate_registration(args):
+        return
+
+    delegate_url = read_state("mock_signtx_delegate_url")
+    if delegate_url is None:
+        return sys.stdout.write(json.dumps({"error": "no mock_signtx_delegate_url configured"}))
+
+    parsed = urllib.parse.urlparse(delegate_url)
+    netloc = parsed.hostname or ""
+    if parsed.port is not None:
+        netloc += f":{parsed.port}"
+    rebuilt = urllib.parse.urlunparse(parsed._replace(netloc=netloc))
+    body = json.dumps({
+        "jsonrpc": "1.0",
+        "id": "signer",
+        "method": "walletprocesspsbt",
+        "params": [args.psbt],
+    }).encode()
+    headers = {"Content-Type": "application/json", "Content-Length": str(len(body))}
+    if parsed.username is not None:
+        userpass = f"{parsed.username}:{parsed.password or ''}".encode()
+        headers["Authorization"] = "Basic " + base64.b64encode(userpass).decode()
+    request = urllib.request.Request(rebuilt, data=body, headers=headers, method="POST")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        reply = json.loads(response.read())
+    if reply.get("error"):
+        return sys.stdout.write(json.dumps({"error": str(reply["error"])}))
+
+    counter_path = os.path.join(os.getcwd(), "mock_signtx_counter")
+    counter = 1
+    if os.path.isfile(counter_path):
+        with open(counter_path, "r", encoding="utf8") as f:
+            counter = int(f.read().strip()) + 1
+    with open(counter_path, "w", encoding="utf8") as f:
+        f.write(str(counter))
+    return sys.stdout.write(json.dumps({"psbt": reply["result"]["psbt"]}))
+
+
 def signtx(args):
-    if args.fingerprint != "00000001":
-        return sys.stdout.write(json.dumps({"error": "Unexpected fingerprint", "fingerprint": args.fingerprint}))
+    if not validate_fingerprint(args):
+        return
+    if args.registration is not None:
+        return registered_signtx(args)
 
     # The test can instruct us to sign in a specific, possibly misbehaving, way
     mode = None
@@ -253,6 +299,7 @@ parser_register.set_defaults(func=registerdescriptor)
 
 parser_signtx = subparsers.add_parser('signtx')
 parser_signtx.add_argument('psbt', metavar='psbt')
+parser_signtx.add_argument('--registration', default=None)
 
 parser_signtx.set_defaults(func=signtx)
 
