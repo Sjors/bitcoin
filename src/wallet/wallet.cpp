@@ -4887,6 +4887,48 @@ std::set<CExtPubKey> CWallet::GetActiveHDPubKeys() const
     return active_xpubs;
 }
 
+std::map<uint32_t, CExtKey> CWallet::GetHDSeeds() const
+{
+    AssertLockHeld(cs_wallet);
+
+    Assert(IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
+
+    std::map<uint32_t, CExtKey> out;
+    if (IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) return out;
+
+    auto consider = [&](const CExtPubKey& xpub) {
+        // Only depth-0 entries are HD seeds.
+        if (xpub.nDepth != 0) return;
+        std::optional<CKey> key = GetKey(xpub.pubkey.GetID());
+        if (!key) return;
+        CExtKey seed(xpub, *key);
+        const CKeyID id = seed.Neuter().pubkey.GetID();
+        uint32_t fp;
+        std::memcpy(&fp, id.begin(), 4);
+        out.emplace(fp, std::move(seed));
+    };
+
+    // Active descriptors first.
+    for (const CExtPubKey& xpub : GetActiveHDPubKeys()) {
+        consider(xpub);
+    }
+
+    // Plus any `unused(KEY)` SPKMs (added via `addhdkey`).
+    for (auto* spkm : GetAllScriptPubKeyMans()) {
+        auto* desc_spkm = dynamic_cast<DescriptorScriptPubKeyMan*>(spkm);
+        if (!desc_spkm) continue;
+        LOCK(desc_spkm->cs_desc_man);
+        WalletDescriptor w_desc = desc_spkm->GetWalletDescriptor();
+        if (w_desc.descriptor->HasScripts()) continue;
+        std::set<CPubKey> dummy_pubs;
+        std::set<CExtPubKey> xpubs;
+        w_desc.descriptor->GetPubKeys(dummy_pubs, xpubs);
+        for (const CExtPubKey& xpub : xpubs) consider(xpub);
+    }
+
+    return out;
+}
+
 std::optional<CKey> CWallet::GetKey(const CKeyID& keyid) const
 {
     Assert(IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
