@@ -141,14 +141,15 @@ class WalletSignerMuSig2Test(BitcoinTestFramework):
         assert_equal(hww_musig.walletdisplayaddress(addr), {"address": addr})
         os.remove(mock_display_path)
 
-    def _set_musig_mock_state(self, *, fingerprint=None, error=None,
-                              reset_counter=True):
+    def _set_musig_mock_state(self, *, fingerprint=None,
+                              error=None, crash=None, reset_counter=True):
         """Drop mock state files in node 1's cwd. None means leave existing
         file in place; '' means remove the file."""
         cwd = self.nodes[1].cwd
         for name, value in (
             ('mock_fingerprint', fingerprint),
             ('mock_signtx_error', error),
+            ('mock_signtx_crash', crash),
         ):
             path = os.path.join(cwd, name)
             if value is None:
