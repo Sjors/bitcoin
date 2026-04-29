@@ -215,22 +215,48 @@ class WalletSignerMuSig2Test(BitcoinTestFramework):
         # the aggregated MuSig2 signature is valid.
         assert result["txid"] in self.nodes[1].getrawmempool()
 
-        # Build a stand-alone PSBT for the hard-fail subtest below. Fund
-        # a second UTXO since `send` consumed the first.
+        # Build a stand-alone PSBT for the soft- and hard-fail subtests
+        # below; using the same PSBT through both subtests lets us
+        # assert the local nonce is preserved across calls without
+        # racing the broadcast of the optimistic path. Fund a second
+        # UTXO since `send` consumed the first.
         addr = hww.getnewaddress(address_type="bech32m")
         self.def_wallet.sendtoaddress(addr, 1)
         self.generate(self.nodes[0], 1)
         psbt = hww.walletcreatefundedpsbt(inputs=[], outputs=[{dest: 0.5}])["psbt"]
 
-        # --- Hard-fail path ---
+        # --- Soft-fail path ---
         # Configure the mock to return a structured signer error from
-        # signtx. The wallet must surface EXTERNAL_SIGNER_FAILED rather
-        # than silently returning the unchanged PSBT.
+        # signtx. Because the local SPKM has an xprv and contributed
+        # its MuSig2 pubnonce in the round-1 fan-out, FillPSBTPolicy
+        # soft-fails the device's signtx so that fresh local
+        # contribution isn't discarded: the caller can re-issue
+        # walletprocesspsbt once the device is back to drive round 2.
         self._set_musig_mock_state(error="device disconnected")
+        result = hww.walletprocesspsbt(psbt=psbt)
+        assert_equal(result["complete"], False)
+        # The local nonce now lives in the returned PSBT. Re-issuing
+        # walletprocesspsbt on that PSBT exercises the hard-fail branch:
+        # the local pass is a no-op (its pubnonce is already there), so
+        # FillPSBTPolicy can't justify hiding the device error and
+        # surfaces it as EXTERNAL_SIGNER_FAILED.
+        psbt_with_nonce = result["psbt"]
         assert_raises_rpc_error(
             -25, "External signer failed to sign",
-            hww.walletprocesspsbt, psbt=psbt,
+            hww.walletprocesspsbt, psbt=psbt_with_nonce,
         )
 
+        # --- Subprocess-crash path ---
+        # `signer.py` exiting non-zero used to escape FillPSBTPolicy as
+        # an uncaught std::runtime_error and bubble up as an opaque
+        # internal JSON-RPC error. Commit "external signer: surface
+        # SignTransactionPolicy crash as signer error" routes that
+        # through the same uniform soft/hard-fail logic as a structured
+        # signer error.
+        self._set_musig_mock_state(error='', crash='1')
+        assert_raises_rpc_error(
+            -25, "External signer failed to sign",
+            hww.walletprocesspsbt, psbt=psbt_with_nonce,
+        )
 if __name__ == '__main__':
     WalletSignerMuSig2Test(__file__).main()

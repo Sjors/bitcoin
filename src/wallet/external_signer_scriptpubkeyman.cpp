@@ -187,11 +187,26 @@ std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBTPolicy(Partially
     // run a round when another participant's data is already in the
     // input, by stashing those entries in hwi-rs before talking to
     // the device.
+    //
+    // Snapshot the per-input MuSig2 nonce + partial-sig counts before
+    // the local pass so the soft-fail path below can tell whether this
+    // call actually advanced the PSBT (round-1 pubnonce or round-2
+    // partial sig from a hot cosigner) or was a no-op replay.
+    auto musig2_contribution_count = [](const PartiallySignedTransaction& p) {
+        size_t n = 0;
+        for (const auto& input : p.inputs) {
+            for (const auto& [_, nonces] : input.m_musig2_pubnonces) n += nonces.size();
+            for (const auto& [_, sigs] : input.m_musig2_partial_sigs) n += sigs.size();
+        }
+        return n;
+    };
+    const size_t musig2_count_before = musig2_contribution_count(psbt);
     common::PSBTFillOptions local_options{options};
     local_options.finalize = false;
     if (auto err = DescriptorScriptPubKeyMan::FillPSBT(psbt, txdata, local_options, n_signed)) {
         return err;
     }
+    const bool local_added_musig2 = musig2_contribution_count(psbt) > musig2_count_before;
 
     // Already complete if every input is now signed.
     bool complete = true;
@@ -215,7 +230,23 @@ std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBTPolicy(Partially
     }
     if (!signer_ok) {
         LogWarning("Failed to sign with policy %s: %s\n", name, failure_reason);
-        return PSBTError::EXTERNAL_SIGNER_FAILED;
+        // Soft-fail for multi-round MuSig2 flows, but only when the
+        // local pass above actually added a new MuSig2 contribution
+        // (round 1 pubnonce or round 2 partial signature) on this
+        // call. Surfacing the device error as a hard PSBTError would
+        // discard that fresh contribution and force the caller to
+        // start over once the device is back; instead we keep the
+        // partial PSBT and let the outer FillPSBT report
+        // complete=false so a follow-up walletprocesspsbt can drive
+        // the device round. If the local pass was a no-op (single-
+        // round flow, or a replay where the hot cosigner has already
+        // contributed everything it can in a previous call) we hard-
+        // fail, so callers see a clear EXTERNAL_SIGNER_FAILED instead
+        // of an unchanged PSBT being silently returned as "fine".
+        if (!local_added_musig2) {
+            return PSBTError::EXTERNAL_SIGNER_FAILED;
+        }
+        return {};
     }
     // For multi-round flows like MuSig2, the local signer above may have
     // contributed its share (round 1 pubnonce, round 2 partial signature)
