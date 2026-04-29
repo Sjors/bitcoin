@@ -6,6 +6,7 @@
 import os
 import sys
 import argparse
+import base64
 import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
@@ -26,6 +27,8 @@ from test_framework.psbt import (
 tprv = "tprv8ZgxMBicQKsPd7Uf69XL1XwhmjHopUGep8GuEiJDZmbQz6o58LninorQAfcKZWARbtRtfnLcJ5MQ2AtHcQJCCRUcMRvmDUjyEmNUWwx8UbK"
 
 MOCK_WALLET = "mock"
+DEFAULT_FINGERPRINT = "00000001"
+DEFAULT_REGISTRATION = "cmRlc2MBBHRlc3Q="
 
 
 def read_state(name):
@@ -34,6 +37,17 @@ def read_state(name):
         return None
     with open(path, "r", encoding="utf8") as f:
         return f.read().strip()
+
+
+def device_fingerprint():
+    return read_state("mock_fingerprint") or DEFAULT_FINGERPRINT
+
+
+def validate_fingerprint(args):
+    if args.fingerprint != device_fingerprint():
+        sys.stdout.write(json.dumps({"error": "Unexpected fingerprint", "fingerprint": args.fingerprint}))
+        return False
+    return True
 
 
 def perform_pre_checks():
@@ -46,7 +60,7 @@ def perform_pre_checks():
             sys.exit(int(mock_result[0]))
 
 def enumerate(args):
-    sys.stdout.write(json.dumps([{"fingerprint": "00000001", "type": "trezor", "model": "trezor_t"}]))
+    sys.stdout.write(json.dumps([{"fingerprint": device_fingerprint(), "type": "trezor", "model": "trezor_t"}]))
 
 def getdescriptors(args):
     xpub = "tpubD6NzVbkrYhZ4WaWSyoBvQwbpLkojyoTZPRsgXELWz3Popb3qkjcJyJUGLnL4qHHoQvao8ESaAstxYSnhyswJ76uZPStJRJCTKvosUCJZL5B"
@@ -69,12 +83,20 @@ def getdescriptors(args):
 
 
 def displayaddress(args):
-    if args.fingerprint != "00000001":
-        return sys.stdout.write(json.dumps({"error": "Unexpected fingerprint", "fingerprint": args.fingerprint}))
+    if not validate_fingerprint(args):
+        return
+
+    if args.registration is not None and not validate_registration(args):
+        return
 
     address = read_state("mock_displayaddress")
     if address is not None:
         return sys.stdout.write(json.dumps({"address": address}))
+    if args.registration is not None:
+        return sys.stdout.write(json.dumps({"error": "mock_displayaddress not set"}))
+
+    if args.fingerprint != DEFAULT_FINGERPRINT:
+        return sys.stdout.write(json.dumps({"error": "Unexpected descriptor signer"}))
 
     expected_desc = {
         "wpkh([00000001/84h/1h/0h/0/0]02c97dc3f4420402e01a113984311bf4a1b8de376cac0bdcfaf1b3ac81f13433c7)#3te6hhy7": "bcrt1qm90ugl4d48jv8n6e5t9ln6t9zlpm5th68x4f8g",
@@ -128,12 +150,34 @@ def tamper(psbt_b64, mode):
     return psbt.to_base64()
 
 def registerdescriptor(args):
-    if args.fingerprint != "00000001":
-        return sys.stdout.write(json.dumps({"error": "Unexpected fingerprint", "fingerprint": args.fingerprint}))
+    if not validate_fingerprint(args):
+        return
 
     if "/<0;1>/*" not in args.descriptor:
         return sys.stdout.write(json.dumps({"error": "Expected multipath descriptor", "descriptor": args.descriptor}))
-    return sys.stdout.write(json.dumps({"registration": "cmRlc2MBBHRlc3Q="}))
+    if args.fingerprint == DEFAULT_FINGERPRINT and read_state("mock_fingerprint") is None:
+        registration = DEFAULT_REGISTRATION
+    else:
+        registration = base64.b64encode(json.dumps({
+            "descriptor": args.descriptor,
+            "fingerprint": args.fingerprint,
+            "name": args.name,
+        }, sort_keys=True).encode()).decode()
+    return sys.stdout.write(json.dumps({"registration": registration}))
+
+
+def validate_registration(args):
+    if args.fingerprint == DEFAULT_FINGERPRINT and args.registration == DEFAULT_REGISTRATION:
+        return True
+    try:
+        registration = json.loads(base64.b64decode(args.registration))
+    except Exception:
+        sys.stdout.write(json.dumps({"error": "Invalid registration"}))
+        return False
+    if registration.get("fingerprint") != args.fingerprint:
+        sys.stdout.write(json.dumps({"error": "Registration fingerprint mismatch"}))
+        return False
+    return True
 
 def signtx(args):
     if args.fingerprint != "00000001":
@@ -196,7 +240,10 @@ parser_getdescriptors.set_defaults(func=getdescriptors)
 parser_getdescriptors.add_argument('--account', metavar='account')
 
 parser_displayaddress = subparsers.add_parser('displayaddress', help='display address on signer')
-parser_displayaddress.add_argument('--desc', metavar='desc')
+parser_displayaddress.add_argument('--desc', metavar='desc', default=None)
+parser_displayaddress.add_argument('--registration', default=None)
+parser_displayaddress.add_argument('--index', type=int, default=None)
+parser_displayaddress.add_argument('--multipath-index', type=int, default=0)
 parser_displayaddress.set_defaults(func=displayaddress)
 
 parser_register = subparsers.add_parser('registerdescriptor')
