@@ -201,7 +201,16 @@ std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBTRegistered(Parti
     if (complete) return {};
 
     std::string failure_reason;
-    if (!signer.SignTransactionRegistered(psbt, registration, failure_reason)) {
+    bool signer_ok;
+    try {
+        signer_ok = signer.SignTransactionRegistered(psbt, registration, failure_reason);
+    } catch (const std::runtime_error& e) {
+        // Treat a signer subprocess crash like a structured signer error so it
+        // reaches callers as EXTERNAL_SIGNER_FAILED.
+        signer_ok = false;
+        failure_reason = e.what();
+    }
+    if (!signer_ok) {
         LogWarning("Failed to sign with registered descriptor: %s\n", failure_reason);
         return PSBTError::EXTERNAL_SIGNER_FAILED;
     }

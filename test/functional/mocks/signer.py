@@ -182,6 +182,10 @@ def validate_registration(args):
     return True
 
 def registered_signtx(args):
+    if read_state("mock_signtx_crash") is not None:
+        sys.stderr.write("mock signer crashed\n")
+        sys.exit(1)
+
     error = read_state("mock_signtx_error")
     if error is not None:
         return sys.stdout.write(json.dumps({"error": error}))
