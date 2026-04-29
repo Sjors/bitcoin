@@ -187,13 +187,33 @@ std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBTRegistered(Parti
     // First let the local descriptor signer contribute (e.g. for a
     // MuSig2 cosigner whose xprv lives in this wallet). It will add
     // its own pub-nonce in round 1 and its partial signature in round
-    // 2; in single-sig mode it'll just sign with the local xprv.
+    // 2; in single-sig mode it'll just sign with the local xprv. The
+    // signer below works around the Ledger app's quirk of refusing to
+    // run a round when another participant's data is already in the
+    // input, by stashing those entries in HWI before talking to the
+    // device.
+    //
+    // Snapshot the per-input MuSig2 nonce + partial-sig counts before
+    // the local pass so the soft-fail path below can tell whether this
+    // call actually advanced the PSBT (round-1 pubnonce or round-2
+    // partial sig from a hot cosigner) or was a no-op replay.
+    auto musig2_contribution_count = [](const PartiallySignedTransaction& p) {
+        size_t n = 0;
+        for (const auto& input : p.inputs) {
+            for (const auto& [_, nonces] : input.m_musig2_pubnonces) n += nonces.size();
+            for (const auto& [_, sigs] : input.m_musig2_partial_sigs) n += sigs.size();
+        }
+        return n;
+    };
+    const size_t musig2_count_before = musig2_contribution_count(psbt);
     common::PSBTFillOptions local_options{options};
     local_options.finalize = false;
     if (auto err = DescriptorScriptPubKeyMan::FillPSBT(psbt, txdata, local_options, n_signed)) {
         return err;
     }
+    const bool local_added_musig2 = musig2_contribution_count(psbt) > musig2_count_before;
 
+    // Already complete if every input is now signed.
     bool complete = true;
     for (const auto& input : psbt.inputs) {
         complete &= PSBTInputSigned(input);
@@ -205,15 +225,43 @@ std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBTRegistered(Parti
     try {
         signer_ok = signer.SignTransactionRegistered(psbt, registration, failure_reason);
     } catch (const std::runtime_error& e) {
-        // Treat a signer subprocess crash like a structured signer error so it
-        // reaches callers as EXTERNAL_SIGNER_FAILED.
+        // The signer subprocess exited non-zero (e.g. device unplugged
+        // mid-flow, or HWI reporting a transport error). Treat it
+        // the same as a structured `{"error":...}` response so the
+        // caller sees a uniform EXTERNAL_SIGNER_FAILED instead of an
+        // uncaught exception bubbling up through the RPC layer.
         signer_ok = false;
         failure_reason = e.what();
     }
     if (!signer_ok) {
         LogWarning("Failed to sign with registered descriptor: %s\n", failure_reason);
-        return PSBTError::EXTERNAL_SIGNER_FAILED;
+        // Soft-fail for multi-round MuSig2 flows, but only when the
+        // local pass above actually added a new MuSig2 contribution
+        // (round 1 pubnonce or round 2 partial signature) on this
+        // call. Surfacing the device error as a hard PSBTError would
+        // discard that fresh contribution and force the caller to
+        // start over once the device is back; instead we keep the
+        // partial PSBT and let the outer FillPSBT report
+        // complete=false so a follow-up walletprocesspsbt can drive
+        // the device round. If the local pass was a no-op (single-
+        // round flow, or a replay where the hot cosigner has already
+        // contributed everything it can in a previous call) we hard-
+        // fail, so callers see a clear EXTERNAL_SIGNER_FAILED instead
+        // of an unchanged PSBT being silently returned as "fine".
+        if (!local_added_musig2) {
+            return PSBTError::EXTERNAL_SIGNER_FAILED;
+        }
+        return {};
     }
+    // For multi-round flows like MuSig2, the local signer above may have
+    // contributed its share (round 1 pubnonce, round 2 partial signature)
+    // before the external signer added its own. After round 2 both
+    // cosigners' partial signatures are present in the PSBT, but neither
+    // FillPSBT call attempted aggregation -- the local one ran before the
+    // external signer's partial sig was available, and the external signer
+    // doesn't aggregate on its own. When the caller asked for finalization,
+    // run FinalizePSBT to aggregate any complete MuSig2 sessions into a
+    // Schnorr key-path signature. Round 1 (only nonces) is a no-op.
     if (options.finalize) {
         FinalizePSBT(psbt);
     }
