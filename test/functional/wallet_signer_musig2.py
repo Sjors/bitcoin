@@ -20,13 +20,6 @@ from test_framework.util import (
 # from that wallet at runtime in `_setup_device_wallet`.
 DEVICE_ACCOUNT_PATH = "m/87h/1h/0h"
 
-# Hardcode the local MuSig participant's account keys until the later
-# importdescriptors autobind commit teaches the wallet to bind an xpub
-# descriptor back to an xprv it already knows.
-LOCAL_ORIGIN = "[ec63add0/84h/1h/0h]"
-LOCAL_XPRV = "tprv8gauGKtmnH4cxv22ZtmEKqDDAeqnm2b4srPWuFsugMuVc79KDEHRTWgKGdAhACqjZQytU1o9gcc91TSW8L1s18PgFUHAJ8p8iY1GwaUEn9u"
-LOCAL_XPUB = "tpubDDGwQjw1vekHrP3pTYRpjEsKjgMivMmyT9zJBmvD6dhtSbQ5qd71e1JBSm8XsPHiibVPfvpSsK1gffjHc2NLr9p2BebB6XRpyLih9E1j5nF"
-
 
 class WalletSignerMuSig2Test(BitcoinTestFramework):
     def set_test_params(self):
@@ -73,7 +66,11 @@ class WalletSignerMuSig2Test(BitcoinTestFramework):
         self.log.info('Create an external-signer wallet with a MuSig2 descriptor')
 
         # Blank wallet so signer setup doesn't auto-import the device's
-        # placeholder single-sig descriptors.
+        # placeholder single-sig descriptors. We then add a hot HD seed
+        # locally and import an xpub-only MuSig2 descriptor: the
+        # `importdescriptors xprv autobind` path recognises the local
+        # cosigner xpub as one of the wallet's own and binds the matching
+        # xprv automatically.
         self.nodes[1].createwallet(
             wallet_name='hww_musig',
             external_signer=True,
@@ -81,9 +78,12 @@ class WalletSignerMuSig2Test(BitcoinTestFramework):
             blank=True,
         )
         hww_musig = self.nodes[1].get_wallet_rpc('hww_musig')
+        hww_musig.addhdkey()
+        local_info = hww_musig.derivehdkey(DEVICE_ACCOUNT_PATH, {"private": True})
+        self.local_xpub = local_info["xpub"]
 
         musig_descriptor = (
-            f"tr(musig({LOCAL_ORIGIN}{LOCAL_XPRV},"
+            f"tr(musig({local_info['origin']}{self.local_xpub},"
             f"{self.device_origin}{self.device_xpub})/<0;1>/*)"
         )
         result = hww_musig.importdescriptors([{
@@ -99,7 +99,7 @@ class WalletSignerMuSig2Test(BitcoinTestFramework):
         # the wallet calls signtx.
         device_descriptor = (
             f"tr(musig({self.device_origin}{self.device_xprv},"
-            f"{LOCAL_ORIGIN}{LOCAL_XPUB})/<0;1>/*)"
+            f"{local_info['origin']}{self.local_xpub})/<0;1>/*)"
         )
         result = self.device_wallet.importdescriptors([{
             "desc": descsum_create(device_descriptor),
