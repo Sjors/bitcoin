@@ -1127,6 +1127,14 @@ public:
     //! Retrieve descriptor xpubs matching the requested filter.
     HDPubKeyMap GetHDPubKeys(HDKeyFilter filter) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
+    //! Retrieve every HD seed (depth-0 extended key) the wallet knows the private key
+    //! for, indexed by the seed's master fingerprint (the first 4 bytes of the depth-0
+    //! pubkey id). Walks both active descriptors and `unused(KEY)` SPKMs. Used by
+    //! `importdescriptors` to bind descriptor xpubs to known seeds.
+    //! Note: ignores fingerprint collisions between distinct seeds (only the first
+    //! seed seen for a given fingerprint is returned).
+    std::map<uint32_t, CExtKey> GetHDSeeds() const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
     //! Find the private key for the given key id from the wallet's descriptors, if available
     //! Returns nullopt when no descriptor has the key or if the wallet is locked.
     std::optional<CKey> GetKey(const CKeyID& keyid) const;
