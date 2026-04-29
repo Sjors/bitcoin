@@ -17,11 +17,13 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 class CScript;
 class SigningProvider;
 struct FlatSigningProvider;
+struct KeyOriginInfo;
 
 using ExtPubKeyMap = std::unordered_map<uint32_t, CExtPubKey>;
 
@@ -188,6 +190,18 @@ struct Descriptor {
      * @param[out] ext_pubs Any extended public keys
      */
     virtual void GetPubKeys(std::set<CPubKey>& pubkeys, std::set<CExtPubKey>& ext_pubs) const = 0;
+
+    /** Return (master-rooted origin info, root extended pubkey) for every BIP 32 key
+     *  expression with origin info inside this descriptor (including musig() participants
+     *  and subdescriptors). Used by `importdescriptors` to bind known wallet HD seeds
+     *  to descriptor xpubs without requiring the caller to splice xprvs into the
+     *  descriptor string.
+     *
+     * @param[out] out Each entry is `{origin, root_extkey}` where `origin.fingerprint`
+     *                 is the master fingerprint and `origin.path` is the path from
+     *                 master to `root_extkey`.
+     */
+    virtual void GetKeyOrigins(std::vector<std::pair<KeyOriginInfo, CExtPubKey>>& out) const = 0;
 
     /** Whether this descriptor produces any scripts with the Expand functions */
     virtual bool HasScripts() const = 0;
