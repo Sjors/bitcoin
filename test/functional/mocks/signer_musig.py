@@ -144,6 +144,14 @@ def _validate_registration(args):
 def signtx_cmd(args):
     if not _validate_fingerprint(args):
         return
+    # Test-injected subprocess-crash path. The wallet's registered signing
+    # call invokes RunCommandParseJSON, which throws std::runtime_error
+    # if the subprocess exits non-zero. Used to exercise the try/catch
+    # in FillPSBTRegistered.
+    if _read_state("mock_signtx_crash") is not None:
+        sys.stderr.write("mock signer crashed\n")
+        sys.exit(1)
+
     # Test-injected error path. Counter is intentionally NOT advanced so
     # repeat calls keep failing the same way (mirrors a device that's
     # unplugged for the duration of the test scenario).
