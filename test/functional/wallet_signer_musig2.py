@@ -140,14 +140,15 @@ class WalletSignerMuSig2Test(BitcoinTestFramework):
         assert_equal(hww_musig.walletdisplayaddress(addr), {"address": addr})
         os.remove(mock_display_path)
 
-    def _set_musig_mock_state(self, *, fingerprint=None, error=None,
-                              reset_counter=True):
+    def _set_musig_mock_state(self, *, fingerprint=None,
+                              error=None, crash=None, reset_counter=True):
         """Drop mock state files in node 1's cwd. None means leave existing
         file in place; '' means remove the file."""
         cwd = self.nodes[1].cwd
         for name, value in (
             ('mock_fingerprint', fingerprint),
             ('mock_signtx_error', error),
+            ('mock_signtx_crash', crash),
         ):
             path = os.path.join(cwd, name)
             if value is None:
@@ -217,6 +218,14 @@ class WalletSignerMuSig2Test(BitcoinTestFramework):
         # signtx. The wallet must surface EXTERNAL_SIGNER_FAILED rather
         # than silently returning the unchanged PSBT.
         self._set_musig_mock_state(error="device disconnected")
+        assert_raises_rpc_error(
+            -25, "External signer failed to sign",
+            hww.walletprocesspsbt, psbt=psbt,
+        )
+
+        # A non-zero signer exit follows the same error path as a structured
+        # signer error instead of escaping as an internal JSON-RPC error.
+        self._set_musig_mock_state(error='', crash='1')
         assert_raises_rpc_error(
             -25, "External signer failed to sign",
             hww.walletprocesspsbt, psbt=psbt,
