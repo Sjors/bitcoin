@@ -201,7 +201,19 @@ std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBTPolicy(Partially
     if (complete) return {};
 
     std::string failure_reason;
-    if (!signer.SignTransactionPolicy(psbt, name, descriptor_template, keys_info, hmac, failure_reason)) {
+    bool signer_ok;
+    try {
+        signer_ok = signer.SignTransactionPolicy(psbt, name, descriptor_template, keys_info, hmac, failure_reason);
+    } catch (const std::runtime_error& e) {
+        // The signer subprocess exited non-zero (e.g. device unplugged
+        // mid-flow, or hwi-rs reporting a transport error). Treat it
+        // the same as a structured `{"error":...}` response so the
+        // caller sees a uniform EXTERNAL_SIGNER_FAILED instead of an
+        // uncaught exception bubbling up through the RPC layer.
+        signer_ok = false;
+        failure_reason = e.what();
+    }
+    if (!signer_ok) {
         LogWarning("Failed to sign with policy %s: %s\n", name, failure_reason);
         return PSBTError::EXTERNAL_SIGNER_FAILED;
     }
