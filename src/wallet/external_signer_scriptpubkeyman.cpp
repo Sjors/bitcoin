@@ -62,15 +62,21 @@ std::unique_ptr<ExternalSignerScriptPubKeyMan> ExternalSignerScriptPubKeyMan::Cr
     return spkm;
 }
 
- util::Result<ExternalSigner> ExternalSignerScriptPubKeyMan::GetExternalSigner() {
+util::Result<std::vector<ExternalSigner>> ExternalSignerScriptPubKeyMan::GetExternalSigners() {
     const std::string command = gArgs.GetArg("-signer", "");
     if (command == "") return util::Error{Untranslated("restart bitcoind with -signer=<cmd>")};
     std::vector<ExternalSigner> signers;
     ExternalSigner::Enumerate(command, signers, Params().GetChainTypeString());
     if (signers.empty()) return util::Error{Untranslated("No external signers found")};
+    return signers;
+}
+
+util::Result<ExternalSigner> ExternalSignerScriptPubKeyMan::GetExternalSigner() {
+    auto signers{GetExternalSigners()};
+    if (!signers) return util::Error{util::ErrorString(signers)};
     // TODO: add fingerprint argument instead of failing in case of multiple signers.
-    if (signers.size() > 1) return util::Error{Untranslated("More than one external signer found. Please connect only one at a time.")};
-    return signers[0];
+    if (signers->size() > 1) return util::Error{Untranslated("More than one external signer found. Please connect only one at a time.")};
+    return std::move(signers->front());
 }
 
 util::Result<void> ExternalSignerScriptPubKeyMan::DisplayAddress(const CTxDestination& dest, const ExternalSigner &signer) const

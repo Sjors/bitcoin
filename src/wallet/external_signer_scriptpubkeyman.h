@@ -35,6 +35,16 @@ public:
     static std::unique_ptr<ExternalSignerScriptPubKeyMan> CreateFromImport(WalletStorage& storage, WalletDescriptor& descriptor, int64_t keypool_size, const FlatSigningProvider& provider);
     static std::unique_ptr<ExternalSignerScriptPubKeyMan> CreateNew(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, std::unique_ptr<Descriptor> desc);
 
+  /** Enumerate all external signers reachable through the configured
+   *  -signer command. Returns the full set so callers (e.g. multi-signer
+   *  MuSig2 wallets) can fan a single RPC out to every connected device.
+   */
+  static util::Result<std::vector<ExternalSigner>> GetExternalSigners();
+
+  /** Convenience wrapper that returns the single signer when exactly one
+   *  is connected. Errors out for the multi-signer case so callers that
+   *  haven't been taught to fan out keep their old behaviour.
+   */
   static util::Result<ExternalSigner> GetExternalSigner();
 
   /**

@@ -40,6 +40,7 @@ class WalletSignerMuSig2Test(BitcoinTestFramework):
         self.test_register()
         self.test_display_address()
         self.test_bip388_musig2_policy()
+        self.test_bip388_musig2_two_signers()
 
     def _setup_device_wallet(self):
         """Create the cosigner wallet on node 0 that backs the mock
@@ -141,8 +142,8 @@ class WalletSignerMuSig2Test(BitcoinTestFramework):
         assert_equal(hww_musig.walletdisplayaddress(addr), {"address": addr})
         os.remove(mock_display_path)
 
-    def _set_musig_mock_state(self, *, fingerprint=None,
-                              error=None, crash=None, reset_counter=True):
+    def _set_musig_mock_state(self, *, fingerprint=None, error=None, crash=None,
+                              reset_counter=True):
         """Drop mock state files in node 1's cwd. None means leave existing
         file in place; '' means remove the file."""
         cwd = self.nodes[1].cwd
@@ -209,7 +210,8 @@ class WalletSignerMuSig2Test(BitcoinTestFramework):
         result = hww.send(outputs=[{dest: 0.5}])
         assert_equal(result["complete"], True)
         # The mock saw two signtx calls (round 1 + round 2).
-        with open(os.path.join(self.nodes[1].cwd, 'mock_signtx_counter')) as f:
+        with open(os.path.join(self.nodes[1].cwd,
+                               f'mock_signtx_{self.device_fingerprint}_counter')) as f:
             assert_equal(f.read().strip(), "2")
         # `send` already broadcast the tx; mempool acceptance verifies
         # the aggregated MuSig2 signature is valid.
@@ -258,5 +260,134 @@ class WalletSignerMuSig2Test(BitcoinTestFramework):
             -25, "External signer failed to sign",
             hww.walletprocesspsbt, psbt=psbt_with_nonce,
         )
+        # Reset state so subsequent tests aren't affected.
+        self._set_musig_mock_state(crash='')
+
+    def test_bip388_musig2_two_signers(self):
+        self.log.info("Test BIP388 MuSig2 policy signing dance with two external signers")
+        # Two co-signing devices, both reachable through the same
+        # `-signer` mock binary. After CWallet's BIP388 dispatch was
+        # taught to fan out to every connected signer (commit "wallet:
+        # fan registerpolicy/displayaddress/FillPSBT out to all
+        # signers"), this scenario completes inside a single
+        # walletprocesspsbt call: the round-1 fan-out collects every
+        # cosigner's pubnonce, the round-2 retry inside FillPSBT
+        # collects every partial sig, and FillPSBTPolicy's FinalizePSBT
+        # aggregates them into a Schnorr key-path signature.
+
+        # The single-device hww_musig leaves a delegate URL set; clear
+        # it (and the single-device fingerprint slot) so each device
+        # gets routed only via its own per-fingerprint delegate URL.
+        cwd = self.nodes[1].cwd
+        for stale in ('mock_signtx_delegate_url', 'mock_fingerprint',
+                      'mock_signtx_counter', 'mock_signtx_error',
+                      'mock_signtx_crash', 'mock_displayaddress'):
+            stale_path = os.path.join(cwd, stale)
+            if os.path.isfile(stale_path):
+                os.remove(stale_path)
+
+        # Two device-side cosigner wallets on node 0, each with its own
+        # xprv at the same BIP32 path. Together with the local mirror
+        # held by the BIP388 wallet on node 1, this is a 2-of-2 MuSig2.
+        device_a = self._make_device_cosigner('hww_musig_device_a')
+        device_b = self._make_device_cosigner('hww_musig_device_b')
+
+        # Wire the mock to enumerate two devices and route each
+        # fingerprint to its own cosigner wallet.
+        with open(os.path.join(cwd, 'mock_fingerprints'), 'w') as f:
+            f.write(f"{device_a['fingerprint']},{device_b['fingerprint']}")
+        self._set_musig_signtx_delegate('hww_musig_device_a',
+                                        fingerprint=device_a['fingerprint'])
+        self._set_musig_signtx_delegate('hww_musig_device_b',
+                                        fingerprint=device_b['fingerprint'])
+
+        # BIP388 wallet on node 1: no local privkeys (both cosigners are
+        # devices), blank so signer setup doesn't auto-import single-sig
+        # placeholder descriptors.
+        self.nodes[1].createwallet(
+            wallet_name='hww_bip388_2of2',
+            disable_private_keys=True,
+            external_signer=True,
+            blank=True,
+        )
+        hww = self.nodes[1].get_wallet_rpc('hww_bip388_2of2')
+        musig_descriptor = (
+            f"tr(musig({device_a['origin']}{device_a['xpub']},"
+            f"{device_b['origin']}{device_b['xpub']})/<0;1>/*)"
+        )
+        result = hww.importdescriptors([{
+            "desc": descsum_create(musig_descriptor),
+            "active": True,
+            "timestamp": "now",
+        }])
+        assert_equal(result[0]["success"], True)
+
+        # Mirror the same descriptor on each device wallet, with that
+        # device's own xprv swapped in. The mock delegates signtx to
+        # these wallets so they produce real MuSig2 contributions.
+        for device in (device_a, device_b):
+            other = device_b if device is device_a else device_a
+            mirror = (
+                f"tr(musig({device['origin']}{device['xprv']},"
+                f"{other['origin']}{other['xpub']})/<0;1>/*)"
+            )
+            res = device['wallet'].importdescriptors([{
+                "desc": descsum_create(mirror),
+                "active": True,
+                "timestamp": "now",
+            }])
+            assert_equal(res[0]["success"], True)
+
+        # registerpolicy fans out: one bip388 record per device.
+        self._set_musig_registerpolicy_nohmac(True)
+        hww.registerpolicy()
+        info = hww.getwalletinfo()
+        assert_equal(len(info["bip388"]), 2)
+        assert_equal({entry["fingerprint"] for entry in info["bip388"]},
+                     {device_a['fingerprint'], device_b['fingerprint']})
+
+        # Fund the aggregated address.
+        addr = hww.getnewaddress(address_type="bech32m")
+        self.def_wallet.sendtoaddress(addr, 1)
+        self.generate(self.nodes[0], 1)
+
+        # Single RPC: round 1 fan-out + round 2 retry fan-out + finalize
+        # all happen inside walletprocesspsbt.
+        dest = self.def_wallet.getnewaddress(address_type="bech32m")
+        psbt = hww.walletcreatefundedpsbt(inputs=[], outputs=[{dest: 0.5}],
+                                          options={"change_type": "bech32m"})["psbt"]
+        proc = hww.walletprocesspsbt(psbt=psbt)
+        assert_equal(proc["complete"], True)
+        # Both devices were invoked. The fan-out iterates signers in
+        # order: round 1 calls each (collecting nonces, with the second
+        # also producing a partial sig once both nonces are present);
+        # round 2 calls the first signer again to add its partial sig
+        # and finalize, after which the PSBT is complete and
+        # FillPSBTPolicy short-circuits the remaining signers. So one
+        # device sees two signtx calls and the other sees one.
+        counters = sorted(
+            int(open(os.path.join(cwd, f"mock_signtx_{d['fingerprint']}_counter")).read())
+            for d in (device_a, device_b)
+        )
+        assert_equal(counters, [1, 2])
+        assert self.nodes[0].testmempoolaccept([proc["hex"]])[0]["allowed"]
+
+    def _make_device_cosigner(self, name):
+        """Stand up a cosigner wallet on node 0 to back one mock device.
+        Returns a dict with the wallet handle and the BIP32 material the
+        BIP388 wallet's MuSig2 descriptor needs."""
+        self.nodes[0].createwallet(wallet_name=name)
+        wallet = self.nodes[0].get_wallet_rpc(name)
+        wallet.addhdkey()
+        info = wallet.derivehdkey(DEVICE_ACCOUNT_PATH, {"private": True})
+        return {
+            'wallet': wallet,
+            'origin': info["origin"],
+            'xpub': info["xpub"],
+            'xprv': info["xprv"],
+            'fingerprint': info["origin"][1:9],
+        }
+
+
 if __name__ == '__main__':
     WalletSignerMuSig2Test(__file__).main()

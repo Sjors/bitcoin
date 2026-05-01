@@ -2247,16 +2247,26 @@ std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, co
                 }
             }
             if (policy_spk_man) {
-                auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
-                if (signer) {
-                    const BIP388* matching_policy{nullptr};
-                    for (const auto& entry : m_bip388) {
-                        if (entry.fingerprint == signer->m_fingerprint) {
-                            matching_policy = &entry;
-                            break;
+                // Fan out to every connected external signer that has a
+                // BIP388 policy registered with this wallet (e.g. a
+                // 3-of-3 MuSig2 split across two HW wallets and a hot
+                // cosigner). FillPSBTPolicy itself absorbs the local
+                // descriptor signer's contribution on each call, so we
+                // ask the first matching signer to do the local pass +
+                // its device round, then ask each subsequent signer to
+                // do only its device round.
+                auto signers{ExternalSignerScriptPubKeyMan::GetExternalSigners()};
+                if (signers) {
+                    bool any_dispatched{false};
+                    for (auto& signer : *signers) {
+                        const BIP388* matching_policy{nullptr};
+                        for (const auto& entry : m_bip388) {
+                            if (entry.fingerprint == signer.m_fingerprint) {
+                                matching_policy = &entry;
+                                break;
+                            }
                         }
-                    }
-                    if (matching_policy) {
+                        if (!matching_policy) continue;
                         const auto policy{DerivePolicy(/*spk_pair=*/std::nullopt)};
                         if (!policy) {
                             return PSBTError::EXTERNAL_SIGNER_FAILED;
@@ -2265,7 +2275,7 @@ std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, co
                         auto policy_err = policy_spk_man->FillPSBTPolicy(target, txdata,
                                                                          options,
                                                                          &n_signed_policy,
-                                                                         *signer,
+                                                                         signer,
                                                                          matching_policy->name,
                                                                          policy->first,
                                                                          policy->second,
@@ -2276,8 +2286,9 @@ std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, co
                         if (n_signed) {
                             (*n_signed) += n_signed_policy;
                         }
-                        policy_dispatched = true;
+                        any_dispatched = true;
                     }
+                    policy_dispatched = any_dispatched;
                 }
             }
         }
@@ -2864,34 +2875,36 @@ util::Result<void> CWallet::DisplayAddress(const CTxDestination& dest)
         if (signer_spk_man == nullptr) {
             continue;
         }
-        auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
-        if (!signer) throw std::runtime_error(util::ErrorString(signer).original);
+        auto signers{ExternalSignerScriptPubKeyMan::GetExternalSigners()};
+        if (!signers) throw std::runtime_error(util::ErrorString(signers).original);
 
         // BIP388: if the matched SPKM is part of a registered policy, ask the
-        // device to display the address using that policy (so it can verify the
-        // descriptor against the previously-stored policy metadata) rather than
-        // falling back on the single-key descriptor path that InferDescriptor
-        // produces.
+        // first connected device whose fingerprint matches a registered
+        // policy to display the address using that policy. For multi-signer
+        // wallets (e.g. 3-of-3 MuSig2) any one of the cosigner devices is
+        // sufficient -- they all encode the same address from the same policy
+        // metadata, and the user only needs one device to confirm visually.
         if (IsCandidateForBIP388Policy(*signer_spk_man)) {
-            // TODO: support multiple registered policies on a single wallet by
-            // matching (template, keys) against the stored policy metadata.
-            // For now we pick the first policy registered for this signer's
-            // fingerprint.
+            ExternalSigner* matching_signer{nullptr};
             const BIP388* matching_policy{nullptr};
-            for (const auto& entry : m_bip388) {
-                if (entry.fingerprint == signer->m_fingerprint) {
-                    matching_policy = &entry;
-                    break;
+            for (auto& signer : *signers) {
+                for (const auto& entry : m_bip388) {
+                    if (entry.fingerprint == signer.m_fingerprint) {
+                        matching_signer = &signer;
+                        matching_policy = &entry;
+                        break;
+                    }
                 }
+                if (matching_signer) break;
             }
-            if (matching_policy) {
+            if (matching_signer) {
                 const auto policy{DerivePolicy(/*spk_pair=*/std::nullopt)};
                 if (!policy) return util::Error{util::ErrorString(policy)};
                 const auto index{signer_spk_man->GetScriptPubKeyIndex(scriptPubKey)};
                 if (!index) return util::Error{_("Could not locate address in script pub key map")};
                 const std::optional<bool> internal{IsInternalScriptPubKeyMan(signer_spk_man)};
                 if (!internal) return util::Error{_("Could not determine receive/change chain for address")};
-                return signer_spk_man->DisplayAddressPolicy(dest, *signer,
+                return signer_spk_man->DisplayAddressPolicy(dest, *matching_signer,
                                                             matching_policy->name,
                                                             policy->first,
                                                             policy->second,
@@ -2901,7 +2914,13 @@ util::Result<void> CWallet::DisplayAddress(const CTxDestination& dest)
             }
         }
 
-        return signer_spk_man->DisplayAddress(dest, *signer);
+        // Non-policy single-sig fallback: only meaningful when one signer
+        // is connected. Multi-signer setups always go through the policy
+        // path above.
+        if (signers->size() != 1) {
+            return util::Error{_("Multiple external signers connected; address display requires a registered policy")};
+        }
+        return signer_spk_man->DisplayAddress(dest, signers->front());
     }
     return util::Error{_("There is no ScriptPubKeyManager for this address")};
 }
@@ -3041,23 +3060,33 @@ util::Result<std::optional<std::string>> CWallet::RegisterPolicy(const std::opti
         if (signer_spk_man == nullptr) {
             continue;
         }
-        auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
-        if (!signer) return util::Error{util::ErrorString(signer)};
+        auto signers{ExternalSignerScriptPubKeyMan::GetExternalSigners()};
+        if (!signers) return util::Error{util::ErrorString(signers)};
 
-        util::Result<std::optional<std::string>> res{signer_spk_man->RegisterPolicy(*signer, policy_name, descriptor_template, keys_info)};
-        if (!res) return util::Error{util::ErrorString(res)};
+        // Fan out registration to every connected signer. For multi-signer
+        // wallets (e.g. 3-of-3 MuSig2 split across two HW devices and a
+        // hot cosigner) each device prompts independently and may or may
+        // not return an hmac (Coldcard keys policies by name only and
+        // returns null; Ledger returns a hex hmac). We persist one
+        // bip388_hmac record per signer fingerprint so subsequent
+        // FillPSBTPolicy / DisplayAddressPolicy calls can pick the right
+        // policy entry per device.
+        std::optional<std::string> last_hmac;
+        for (auto& signer : *signers) {
+            util::Result<std::optional<std::string>> res{signer_spk_man->RegisterPolicy(signer, policy_name, descriptor_template, keys_info)};
+            if (!res) return util::Error{util::ErrorString(res)};
 
-        if (res) {
             // Store policy metadata in wallet. The hmac is optional:
             // signers like Coldcard key BIP388 policies solely by name.
             WalletBatch batch(GetDatabase());
-            if (!batch.WriteHmacBip388(policy_name, signer->m_fingerprint, *res)) {
+            if (!batch.WriteHmacBip388(policy_name, signer.m_fingerprint, *res)) {
                 return util::Error{_("Failed to store BIP388 policy metadata in wallet database.")};
             }
-            LoadHmacBIP388(policy_name, signer->m_fingerprint, *res);
+            LoadHmacBIP388(policy_name, signer.m_fingerprint, *res);
+            last_hmac = *res;
         }
 
-        return res;
+        return last_hmac;
     }
     return util::Error{_("Could not find ExternalSignerScriptPubKeyMananager")};
 }
