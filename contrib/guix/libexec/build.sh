@@ -227,6 +227,7 @@ esac
 case "$HOST" in
     *linux*)  HOST_LDFLAGS="-Wl,--as-needed -Wl,--dynamic-linker=$glibc_dynamic_linker -Wl,-O2" ;;
     *mingw*)  HOST_LDFLAGS="-Wl,--no-insert-timestamp" ;;
+    *darwin*) HOST_LDFLAGS="-Wl,--icf=safe" ;;
 esac
 
 # EXE FLAGS
