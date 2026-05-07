@@ -8,8 +8,11 @@
 #include <common/messages.h>
 #include <consensus/amount.h>
 #include <consensus/consensus.h>
+#include <policy/feerate.h>
+#include <policy/policy.h>
 #include <tinyformat.h>
 #include <util/moneystr.h>
+#include <util/result.h>
 #include <util/translation.h>
 
 #include <optional>
