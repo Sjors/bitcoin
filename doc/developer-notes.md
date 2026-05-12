@@ -1136,8 +1136,14 @@ To update the subtree:
 
 ```sh
 git fetch libmultiprocess
-git subtree pull --prefix=src/ipc/libmultiprocess libmultiprocess master --squash
+git subtree pull --prefix=src/ipc/libmultiprocess libmultiprocess lib --squash
 ```
+
+The `lib` branch is published by libmultiprocess upstream and contains
+only the files needed to do a full build (regular and via `depends`). It
+is produced from `master` with `git subtree split --prefix=lib`; CI
+scripts, documentation, and other upstream-only files are intentionally
+excluded from the subtree.
 
 The ultimate upstream of the few externally managed subtrees are:
 
