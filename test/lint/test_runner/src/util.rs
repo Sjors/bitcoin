@@ -97,8 +97,10 @@ pub struct SplitSubtree {
 pub fn get_split_subtrees() -> Vec<SplitSubtree> {
     vec![SplitSubtree {
         path: "src/ipc/libmultiprocess",
-        upstream_url: "https://github.com/bitcoin-core/libmultiprocess.git",
-        upstream_ref: "master",
+        // Temporary [do not merge] override for PR branch validation until the
+        // split `lib` branch is pushed to bitcoin-core/libmultiprocess.
+        upstream_url: "https://github.com/Sjors/libmultiprocess.git",
+        upstream_ref: "2026/05/subtree-split",
         upstream_split_ref: Some("lib"),
         split_prefix: "lib",
     }]
