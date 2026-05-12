@@ -72,6 +72,38 @@ pub fn get_subtrees() -> Vec<&'static str> {
     ]
 }
 
+/// Description of a subtree imported via 'git subtree split'.
+///
+/// Such subtrees are not pulled directly from upstream master; instead, upstream
+/// publishes a 'split' branch produced by 'git subtree split --prefix=<prefix>'
+/// of master, and only that subdirectory is consumed here. To verify that the
+/// split branch was honestly produced from master (and not tampered with), the
+/// lint runner re-runs the deterministic split locally and confirms the
+/// recorded subtree commit is reachable from the result.
+pub struct SplitSubtree {
+    /// Path of the subtree within this repository.
+    pub path: &'static str,
+    /// Upstream repository URL to fetch from.
+    pub upstream_url: &'static str,
+    /// Branch on the upstream repository to fetch and split.
+    pub upstream_ref: &'static str,
+    /// Branch containing the published split history, if different.
+    pub upstream_split_ref: Option<&'static str>,
+    /// Prefix passed to 'git subtree split --prefix=' on the upstream side.
+    pub split_prefix: &'static str,
+}
+
+/// Return all subtrees imported from a 'git subtree split' branch.
+pub fn get_split_subtrees() -> Vec<SplitSubtree> {
+    vec![SplitSubtree {
+        path: "src/ipc/libmultiprocess",
+        upstream_url: "https://github.com/bitcoin-core/libmultiprocess.git",
+        upstream_ref: "master",
+        upstream_split_ref: Some("lib"),
+        split_prefix: "lib",
+    }]
+}
+
 /// Return the pathspecs to exclude by default
 pub fn get_pathspecs_default_excludes() -> Vec<String> {
     get_subtrees()
