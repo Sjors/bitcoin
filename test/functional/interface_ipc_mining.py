@@ -6,6 +6,7 @@
 import asyncio
 import time
 from contextlib import AsyncExitStack
+from decimal import Decimal
 from io import BytesIO
 from test_framework.blocktools import NULL_OUTPOINT
 from test_framework.messages import (
@@ -335,6 +336,56 @@ class IPCMiningTest(BitcoinTestFramework):
 
         asyncio.run(capnp.run(async_routine()))
 
+    def run_waitnext_mining_policy_test(self):
+        """Verify that waitNext() preserves the mining policy from -blockmintxfee
+        instead of falling back to defaults."""
+        self.log.info("Running waitNext mining policy test")
+        block_min_tx_fee = Decimal("0.00002000")
+        below_block_min_tx_fee = Decimal("0.00001000")
+        above_block_min_tx_fee = Decimal("0.00003000")
+
+        self.restart_node(0, extra_args=[
+            f"-blockmintxfee={block_min_tx_fee:.8f}",
+            "-minrelaytxfee=0",
+            "-persistmempool=0",
+        ])
+
+        async def async_routine():
+            ctx, mining = await make_mining_ctx(self)
+
+            self.log.debug("Create a below -blockmintxfee transaction")
+            low_fee_tx = self.miniwallet.send_self_transfer(
+                fee_rate=below_block_min_tx_fee,
+                from_node=self.nodes[0],
+                confirmed_only=True,
+            )
+
+            async with AsyncExitStack() as stack:
+                self.log.debug("createNewBlock should respect -blockmintxfee")
+                template = await mining_create_block_template(mining, stack, ctx, self.default_block_create_options)
+                assert template is not None
+                block = await mining_get_block(template, ctx)
+                assert low_fee_tx["txid"] not in {tx.txid_hex for tx in block.vtx[1:]}
+
+                self.log.debug("waitNext should preserve the same mining policy")
+                high_fee_tx = self.miniwallet.send_self_transfer(
+                    fee_rate=above_block_min_tx_fee,
+                    from_node=self.nodes[0],
+                    confirmed_only=True,
+                )
+                waitoptions = self.capnp_modules['mining'].BlockWaitOptions()
+                waitoptions.timeout = 1000.0 * self.options.timeout_factor
+                waitoptions.feeThreshold = 1
+                template_next = await mining_wait_next_template(template, stack, ctx, waitoptions)
+                assert template_next is not None
+
+                block_next = await mining_get_block(template_next, ctx)
+                block_next_txids = {tx.txid_hex for tx in block_next.vtx[1:]}
+                assert high_fee_tx["txid"] in block_next_txids
+                assert low_fee_tx["txid"] not in block_next_txids
+
+        asyncio.run(capnp.run(async_routine()))
+
     def run_coinbase_and_submission_test(self):
         """Test coinbase construction (getCoinbaseTx) and block submission (submitSolution)."""
         self.log.info("Running coinbase construction and submission test")
@@ -420,6 +471,7 @@ class IPCMiningTest(BitcoinTestFramework):
         self.run_early_startup_test()
         self.run_block_template_test()
         self.run_coinbase_and_submission_test()
+        self.run_waitnext_mining_policy_test()
         self.run_ipc_option_override_test()
 
 
