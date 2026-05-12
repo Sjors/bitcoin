@@ -13,7 +13,14 @@ endif()
 include("cmake/compat_find.cmake")
 
 find_package(Threads REQUIRED)
-find_package(CapnProto 0.7 QUIET NO_MODULE)
+# When this file is processed via add_subdirectory() from the standalone
+# wrapper, find_package(CapnProto) has already been called there to make the
+# IMPORTED targets visible to the example/ sibling directory. Re-running it
+# here would fail on platforms whose CapnProto cmake config registers global
+# targets (e.g. NetBSD pkgsrc), so skip it when CapnProto is already found.
+if(NOT CapnProto_FOUND)
+  find_package(CapnProto 0.7 QUIET NO_MODULE)
+endif()
  if(NOT CapnProto_FOUND)
    message(FATAL_ERROR
      "Cap'n Proto is required but was not found.\n"
@@ -113,6 +120,7 @@ endif()
 
 include("cmake/compat_config.cmake")
 include("cmake/pthread_checks.cmake")
+include("cmake/TargetCapnpSources.cmake")
 include(GNUInstallDirs)
 
 # Set MP_INCLUDE_DIR as a global property so target_capnp_sources function can
@@ -120,12 +128,17 @@ include(GNUInstallDirs)
 # to avoid "error: Import failed: /mp/proxy.capnp" failures from capnproto.
 set_property(GLOBAL PROPERTY MP_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-# Set a convenience variable for subdirectories.
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  set(MP_STANDALONE TRUE)
-  include(CTest)
-else()
-  set(MP_STANDALONE FALSE)
+# Set a convenience variable for subdirectories. May be pre-set by a parent
+# CMakeLists.txt (e.g. the top-level wrapper used for `cmake -S .` standalone
+# builds) so that test/ and other subdirectories know they should expose
+# convenience targets even though lib/ is not the top-level source.
+if(NOT DEFINED MP_STANDALONE)
+  if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(MP_STANDALONE TRUE)
+    include(CTest)
+  else()
+    set(MP_STANDALONE FALSE)
+  endif()
 endif()
 
 # Prevent include directories from parent project from leaking into this one.
@@ -259,6 +272,5 @@ add_custom_target(install-lib
   VERBATIM)
 add_dependencies(install-lib multiprocess)
 
-# Example and test subdirectories
-add_subdirectory(example EXCLUDE_FROM_ALL)
+# Test subdirectory
 add_subdirectory(test EXCLUDE_FROM_ALL)
