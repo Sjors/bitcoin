@@ -349,8 +349,13 @@ class IPCMiningTest(BitcoinTestFramework):
             current_block_height = self.nodes[0].getchaintips()[0]["height"]
             check_opts = self.capnp_modules['mining'].BlockCheckOptions()
 
+            # Send a real transaction so the template includes it.
+            self.miniwallet.send_self_transfer(fee_rate=10, from_node=self.nodes[0])
+
             async with destroying((await mining.createNewBlock(ctx, self.default_block_create_options)).result, ctx) as template:
                 block, coinbase = await self.build_candidate_block(template, ctx)
+                self.log.debug("Template should include a mempool transaction")
+                assert len(block.vtx) >= 2, "Block should include at least the coinbase and the mempool tx"
                 balance = self.miniwallet.get_balance()
                 original_version = block.nVersion
 
@@ -367,6 +372,7 @@ class IPCMiningTest(BitcoinTestFramework):
                 check = await mining.checkBlock(ctx, block.serialize(), check_opts)
                 assert_equal(check.result, False)
                 assert_equal(check.reason, "bad-version(0x00000000)")
+                assert_equal(check.debug, "rejected nVersion=0x00000000 block")
                 submitted = (await template.submitSolution(ctx, block.nVersion, block.nTime, block.nNonce, coinbase.serialize())).result
                 assert_equal(submitted, False)
                 self.log.debug("Submit a valid block")
