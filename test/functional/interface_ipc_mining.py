@@ -106,6 +106,16 @@ class IPCMiningTest(BitcoinTestFramework):
         coinbase_tx.nLockTime = coinbase_res.lockTime
         return coinbase_tx
 
+    async def build_candidate_block(self, template, ctx):
+        """Build a complete block from a remote BlockTemplate."""
+        block = await mining_get_block(template, ctx)
+        coinbase = await self.build_coinbase_test(template, ctx, self.miniwallet)
+        # Reduce payout for balance comparison simplicity.
+        coinbase.vout[0].nValue = COIN
+        block.vtx[0] = coinbase
+        block.hashMerkleRoot = block.calc_merkle_root()
+        return block, coinbase
+
     def run_mining_interface_test(self):
         """Test Mining interface methods."""
         self.log.info("Running Mining interface test")
@@ -340,13 +350,8 @@ class IPCMiningTest(BitcoinTestFramework):
             check_opts = self.capnp_modules['mining'].BlockCheckOptions()
 
             async with destroying((await mining.createNewBlock(ctx, self.default_block_create_options)).result, ctx) as template:
-                block = await mining_get_block(template, ctx)
+                block, coinbase = await self.build_candidate_block(template, ctx)
                 balance = self.miniwallet.get_balance()
-                coinbase = await self.build_coinbase_test(template, ctx, self.miniwallet)
-                # Reduce payout for balance comparison simplicity
-                coinbase.vout[0].nValue = COIN
-                block.vtx[0] = coinbase
-                block.hashMerkleRoot = block.calc_merkle_root()
                 original_version = block.nVersion
 
                 self.log.debug("Submit solution that can't be deserialized")
