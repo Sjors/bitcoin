@@ -8,6 +8,7 @@
 #include <test/util/common.h>
 #include <test/util/setup_common.h>
 #include <univalue.h>
+#include <util/result.h>
 #include <util/strencodings.h>
 
 #include <limits>
@@ -277,6 +278,32 @@ BOOST_AUTO_TEST_CASE(intarg)
     BOOST_CHECK_EQUAL(local_args.GetArg<uint8_t>("-bar"), 12);
     BOOST_CHECK_EQUAL(local_args.GetIntArg("-foo", 0), 11);
     BOOST_CHECK_EQUAL(local_args.GetArg("-bar", uint8_t{11}), 12);
+    auto bounded_foo{local_args.GetIntArg("-foo", 0, 10, 12)};
+    BOOST_REQUIRE(bounded_foo);
+    BOOST_CHECK_EQUAL(*bounded_foo, 11);
+
+    ResetArgs(local_args, "");
+    auto bounded_default{local_args.GetIntArg("-foo", 11, 10, 12)};
+    BOOST_REQUIRE(bounded_default);
+    BOOST_CHECK_EQUAL(*bounded_default, 11);
+
+    ResetArgs(local_args, "-foo=9");
+    auto bounded_low{local_args.GetIntArg("-foo", 11, 10, 12)};
+    BOOST_CHECK(!bounded_low);
+    BOOST_CHECK_EQUAL(util::ErrorString(bounded_low).original, "-foo (9) must be in the range [10, 12]");
+
+    auto bounded_custom_low{local_args.GetIntArg("-foo", 11, 10, 12, "is below", "is above")};
+    BOOST_CHECK(!bounded_custom_low);
+    BOOST_CHECK_EQUAL(util::ErrorString(bounded_custom_low).original, "-foo (9) is below (10)");
+
+    ResetArgs(local_args, "-foo=13");
+    auto bounded_high{local_args.GetIntArg("-foo", 11, 10, 12)};
+    BOOST_CHECK(!bounded_high);
+    BOOST_CHECK_EQUAL(util::ErrorString(bounded_high).original, "-foo (13) must be in the range [10, 12]");
+
+    auto bounded_custom_high{local_args.GetIntArg("-foo", 11, 10, 12, "is below", "is above")};
+    BOOST_CHECK(!bounded_custom_high);
+    BOOST_CHECK_EQUAL(util::ErrorString(bounded_custom_high).original, "-foo (13) is above (12)");
 
     ResetArgs(local_args, "-foo=NaN -bar=NotANumber");
     BOOST_CHECK_EQUAL(local_args.GetArg<int64_t>("-foo"), 0);

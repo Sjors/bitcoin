@@ -65,17 +65,27 @@ util::Result<void> ReadMiningArgs(const ArgsManager& args, MiningArgs& mining_ar
         mining_args.block_min_fee_rate = CFeeRate{*block_min_tx_fee};
     }
 
-    const size_t max_block_weight = args.GetIntArg("-blockmaxweight", DEFAULT_BLOCK_MAX_WEIGHT);
-    if (auto result{CheckBlockMaxWeight(max_block_weight, "-blockmaxweight")}; !result) {
-        return result;
+    auto max_block_weight{args.GetIntArg("-blockmaxweight",
+                                          DEFAULT_BLOCK_MAX_WEIGHT,
+                                          0,
+                                          MAX_BLOCK_WEIGHT,
+                                          "is lower than minimum value of",
+                                          "exceeds consensus maximum block weight")};
+    if (!max_block_weight) {
+        return util::Error{util::ErrorString(max_block_weight)};
     }
-    mining_args.default_block_max_weight = max_block_weight;
+    mining_args.default_block_max_weight = static_cast<size_t>(*max_block_weight);
 
-    const size_t block_reserved_weight = args.GetIntArg("-blockreservedweight", DEFAULT_BLOCK_RESERVED_WEIGHT);
-    if (auto result{CheckBlockReservedWeight(block_reserved_weight, "-blockreservedweight")}; !result) {
-        return result;
+    auto block_reserved_weight{args.GetIntArg("-blockreservedweight",
+                                              DEFAULT_BLOCK_RESERVED_WEIGHT,
+                                              MINIMUM_BLOCK_RESERVED_WEIGHT,
+                                              MAX_BLOCK_WEIGHT,
+                                              "is lower than minimum safety value of",
+                                              "exceeds consensus maximum block weight")};
+    if (!block_reserved_weight) {
+        return util::Error{util::ErrorString(block_reserved_weight)};
     }
-    mining_args.default_block_reserved_weight = block_reserved_weight;
+    mining_args.default_block_reserved_weight = static_cast<size_t>(*block_reserved_weight);
 
     mining_args.print_modified_fee = args.GetBoolArg("-printpriority", mining_args.print_modified_fee);
 

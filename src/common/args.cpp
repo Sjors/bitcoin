@@ -15,8 +15,10 @@
 #include <util/check.h>
 #include <util/fs.h>
 #include <util/fs_helpers.h>
+#include <util/result.h>
 #include <util/strencodings.h>
 #include <util/string.h>
+#include <util/translation.h>
 
 #ifdef WIN32
 #include <shlobj.h>
@@ -511,6 +513,37 @@ template <std::integral Int>
 Int ArgsManager::GetArg(const std::string& strArg, Int nDefault) const
 {
     return GetArg<Int>(strArg).value_or(nDefault);
+}
+
+util::Result<int64_t> ArgsManager::GetIntArg(const std::string& strArg,
+                                             int64_t nDefault,
+                                             int64_t min_value,
+                                             int64_t max_value,
+                                             std::string_view min_err,
+                                             std::string_view max_err) const
+{
+    Assert(min_value <= max_value);
+    const int64_t value{GetIntArg(strArg, nDefault)};
+    const auto value_str{std::to_string(value)};
+    const auto min_str{std::to_string(min_value)};
+    const auto max_str{std::to_string(max_value)};
+    if (value < min_value && !min_err.empty()) {
+        return util::Error{Untranslated(strprintf("%s (%s) %s (%s)",
+                                                  strArg, value_str, std::string{min_err}, min_str))};
+    }
+    if (value > max_value && !max_err.empty()) {
+        return util::Error{Untranslated(strprintf("%s (%s) %s (%s)",
+                                                  strArg, value_str, std::string{max_err}, max_str))};
+    }
+    if (value < min_value || value > max_value) {
+        return util::Error{Untranslated(strprintf(
+            "%s (%s) must be in the range [%s, %s]",
+            strArg,
+            value_str,
+            min_str,
+            max_str))};
+    }
+    return value;
 }
 
 template <std::integral Int>

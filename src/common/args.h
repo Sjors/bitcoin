@@ -19,10 +19,16 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
 class ArgsManager;
+
+namespace util {
+template <class M>
+class Result;
+} // namespace util
 
 extern const char * const BITCOIN_CONF_FILENAME;
 extern const char * const BITCOIN_SETTINGS_FILENAME;
@@ -307,6 +313,12 @@ public:
 
     int64_t GetIntArg(const std::string& strArg, int64_t nDefault) const EXCLUSIVE_LOCKS_REQUIRED(!cs_args) { return GetArg<int64_t>(strArg, nDefault); }
     std::optional<int64_t> GetIntArg(const std::string& strArg) const EXCLUSIVE_LOCKS_REQUIRED(!cs_args) { return GetArg<int64_t>(strArg); }
+    util::Result<int64_t> GetIntArg(const std::string& strArg,
+                                    int64_t nDefault,
+                                    int64_t min_value,
+                                    int64_t max_value,
+                                    std::string_view min_err = {},
+                                    std::string_view max_err = {}) const EXCLUSIVE_LOCKS_REQUIRED(!cs_args);
 
     /**
      * Return boolean argument or default value
