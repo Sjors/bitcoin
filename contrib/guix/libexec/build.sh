@@ -206,6 +206,9 @@ mkdir -p "$OUTDIR"
 
 # CONFIGFLAGS
 CONFIGFLAGS="-DREDUCE_EXPORTS=ON -DBUILD_BENCH=OFF -DBUILD_GUI_TESTS=OFF -DBUILD_FUZZ_BINARY=OFF -DCMAKE_SKIP_RPATH=TRUE"
+case "$HOST" in
+    *darwin*) CONFIGFLAGS+=" -DAPPEND_CFLAGS=-faddrsig -DAPPEND_CXXFLAGS=-faddrsig" ;;
+esac
 
 # CFLAGS
 HOST_CFLAGS="-O2 -g"
@@ -227,7 +230,7 @@ esac
 case "$HOST" in
     *linux*)  HOST_LDFLAGS="-Wl,--as-needed -Wl,--dynamic-linker=$glibc_dynamic_linker -Wl,-O2" ;;
     *mingw*)  HOST_LDFLAGS="-Wl,--no-insert-timestamp" ;;
-    *darwin*) HOST_LDFLAGS="-Wl,--icf=all" ;;
+    *darwin*) HOST_LDFLAGS="-Wl,--icf=safe" ;;
 esac
 
 # EXE FLAGS
