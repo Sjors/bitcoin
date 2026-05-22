@@ -1380,6 +1380,70 @@ void CheckUnused(const std::string& prv, const std::string& pub)
     BOOST_CHECK_EQUAL(pub_pubkeys.size() + pub_extpubs.size(), 1);
 }
 
+std::set<CExtPubKey> GetExtPubKeysForDescriptor(const std::string& desc, bool exclude_observable = false)
+{
+    FlatSigningProvider keys;
+    std::string error;
+    std::set<CExtPubKey> ext_pubkeys;
+    auto parsed{Parse(desc, keys, error)};
+    BOOST_REQUIRE_MESSAGE(!parsed.empty(), error);
+    for (const auto& parsed_desc : parsed) {
+        parsed_desc->GetExtPubKeys(ext_pubkeys, exclude_observable);
+    }
+    return ext_pubkeys;
+}
+
+BOOST_AUTO_TEST_CASE(descriptor_get_extpubkeys_exclude_observable_test)
+{
+    const std::string xpub{"xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y"};
+    const std::string xpub2{"xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL"};
+    const std::string literal_pubkey{"03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd"};
+
+    auto ext_pubkeys{GetExtPubKeysForDescriptor("wpkh(" + xpub + ")")};
+    BOOST_REQUIRE_EQUAL(ext_pubkeys.size(), 1);
+    ext_pubkeys = GetExtPubKeysForDescriptor("wpkh(" + xpub + ")", /*exclude_observable=*/true);
+    BOOST_CHECK(ext_pubkeys.empty());
+
+    ext_pubkeys = GetExtPubKeysForDescriptor("wpkh([01234567]" + xpub + "/0)");
+    BOOST_REQUIRE_EQUAL(ext_pubkeys.size(), 1);
+    ext_pubkeys = GetExtPubKeysForDescriptor("wpkh([01234567]" + xpub + "/0)", /*exclude_observable=*/true);
+    BOOST_REQUIRE_EQUAL(ext_pubkeys.size(), 1);
+
+    ext_pubkeys = GetExtPubKeysForDescriptor("wpkh(" + xpub + "/*)");
+    BOOST_REQUIRE_EQUAL(ext_pubkeys.size(), 1);
+    ext_pubkeys = GetExtPubKeysForDescriptor("wpkh(" + xpub + "/*)", /*exclude_observable=*/true);
+    BOOST_REQUIRE_EQUAL(ext_pubkeys.size(), 1);
+
+    ext_pubkeys = GetExtPubKeysForDescriptor("wpkh(" + xpub + "/<0;1>)");
+    BOOST_REQUIRE_EQUAL(ext_pubkeys.size(), 1);
+    ext_pubkeys = GetExtPubKeysForDescriptor("wpkh(" + xpub + "/<0;1>)", /*exclude_observable=*/true);
+    BOOST_REQUIRE_EQUAL(ext_pubkeys.size(), 1);
+
+    ext_pubkeys = GetExtPubKeysForDescriptor("wsh(multi(1," + xpub + "/0," + literal_pubkey + "))");
+    BOOST_REQUIRE_EQUAL(ext_pubkeys.size(), 1);
+    ext_pubkeys = GetExtPubKeysForDescriptor("wsh(multi(1," + xpub + "/0," + literal_pubkey + "))", /*exclude_observable=*/true);
+    BOOST_REQUIRE_EQUAL(ext_pubkeys.size(), 1);
+
+    ext_pubkeys = GetExtPubKeysForDescriptor("tr(" + xpub + "/0/*,pk(" + xpub + "/1/*))");
+    BOOST_REQUIRE_EQUAL(ext_pubkeys.size(), 1);
+    ext_pubkeys = GetExtPubKeysForDescriptor("tr(" + xpub + "/0/*,pk(" + xpub + "/1/*))", /*exclude_observable=*/true);
+    BOOST_REQUIRE_EQUAL(ext_pubkeys.size(), 1);
+
+    ext_pubkeys = GetExtPubKeysForDescriptor("tr(musig(" + xpub + "/0," + xpub2 + "/0))");
+    BOOST_CHECK(ext_pubkeys.empty());
+    ext_pubkeys = GetExtPubKeysForDescriptor("tr(musig(" + xpub + "/0," + xpub2 + "/0))", /*exclude_observable=*/true);
+    BOOST_REQUIRE_EQUAL(ext_pubkeys.size(), 2);
+
+    ext_pubkeys = GetExtPubKeysForDescriptor("tr(musig(" + xpub + "," + xpub2 + "))");
+    BOOST_CHECK(ext_pubkeys.empty());
+    ext_pubkeys = GetExtPubKeysForDescriptor("tr(musig(" + xpub + "," + xpub2 + "))", /*exclude_observable=*/true);
+    BOOST_REQUIRE_EQUAL(ext_pubkeys.size(), 2);
+    ext_pubkeys = GetExtPubKeysForDescriptor("tr(musig(" + xpub + "," + xpub2 + ")/*)");
+    BOOST_CHECK(ext_pubkeys.empty());
+    ext_pubkeys = GetExtPubKeysForDescriptor("tr(musig(" + xpub + "," + xpub2 + ")/*)", /*exclude_observable=*/true);
+    BOOST_REQUIRE_EQUAL(ext_pubkeys.size(), 2);
+}
+
 // unused() descriptors don't produce scripts, so these need to be tested separately
 BOOST_AUTO_TEST_CASE(unused_descriptor_test)
 {

@@ -189,6 +189,13 @@ struct Descriptor {
      */
     virtual void GetPubKeys(std::set<CPubKey>& pubkeys, std::set<CExtPubKey>& ext_pubs) const = 0;
 
+    /** Return all extended public keys for this descriptor, including any from subdescriptors.
+     *
+     * @param[out] ext_pubs Any extended public keys
+     * @param[in] exclude_observable Whether to exclude xpubs that may be observable from spends
+     */
+    virtual void GetExtPubKeys(std::set<CExtPubKey>& ext_pubs, bool exclude_observable = false) const = 0;
+
     /** Whether this descriptor produces any scripts with the Expand functions */
     virtual bool HasScripts() const = 0;
 
