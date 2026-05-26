@@ -14,6 +14,7 @@
 #include <test/data/bip138_chacha20poly1305_encryption.json.h>
 #include <test/data/bip138_encrypted_backup.json.h>
 #include <test/data/bip138_bip380_descriptor_backup.json.h>
+#include <test/data/bip138_bip380_descriptor_backup.txt.h>
 
 #include <test/util/json.h>
 #include <test/util/setup_common.h>
@@ -30,6 +31,7 @@
 #include <univalue.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <string_view>
 
@@ -342,6 +344,26 @@ BOOST_AUTO_TEST_CASE(bip380_descriptor_backup_vector_test)
     const UniValue& multipath_descriptor{json_vectors[1]["document"]["descriptor_sets"][0]};
     BOOST_CHECK(multipath_descriptor["descriptor"].get_str().find("/<0;1>/*") != std::string::npos);
     BOOST_CHECK(multipath_descriptor["change_descriptor"].isNull());
+
+    std::string text_vector;
+    text_vector.reserve(test::data::bip138_bip380_descriptor_backup.size());
+    for (const std::byte byte : test::data::bip138_bip380_descriptor_backup) {
+        text_vector.push_back(std::to_integer<char>(byte));
+    }
+
+    std::vector<std::string> descriptors;
+    for (std::string_view remaining{text_vector}; !remaining.empty();) {
+        const size_t newline{remaining.find('\n')};
+        const std::string_view line{remaining.substr(0, newline)};
+        if (!line.empty() && !line.starts_with("#")) {
+            descriptors.emplace_back(line);
+        }
+        if (newline == std::string_view::npos) break;
+        remaining.remove_prefix(newline + 1);
+    }
+
+    BOOST_REQUIRE_EQUAL(descriptors.size(), 1);
+    BOOST_CHECK(descriptors[0].find("/<0;1>/*") != std::string::npos);
 }
 
 BOOST_AUTO_TEST_CASE(chacha20poly1305_roundtrip_test)
@@ -591,7 +613,7 @@ BOOST_AUTO_TEST_CASE(interface_create_encrypted_descriptor_backup_test)
 
     std::shared_ptr<CWallet> wallet_ptr{&wallet, [](CWallet*) {}};
     auto wallet_interface{interfaces::MakeWallet(context, wallet_ptr)};
-    auto backup{wallet_interface->createEncryptedDescriptorBackup(std::nullopt)};
+    auto backup{wallet_interface->createEncryptedDescriptorBackup(std::nullopt, /*compact=*/false)};
     BOOST_REQUIRE_MESSAGE(backup, util::ErrorString(backup).original);
 
     auto metadata{CWallet::GetEncryptedBackupMetadata(*backup)};
@@ -608,6 +630,43 @@ BOOST_AUTO_TEST_CASE(interface_create_encrypted_descriptor_backup_test)
     BOOST_CHECK(interface_metadata->individual_secret_count > 0);
     BOOST_CHECK_EQUAL(interface_metadata->encryption, "ChaCha20-Poly1305");
     BOOST_CHECK(interface_metadata->derivation_paths.empty());
+
+    // A compact backup holds a single bare descriptor, so it refuses a
+    // wallet with more than one descriptor set
+    auto compact_refused{wallet_interface->createEncryptedDescriptorBackup(std::nullopt, /*compact=*/true)};
+    BOOST_REQUIRE(!compact_refused);
+    BOOST_CHECK_MESSAGE(util::ErrorString(compact_refused).original.find("single descriptor set") != std::string::npos,
+                        util::ErrorString(compact_refused).original);
+
+    // A wallet with one descriptor set produces a compact backup: the bare
+    // multipath descriptor as plaintext
+    const std::string multipath_descriptor{"wpkh([d34db33f/84h/1h/0h]tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba/<0;1>/*)"};
+    CWallet compact_wallet(/*chain=*/nullptr, "", CreateMockableWalletDatabase());
+    {
+        LOCK(compact_wallet.cs_wallet);
+        compact_wallet.SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
+        compact_wallet.SetWalletFlag(WALLET_FLAG_DISABLE_PRIVATE_KEYS);
+        FlatSigningProvider provider;
+        std::string error;
+        auto descs{Parse(multipath_descriptor, provider, error, /*require_checksum=*/false)};
+        BOOST_REQUIRE_EQUAL(descs.size(), 2);
+        bool internal{false};
+        for (auto& desc : descs) {
+            WalletDescriptor w_desc(std::move(desc), /*creation_time=*/0, /*range_start=*/0, /*range_end=*/10, /*next_index=*/0);
+            BOOST_REQUIRE(compact_wallet.AddWalletDescriptor(w_desc, provider, "", internal));
+            internal = true;
+        }
+    }
+    std::shared_ptr<CWallet> compact_wallet_ptr{&compact_wallet, [](CWallet*) {}};
+    auto compact_interface{interfaces::MakeWallet(context, compact_wallet_ptr)};
+    auto compact_backup{compact_interface->createEncryptedDescriptorBackup(std::nullopt, /*compact=*/true)};
+    BOOST_REQUIRE_MESSAGE(compact_backup, util::ErrorString(compact_backup).original);
+
+    auto compact_decoded{DecodeEncryptedBackupBase64(*compact_backup)};
+    BOOST_REQUIRE_MESSAGE(compact_decoded, util::ErrorString(compact_decoded).original);
+    auto compact_plaintext{DecryptBackupWithDescriptor(*compact_decoded, multipath_descriptor)};
+    BOOST_REQUIRE_MESSAGE(compact_plaintext, util::ErrorString(compact_plaintext).original);
+    BOOST_CHECK_EQUAL(std::string(compact_plaintext->begin(), compact_plaintext->end()), multipath_descriptor);
 }
 
 BOOST_AUTO_TEST_CASE(wrong_key_decryption_test)
