@@ -193,7 +193,7 @@ bool ExecuteWalletToolFunc(const ArgsManager& args, const std::string& command)
 
         WalletContext context;
         auto wallet_interface{interfaces::MakeWallet(context, wallet_instance)};
-        auto backup_result{wallet_interface->createEncryptedDescriptorBackup(target_xpub)};
+        auto backup_result{wallet_interface->createEncryptedDescriptorBackup(target_xpub, args.GetBoolArg("-compact", false))};
         if (!backup_result) {
             tfm::format(std::cerr, "%s\n", util::ErrorString(backup_result).original);
             wallet_instance->Close();
