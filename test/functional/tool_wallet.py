@@ -683,14 +683,25 @@ class ToolWalletTest(BitcoinTestFramework):
         assert_equal(len(original_desc_strs), len(imported_desc_strs))
         for i, (orig, imported) in enumerate(zip(original_desc_strs, imported_desc_strs)):
             assert_equal(orig, imported)
+        self.nodes[0].unloadwallet(import_wallet_name)
 
         self.log.info("Importing compact decrypted descriptors into blank watch-only wallet...")
         compact_import_wallet_name = "imported_compact_backup_wallet"
         self.nodes[0].createwallet(compact_import_wallet_name, disable_private_keys=True, blank=True)
+        self.nodes[0].unloadwallet(compact_import_wallet_name)
+        self.stop_node(0)
+
+        p = self.bitcoin_wallet_process(f"-wallet={compact_import_wallet_name}", f"-pubkey={xpub_for_decrypt}", "decryptbackup")
+        compact_import_output, stderr = p.communicate(input=compact_backup_base64)
+        if p.poll() != 0:
+            self.log.error(f"compact decryptbackup import failed: stderr={stderr} stdout={compact_import_output}")
+        assert_equal(p.poll(), 0)
+        assert_equal(compact_import_output, "")
+        assert_equal(stderr, "")
+
+        self.start_node(0)
+        self.nodes[0].loadwallet(compact_import_wallet_name)
         compact_imported_wallet = self.nodes[0].get_wallet_rpc(compact_import_wallet_name)
-        result = compact_imported_wallet.importdescriptors(compact_decrypted_descriptors)
-        for r in result:
-            assert r["success"], f"Compact import failed: {r}"
 
         imported_compact_descriptors = compact_imported_wallet.listdescriptors()["descriptors"]
         imported_compact_descriptors = sorted(imported_compact_descriptors, key=lambda d: d["desc"])
@@ -699,7 +710,6 @@ class ToolWalletTest(BitcoinTestFramework):
         assert_equal(len(original_desc_strs), len(imported_compact_desc_strs))
         for i, (orig, imported) in enumerate(zip(original_desc_strs, imported_compact_desc_strs)):
             assert_equal(orig, imported)
-        self.nodes[0].unloadwallet(import_wallet_name)
         self.nodes[0].unloadwallet(compact_import_wallet_name)
         self.stop_node(0)
 

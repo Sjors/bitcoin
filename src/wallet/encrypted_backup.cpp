@@ -752,6 +752,12 @@ static util::Result<std::optional<std::pair<int64_t, int64_t>>> ParseDescriptorB
     return std::optional{std::make_pair(begin, end_inclusive)};
 }
 
+static std::string DescriptorWithChecksum(const std::string& descriptor)
+{
+    if (descriptor.find('#') != std::string::npos) return descriptor;
+    return descriptor + "#" + GetDescriptorChecksum(descriptor);
+}
+
 static util::Result<std::vector<ImportDescriptorRequest>> ParseDescriptorBackupImports(std::string_view content)
 {
     const int64_t now{GetTime()};
@@ -806,7 +812,19 @@ static util::Result<std::vector<ImportDescriptorRequest>> ParseDescriptorBackupI
             }
         }
     } else {
-        return util::Error{Untranslated("Descriptor backup import requires JSON descriptor backup content.")};
+        for (const auto& untrimmed_line : util::SplitString(content, '\n')) {
+            const std::string line{util::TrimString(untrimmed_line)};
+            if (line.empty() || line.starts_with("#")) continue;
+            imports.push_back({
+                .descriptor = DescriptorWithChecksum(line),
+                .label = std::nullopt,
+                .timestamp = now,
+                .active = true,
+                .internal = std::nullopt,
+                .range = std::nullopt,
+                .next_index = std::nullopt,
+            });
+        }
     }
 
     if (imports.empty()) {
