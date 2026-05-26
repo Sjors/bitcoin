@@ -309,6 +309,18 @@ BOOST_AUTO_TEST_CASE(util_ReplaceAll)
     test_replaceall("%s", "foo", "A test \"foo\" string 'foo'.");
     test_replaceall("\"", "foo", "A test foo%sfoo string '%s'.");
     test_replaceall("'", "foo", "A test \"%s\" string foo%sfoo.");
+
+    std::string descriptor{"wpkh(xpub/0/*),wpkh(xpub/0/*)"};
+    ReplaceAll(descriptor, "/0/*", "/<0;1>/*");
+    BOOST_CHECK_EQUAL(descriptor, "wpkh(xpub/<0;1>/*),wpkh(xpub/<0;1>/*)");
+
+    std::string regex_chars{"a.c .* a.c"};
+    ReplaceAll(regex_chars, ".*", "x");
+    BOOST_CHECK_EQUAL(regex_chars, "a.c x a.c");
+
+    std::string dollar_substitute{"foo %s"};
+    ReplaceAll(dollar_substitute, "%s", "$1");
+    BOOST_CHECK_EQUAL(dollar_substitute, "foo $1");
 }
 
 BOOST_AUTO_TEST_CASE(util_TrimString)
