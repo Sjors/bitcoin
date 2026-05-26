@@ -50,6 +50,9 @@ struct ImportDescriptorRequest {
     std::optional<int64_t> next_index;
 };
 
+ImportResult ImportDescriptor(CWallet& wallet,
+    const ImportDescriptorRequest& request) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet);
+
 std::vector<ImportResult> ProcessDescriptorsImport(CWallet& wallet,
     std::vector<ImportDescriptorRequest>& requests);
 

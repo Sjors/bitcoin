@@ -49,7 +49,7 @@ static void SetupWalletToolArgs(ArgsManager& argsman)
     argsman.AddCommand("dump", "Print out all of the wallet key-value records", {"-dumpfile"});
     argsman.AddCommand("createfromdump", "Create new wallet file from dumped records", {"-dumpfile"});
     argsman.AddCommand("encryptbackup", "Create an encrypted backup of wallet descriptors (outputs base64)", {"-xpub", "-compact"});
-    argsman.AddCommand("decryptbackup", "Decrypt an encrypted backup (reads base64 from stdin, requires -pubkey)", {"-pubkey"});
+    argsman.AddCommand("decryptbackup", "Decrypt an encrypted backup (reads base64 from stdin, requires -pubkey; imports descriptors when -wallet is provided)", {"-pubkey"});
     argsman.AddCommand("inspectbackup", "Show unencrypted metadata from a backup (reads base64 from stdin)");
 }
 
