@@ -11,6 +11,7 @@ import textwrap
 
 from collections import OrderedDict
 
+from test_framework.descriptors import descsum_create
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal,
@@ -529,26 +530,49 @@ class ToolWalletTest(BitcoinTestFramework):
         import json
         self.log.info("Verifying decrypted descriptors match originals...")
 
+        def decode_descriptor_backup(content):
+            if content.startswith("{"):
+                descriptor_backup = json.loads(content)
+                assert_equal(descriptor_backup["version"], 1)
+                return descriptor_backup["descriptor_sets"]
+            return [
+                {"descriptor": line.strip()}
+                for line in content.splitlines()
+                if line.strip() and not line.startswith("#")
+            ]
+
         def import_descriptors_from_backup_sets(descriptor_sets):
+            def with_checksum(desc):
+                return desc if "#" in desc else descsum_create(desc)
+
             import_descriptors = []
             for descriptor_set in descriptor_sets:
                 assert "descriptor" in descriptor_set
-                assert "change_descriptor" in descriptor_set
+                active = not descriptor_set.get("archived", False)
+                timestamp = descriptor_set.get("birth_time", "now")
 
                 import_descriptor = {
-                    "desc": descriptor_set["descriptor"],
-                    "timestamp": "now",
-                    "active": not descriptor_set.get("archived", False),
-                    "internal": False,
-                }
-                change_descriptor = {
-                    "desc": descriptor_set["change_descriptor"],
-                    "timestamp": "now",
-                    "active": not descriptor_set.get("archived", False),
-                    "internal": True,
+                    "desc": with_checksum(descriptor_set["descriptor"]),
+                    "timestamp": timestamp,
+                    "active": active,
                 }
                 if "range" in descriptor_set:
                     import_descriptor["range"] = descriptor_set["range"]
+
+                if "change_descriptor" not in descriptor_set:
+                    # Compact descriptor backups omit birth time metadata.
+                    import_descriptor["timestamp"] = "now"
+                    import_descriptors.append(import_descriptor)
+                    continue
+
+                import_descriptor["internal"] = False
+                change_descriptor = {
+                    "desc": with_checksum(descriptor_set["change_descriptor"]),
+                    "timestamp": timestamp,
+                    "active": active,
+                    "internal": True,
+                }
+                if "range" in descriptor_set:
                     change_descriptor["range"] = descriptor_set["range"]
 
                 import_descriptors.extend([import_descriptor, change_descriptor])
@@ -556,9 +580,41 @@ class ToolWalletTest(BitcoinTestFramework):
 
         # The first line of output is the JSON, stderr has the import message
         decrypted_content = decrypted_output.strip()
-        descriptor_backup = json.loads(decrypted_content)
-        assert_equal(descriptor_backup["version"], 1)
-        descriptor_sets = descriptor_backup["descriptor_sets"]
+        descriptor_sets = decode_descriptor_backup(decrypted_content)
+        compact_content = "\n".join(
+            ["# compact descriptor backup"]
+            + [
+                descriptor_set["descriptor"].split("#", 1)[0].replace("/0/*", "/<0;1>/*")
+                for descriptor_set in descriptor_sets
+            ]
+            + ["", "# trailing comment"]
+        )
+        compact_descriptor_sets = decode_descriptor_backup(compact_content)
+        assert_equal(len(compact_descriptor_sets), len(descriptor_sets))
+        for compact_set in compact_descriptor_sets:
+            assert "/<0;1>/*" in compact_set["descriptor"]
+
+        self.log.info("Creating compact encrypted backup...")
+        p = self.bitcoin_wallet_process(f"-wallet={wallet_name}", "-compact", "encryptbackup")
+        compact_backup_output, stderr = p.communicate()
+        assert_equal(p.poll(), 0)
+        assert_equal(stderr, "")
+        compact_backup_base64 = compact_backup_output.strip()
+
+        self.log.info("Decrypting compact backup using xpub...")
+        p = self.bitcoin_wallet_process(f"-pubkey={xpub_for_decrypt}", "decryptbackup")
+        compact_decrypted_output, stderr = p.communicate(input=compact_backup_base64)
+        assert_equal(p.poll(), 0)
+        compact_decrypted_content = compact_decrypted_output.strip()
+        assert not compact_decrypted_content.startswith("{")
+        compact_descriptor_sets = decode_descriptor_backup(compact_decrypted_content)
+        assert_equal(len(compact_descriptor_sets), len(descriptor_sets))
+        for compact_set in compact_descriptor_sets:
+            assert "/<0;1>/*" in compact_set["descriptor"]
+        compact_decrypted_descriptors = import_descriptors_from_backup_sets(compact_descriptor_sets)
+        for desc in compact_decrypted_descriptors:
+            assert_equal(desc["timestamp"], "now")
+
         decrypted_descriptors = import_descriptors_from_backup_sets(descriptor_sets)
 
         # Sort by descriptor string for consistent comparison
@@ -603,7 +659,24 @@ class ToolWalletTest(BitcoinTestFramework):
         for i, (orig, imported) in enumerate(zip(original_desc_strs, imported_desc_strs)):
             assert_equal(orig, imported)
 
+        self.log.info("Importing compact decrypted descriptors into blank watch-only wallet...")
+        compact_import_wallet_name = "imported_compact_backup_wallet"
+        self.nodes[0].createwallet(compact_import_wallet_name, disable_private_keys=True, blank=True)
+        compact_imported_wallet = self.nodes[0].get_wallet_rpc(compact_import_wallet_name)
+        result = compact_imported_wallet.importdescriptors(compact_decrypted_descriptors)
+        for r in result:
+            assert r["success"], f"Compact import failed: {r}"
+
+        imported_compact_descriptors = compact_imported_wallet.listdescriptors()["descriptors"]
+        imported_compact_descriptors = sorted(imported_compact_descriptors, key=lambda d: d["desc"])
+        imported_compact_desc_strs = [d["desc"] for d in imported_compact_descriptors]
+
+        assert_equal(len(original_desc_strs), len(imported_compact_desc_strs))
+        for i, (orig, imported) in enumerate(zip(original_desc_strs, imported_compact_desc_strs)):
+            assert_equal(orig, imported)
+
         self.nodes[0].unloadwallet(import_wallet_name)
+        self.nodes[0].unloadwallet(compact_import_wallet_name)
         self.stop_node(0)
 
         self.log.info("Encrypted backup roundtrip test passed!")

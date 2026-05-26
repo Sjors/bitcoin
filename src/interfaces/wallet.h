@@ -96,7 +96,7 @@ public:
     virtual bool backupWallet(const std::string& filename) = 0;
 
     //! Create an encrypted backup of public wallet descriptors.
-    virtual util::Result<std::string> createEncryptedDescriptorBackup(const std::optional<std::string>& target_xpub) = 0;
+    virtual util::Result<std::string> createEncryptedDescriptorBackup(const std::optional<std::string>& target_xpub, bool compact) = 0;
 
     //! Get wallet name.
     virtual std::string getWalletName() = 0;

@@ -14,6 +14,7 @@
 #include <test/data/bip138_chacha20poly1305_encryption.json.h>
 #include <test/data/bip138_encrypted_backup.json.h>
 #include <test/data/bip138_bip380_descriptor_backup.json.h>
+#include <test/data/bip138_bip380_descriptor_backup.txt.h>
 
 #include <test/util/json.h>
 #include <test/util/setup_common.h>
@@ -30,6 +31,7 @@
 #include <univalue.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <string_view>
 
@@ -336,6 +338,26 @@ BOOST_AUTO_TEST_CASE(bip380_descriptor_backup_vector_test)
     const UniValue& multipath_descriptor{json_vectors[1]["document"]["descriptor_sets"][0]};
     BOOST_CHECK(multipath_descriptor["descriptor"].get_str().find("/<0;1>/*") != std::string::npos);
     BOOST_CHECK(multipath_descriptor["change_descriptor"].isNull());
+
+    std::string text_vector;
+    text_vector.reserve(test::data::bip138_bip380_descriptor_backup.size());
+    for (const std::byte byte : test::data::bip138_bip380_descriptor_backup) {
+        text_vector.push_back(std::to_integer<char>(byte));
+    }
+
+    std::vector<std::string> descriptors;
+    for (std::string_view remaining{text_vector}; !remaining.empty();) {
+        const size_t newline{remaining.find('\n')};
+        const std::string_view line{remaining.substr(0, newline)};
+        if (!line.empty() && !line.starts_with("#")) {
+            descriptors.emplace_back(line);
+        }
+        if (newline == std::string_view::npos) break;
+        remaining.remove_prefix(newline + 1);
+    }
+
+    BOOST_REQUIRE_EQUAL(descriptors.size(), 1);
+    BOOST_CHECK(descriptors[0].find("/<0;1>/*") != std::string::npos);
 }
 
 BOOST_AUTO_TEST_CASE(chacha20poly1305_roundtrip_test)
@@ -585,7 +607,7 @@ BOOST_AUTO_TEST_CASE(interface_create_encrypted_descriptor_backup_test)
 
     std::shared_ptr<CWallet> wallet_ptr{&wallet, [](CWallet*) {}};
     auto wallet_interface{interfaces::MakeWallet(context, wallet_ptr)};
-    auto backup{wallet_interface->createEncryptedDescriptorBackup(std::nullopt)};
+    auto backup{wallet_interface->createEncryptedDescriptorBackup(std::nullopt, /*compact=*/false)};
     BOOST_REQUIRE_MESSAGE(backup, util::ErrorString(backup).original);
 
     auto metadata{CWallet::GetEncryptedBackupMetadata(*backup)};

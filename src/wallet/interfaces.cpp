@@ -154,9 +154,9 @@ public:
     }
     void abortRescan() override { m_wallet->AbortRescan(); }
     bool backupWallet(const std::string& filename) override { return m_wallet->BackupWallet(filename); }
-    util::Result<std::string> createEncryptedDescriptorBackup(const std::optional<std::string>& target_xpub) override
+    util::Result<std::string> createEncryptedDescriptorBackup(const std::optional<std::string>& target_xpub, bool compact) override
     {
-        return m_wallet->CreateEncryptedDescriptorBackup(target_xpub);
+        return m_wallet->CreateEncryptedDescriptorBackup(target_xpub, compact);
     }
     std::string getWalletName() override { return m_wallet->GetName(); }
     util::Result<CTxDestination> getNewDestination(const OutputType type, const std::string& label) override

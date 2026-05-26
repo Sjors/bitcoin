@@ -707,6 +707,11 @@ static util::Result<void> AddDescriptorToBackupSet(DescriptorBackupSet& set, Wal
     return {};
 }
 
+static std::string DescriptorBackupSetMultipathDescriptor(const DescriptorBackupSet& set)
+{
+    return set.multipath_descriptor;
+}
+
 static UniValue DescriptorBackupSetToUniValue(const DescriptorBackupSet& set)
 {
     UniValue obj(UniValue::VOBJ);
@@ -730,7 +735,7 @@ static UniValue DescriptorBackupSetToUniValue(const DescriptorBackupSet& set)
     return obj;
 }
 
-util::Result<std::string> CWallet::CreateEncryptedDescriptorBackup(const std::optional<std::string>& target_xpub) const
+util::Result<std::string> CWallet::CreateEncryptedDescriptorBackup(const std::optional<std::string>& target_xpub, bool compact) const
 {
     if (target_xpub) {
         const CExtPubKey ext_pubkey{DecodeExtPubKey(*target_xpub)};
@@ -835,15 +840,25 @@ util::Result<std::string> CWallet::CreateEncryptedDescriptorBackup(const std::op
     });
 
     const std::string primary_descriptor{sorted_sets.front().receive->descriptor};
-    UniValue descriptor_sets_arr(UniValue::VARR);
-    for (const auto& descriptor_set : sorted_sets) {
-        descriptor_sets_arr.push_back(DescriptorBackupSetToUniValue(descriptor_set));
+    std::string plaintext_str;
+    if (compact) {
+        for (const auto& descriptor_set : sorted_sets) {
+            if (!plaintext_str.empty()) plaintext_str += '\n';
+            plaintext_str += DescriptorBackupSetMultipathDescriptor(descriptor_set);
+        }
+        plaintext_str += '\n';
+    } else {
+        UniValue descriptor_sets_arr(UniValue::VARR);
+        for (const auto& descriptor_set : sorted_sets) {
+            descriptor_sets_arr.push_back(DescriptorBackupSetToUniValue(descriptor_set));
+        }
+
+        UniValue descriptor_backup(UniValue::VOBJ);
+        descriptor_backup.pushKV("version", 1);
+        descriptor_backup.pushKV("descriptor_sets", std::move(descriptor_sets_arr));
+        plaintext_str = descriptor_backup.write();
     }
 
-    UniValue descriptor_backup(UniValue::VOBJ);
-    descriptor_backup.pushKV("version", 1);
-    descriptor_backup.pushKV("descriptor_sets", std::move(descriptor_sets_arr));
-    const std::string plaintext_str{descriptor_backup.write()};
     const std::vector<uint8_t> plaintext{plaintext_str.begin(), plaintext_str.end()};
     const EncryptedBackupContent content{
         .type = ContentType::BIP_NUMBER,

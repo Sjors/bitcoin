@@ -162,6 +162,7 @@ target_json_data_sources(test_bitcoin
 )
 target_raw_data_sources(test_bitcoin NAMESPACE test::data
   data/asmap.raw
+  data/bip138_bip380_descriptor_backup.txt
 )
 
 add_windows_application_manifest(test_bitcoin)
