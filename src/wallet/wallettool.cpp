@@ -215,6 +215,29 @@ bool ExecuteWalletToolFunc(const ArgsManager& args, const std::string& command)
             return false;
         }
 
+        if (args.IsArgSet("-wallet")) {
+            if (!fs::exists(path)) {
+                tfm::format(std::cerr, "Wallet '%s' does not exist. Create it first with `bitcoin-wallet -wallet=%s create`.\n", name, name);
+                return false;
+            }
+
+            DatabaseOptions options;
+            ReadDatabaseArgs(args, options);
+            options.require_existing = true;
+            const std::shared_ptr<CWallet> wallet_instance = MakeWallet(name, path, options);
+            if (!wallet_instance) return false;
+
+            auto import_result{wallet_instance->ImportEncryptedDescriptorBackup(base64_input, args.GetArg("-pubkey", ""))};
+            if (!import_result) {
+                tfm::format(std::cerr, "%s\n", util::ErrorString(import_result).original);
+                wallet_instance->Close();
+                return false;
+            }
+
+            wallet_instance->Close();
+            return true;
+        }
+
         auto wallet_backup{interfaces::MakeWalletBackup()};
         auto decrypted{wallet_backup->decryptEncryptedDescriptorBackup(base64_input, args.GetArg("-pubkey", ""))};
         if (!decrypted) {

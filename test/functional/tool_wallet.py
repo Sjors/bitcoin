@@ -541,7 +541,7 @@ class ToolWalletTest(BitcoinTestFramework):
                 if line.strip() and not line.startswith("#")
             ]
 
-        def import_descriptors_from_backup_sets(descriptor_sets):
+        def descriptors_from_backup_sets(descriptor_sets):
             def with_checksum(desc):
                 return desc if "#" in desc else descsum_create(desc)
 
@@ -611,11 +611,11 @@ class ToolWalletTest(BitcoinTestFramework):
         assert_equal(len(compact_descriptor_sets), len(descriptor_sets))
         for compact_set in compact_descriptor_sets:
             assert "/<0;1>/*" in compact_set["descriptor"]
-        compact_decrypted_descriptors = import_descriptors_from_backup_sets(compact_descriptor_sets)
+        compact_decrypted_descriptors = descriptors_from_backup_sets(compact_descriptor_sets)
         for desc in compact_decrypted_descriptors:
             assert_equal(desc["timestamp"], "now")
 
-        decrypted_descriptors = import_descriptors_from_backup_sets(descriptor_sets)
+        decrypted_descriptors = descriptors_from_backup_sets(descriptor_sets)
 
         # Sort by descriptor string for consistent comparison
         decrypted_descriptors = sorted(decrypted_descriptors, key=lambda d: d["desc"])
@@ -634,17 +634,42 @@ class ToolWalletTest(BitcoinTestFramework):
         for i, (orig, decrypted) in enumerate(zip(original_desc_strs, decrypted_desc_strs)):
             assert_equal(orig, decrypted)
 
-        # Verify the decrypted descriptors can be imported into a blank watch-only wallet
-        self.log.info("Creating blank watch-only wallet for import test...")
+        self.log.info("Testing decryptbackup with a missing -wallet target...")
         self.start_node(0)
+        p = self.bitcoin_wallet_process("-wallet=missing_backup_wallet", f"-pubkey={xpub_for_decrypt}", "decryptbackup")
+        missing_output, stderr = p.communicate(input=backup_base64)
+        assert_equal(p.poll(), 1)
+        assert_equal(missing_output, "")
+        assert "Create it first" in stderr
+
+        # Verify decryptbackup -wallet imports the descriptors into a blank watch-only wallet
+        self.log.info("Creating blank watch-only wallet for import test...")
         import_wallet_name = "imported_backup_wallet"
         self.nodes[0].createwallet(import_wallet_name, disable_private_keys=True, blank=True)
-        imported_wallet = self.nodes[0].get_wallet_rpc(import_wallet_name)
+        self.nodes[0].unloadwallet(import_wallet_name)
+        self.stop_node(0)
 
         self.log.info("Importing decrypted descriptors into blank watch-only wallet...")
-        result = imported_wallet.importdescriptors(decrypted_descriptors)
-        for r in result:
-            assert r["success"], f"Import failed: {r}"
+        p = self.bitcoin_wallet_process(f"-wallet={import_wallet_name}", f"-pubkey={xpub_for_decrypt}", "decryptbackup")
+        import_output, stderr = p.communicate(input=backup_base64)
+        if p.poll() != 0:
+            self.log.error(f"decryptbackup import failed: stderr={stderr} stdout={import_output}")
+        assert_equal(p.poll(), 0)
+        assert_equal(import_output, "")
+        assert_equal(stderr, "")
+
+        # Re-importing must update existing descriptor managers, not duplicate them.
+        p = self.bitcoin_wallet_process(f"-wallet={import_wallet_name}", f"-pubkey={xpub_for_decrypt}", "decryptbackup")
+        import_output, stderr = p.communicate(input=backup_base64)
+        if p.poll() != 0:
+            self.log.error(f"decryptbackup re-import failed: stderr={stderr} stdout={import_output}")
+        assert_equal(p.poll(), 0)
+        assert_equal(import_output, "")
+        assert_equal(stderr, "")
+
+        self.start_node(0)
+        self.nodes[0].loadwallet(import_wallet_name)
+        imported_wallet = self.nodes[0].get_wallet_rpc(import_wallet_name)
 
         # Verify the imported wallet has the same descriptors
         imported_descriptors = imported_wallet.listdescriptors()["descriptors"]
@@ -674,7 +699,6 @@ class ToolWalletTest(BitcoinTestFramework):
         assert_equal(len(original_desc_strs), len(imported_compact_desc_strs))
         for i, (orig, imported) in enumerate(zip(original_desc_strs, imported_compact_desc_strs)):
             assert_equal(orig, imported)
-
         self.nodes[0].unloadwallet(import_wallet_name)
         self.nodes[0].unloadwallet(compact_import_wallet_name)
         self.stop_node(0)

@@ -23,7 +23,9 @@
 #include <util/bip32.h>
 #include <util/strencodings.h>
 #include <util/string.h>
+#include <util/time.h>
 #include <wallet/descriptor_info.h>
+#include <wallet/imports.h>
 #include <wallet/wallet.h>
 
 namespace wallet {
@@ -735,6 +737,112 @@ static UniValue DescriptorBackupSetToUniValue(const DescriptorBackupSet& set)
     return obj;
 }
 
+static util::Result<std::optional<std::pair<int64_t, int64_t>>> ParseDescriptorBackupRange(const UniValue& range)
+{
+    if (range.isNull()) return std::optional<std::pair<int64_t, int64_t>>{};
+    if (!range.isArray() || range.size() != 2) {
+        return util::Error{Untranslated("Descriptor backup range must contain two indexes.")};
+    }
+
+    const int64_t begin{range[0].getInt<int64_t>()};
+    const int64_t end_inclusive{range[1].getInt<int64_t>()};
+    if (begin < 0 || end_inclusive < begin || end_inclusive == std::numeric_limits<int64_t>::max()) {
+        return util::Error{Untranslated("Descriptor backup range is invalid.")};
+    }
+    return std::optional{std::make_pair(begin, end_inclusive)};
+}
+
+static util::Result<std::vector<ImportDescriptorRequest>> ParseDescriptorBackupImports(std::string_view content)
+{
+    const int64_t now{GetTime()};
+    std::vector<ImportDescriptorRequest> imports;
+
+    if (util::TrimStringView(content).starts_with("{")) {
+        UniValue descriptor_backup;
+        if (!descriptor_backup.read(content) || !descriptor_backup.isObject()) {
+            return util::Error{Untranslated("Failed to parse descriptor backup JSON.")};
+        }
+        if (!descriptor_backup.exists("descriptor_sets") || !descriptor_backup["descriptor_sets"].isArray()) {
+            return util::Error{Untranslated("Descriptor backup JSON is missing descriptor_sets.")};
+        }
+
+        for (const UniValue& descriptor_set : descriptor_backup["descriptor_sets"].getValues()) {
+            if (!descriptor_set.isObject() || !descriptor_set.exists("descriptor") || !descriptor_set["descriptor"].isStr()) {
+                return util::Error{Untranslated("Descriptor backup set is missing a descriptor.")};
+            }
+            const std::string descriptor{descriptor_set["descriptor"].get_str()};
+
+            auto range{ParseDescriptorBackupRange(descriptor_set["range"])};
+            if (!range) return util::Error{util::ErrorString(range)};
+
+            const bool active{!descriptor_set.exists("archived") || !descriptor_set["archived"].get_bool()};
+            const int64_t timestamp{descriptor_set.exists("birth_time") ? descriptor_set["birth_time"].getInt<int64_t>() : now};
+            imports.push_back({
+                .descriptor = descriptor,
+                .label = std::nullopt,
+                .timestamp = timestamp,
+                .active = active,
+                .internal = false,
+                .range = *range,
+                .next_index = std::nullopt,
+            });
+
+            if (descriptor_set.exists("change_descriptor")) {
+                if (!descriptor_set["change_descriptor"].isStr()) {
+                    return util::Error{Untranslated("Descriptor backup change_descriptor must be a string.")};
+                }
+                if (descriptor.find("/<") != std::string::npos) {
+                    return util::Error{Untranslated("Descriptor backup must not include a change_descriptor for a multipath descriptor.")};
+                }
+                imports.push_back({
+                    .descriptor = descriptor_set["change_descriptor"].get_str(),
+                    .label = std::nullopt,
+                    .timestamp = timestamp,
+                    .active = active,
+                    .internal = true,
+                    .range = *range,
+                    .next_index = std::nullopt,
+                });
+            }
+        }
+    } else {
+        return util::Error{Untranslated("Descriptor backup import requires JSON descriptor backup content.")};
+    }
+
+    if (imports.empty()) {
+        return util::Error{Untranslated("Descriptor backup did not contain any descriptors.")};
+    }
+    return imports;
+}
+
+static util::Result<void> PreserveExistingDescriptorRange(CWallet& wallet, ImportDescriptorRequest& request) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
+{
+    FlatSigningProvider keys;
+    std::string error;
+    auto parsed_descs{Parse(request.descriptor, keys, error, /*require_checksum=*/true)};
+    if (parsed_descs.empty()) {
+        return util::Error{Untranslated(strprintf("Unable to parse descriptor '%s': %s", request.descriptor, error))};
+    }
+
+    for (auto& parsed_desc : parsed_descs) {
+        WalletDescriptor wallet_descriptor(std::move(parsed_desc), /*creation_time=*/0, /*range_start=*/0, /*range_end=*/1, /*next_index=*/0);
+        if (!wallet_descriptor.descriptor->IsRange()) continue;
+        if (auto existing_spk_manager{wallet.GetDescriptorScriptPubKeyMan(wallet_descriptor)}) {
+            LOCK(existing_spk_manager->cs_desc_man);
+            const WalletDescriptor existing_descriptor{existing_spk_manager->GetWalletDescriptor()};
+            const auto existing_range{std::make_pair<int64_t, int64_t>(existing_descriptor.range_start, existing_descriptor.range_end - 1)};
+            if (request.range) {
+                request.range = std::make_pair(std::min(request.range->first, existing_range.first), std::max(request.range->second, existing_range.second));
+            } else {
+                request.range = existing_range;
+            }
+            request.next_index = existing_descriptor.next_index;
+        }
+    }
+
+    return {};
+}
+
 util::Result<std::string> CWallet::CreateEncryptedDescriptorBackup(const std::optional<std::string>& target_xpub, bool compact) const
 {
     if (target_xpub) {
@@ -897,6 +1005,41 @@ util::Result<std::vector<uint8_t>> CWallet::DecryptEncryptedBackupBase64WithExtP
     }
 
     return plaintexts->front();
+}
+
+util::Result<int> CWallet::ImportEncryptedDescriptorBackup(const std::string& base64_str, const std::string& pubkey_str)
+{
+    auto decrypted{DecryptEncryptedBackupBase64WithExtPubKey(base64_str, pubkey_str)};
+    if (!decrypted) {
+        return util::Error{util::ErrorString(decrypted)};
+    }
+
+    const std::string content{decrypted->begin(), decrypted->end()};
+    auto imports{ParseDescriptorBackupImports(content)};
+    if (!imports) {
+        return util::Error{util::ErrorString(imports)};
+    }
+
+    int imported{0};
+    {
+        LOCK(cs_wallet);
+        for (auto& import : *imports) {
+            auto range_result{PreserveExistingDescriptorRange(*this, import)};
+            if (!range_result) {
+                return util::Error{util::ErrorString(range_result)};
+            }
+
+            auto import_result{wallet::ImportDescriptor(*this, import)};
+            if (import_result.result_code != wallet::ImportDescriptorResult::ImportResultCode::OK) {
+                return util::Error{Untranslated(import_result.error_message)};
+            }
+            ++imported;
+        }
+        ConnectScriptPubKeyManNotifiers();
+        RefreshAllTXOs();
+    }
+
+    return imported;
 }
 
 util::Result<EncryptedBackupMetadata> CWallet::GetEncryptedBackupMetadata(const std::string& base64_str)
