@@ -60,7 +60,7 @@ class IPCMiningCompatibilityTest(BitcoinTestFramework):
             async with AsyncExitStack() as stack:
                 ctx, mining = await make_mining_ctx(self)
 
-                self.log.debug("Omitting alwaysAddCoinbaseCommitment works with v31.0")
+                self.log.debug("Default block creation options work with v31.0")
                 opts = self.capnp_modules["mining"].BlockCreateOptions()
                 template = await mining_create_block_template(mining, stack, ctx, opts, cooldown=False)
                 coinbase = await mining_get_coinbase_tx(template, ctx)

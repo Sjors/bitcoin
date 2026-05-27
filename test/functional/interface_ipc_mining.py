@@ -241,16 +241,16 @@ class IPCMiningTest(BitcoinTestFramework):
                 txsigops = await template.getTxSigops(ctx)
                 assert_equal(len(txsigops.result), 0)
                 coinbase = await mining_get_coinbase_tx(template, ctx)
-                assert_not_equal(coinbase.witness, None)
-                assert_equal(len(coinbase.requiredOutputs), 1)
+                assert_equal(coinbase.witness, None)
+                assert_equal(coinbase.requiredOutputs, [])
 
-                self.log.debug("Check that coinbase commitment can be omitted for empty templates")
+                self.log.debug("Check that coinbase commitment can be requested for empty templates")
                 opts = self.capnp_modules['mining'].BlockCreateOptions()
-                opts.alwaysAddCoinbaseCommitment = False
+                opts.alwaysAddCoinbaseCommitment = True
                 template_with_opts = await mining_create_block_template(mining, stack, ctx, opts)
                 coinbase_with_opts = await mining_get_coinbase_tx(template_with_opts, ctx)
-                assert_equal(coinbase_with_opts.witness, None)
-                assert_equal(coinbase_with_opts.requiredOutputs, [])
+                assert_not_equal(coinbase_with_opts.witness, None)
+                assert_equal(len(coinbase_with_opts.requiredOutputs), 1)
 
                 self.log.debug("Wait for a new template")
                 waitoptions = self.capnp_modules['mining'].BlockWaitOptions()
@@ -478,7 +478,9 @@ class IPCMiningTest(BitcoinTestFramework):
             current_block_height = self.nodes[0].getchaintips()[0]["height"]
             check_opts = self.capnp_modules['mining'].BlockCheckOptions()
 
-            async with destroying((await mining.createNewBlock(ctx, self.default_block_create_options)).result, ctx) as template:
+            opts = self.capnp_modules['mining'].BlockCreateOptions()
+            opts.alwaysAddCoinbaseCommitment = True
+            async with destroying((await mining.createNewBlock(ctx, opts)).result, ctx) as template:
                 block = await mining_get_block(template, ctx)
                 balance = self.miniwallet.get_balance()
                 coinbase = await self.build_coinbase_test(template, ctx, self.miniwallet, expect_witness=True)
