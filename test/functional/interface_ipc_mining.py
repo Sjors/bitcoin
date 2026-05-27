@@ -8,7 +8,7 @@ import time
 from contextlib import AsyncExitStack
 from decimal import Decimal
 from io import BytesIO
-from test_framework.blocktools import NULL_OUTPOINT, script_BIP34_coinbase_height
+from test_framework.blocktools import NULL_OUTPOINT, WITNESS_COMMITMENT_HEADER, script_BIP34_coinbase_height
 from test_framework.messages import (
     CBlockHeader,
     COIN,
@@ -67,7 +67,7 @@ class IPCMiningTest(BitcoinTestFramework):
         # as it is being called before knowing whether capnp is available).
         self.capnp_modules = load_capnp_modules(self.config)
 
-    async def build_coinbase_test(self, template, ctx, miniwallet, extra_nonce=b""):
+    async def build_coinbase_test(self, template, ctx, miniwallet, extra_nonce=b"", expect_witness=None):
         self.log.debug("Build coinbase transaction using getCoinbaseTx()")
         assert template is not None
         coinbase_res = await mining_get_coinbase_tx(template, ctx)
@@ -85,23 +85,25 @@ class IPCMiningTest(BitcoinTestFramework):
         # Typically a mining pool appends its name and an extraNonce
         coinbase_tx.vin[0].scriptSig = coinbase_res.scriptSigPrefix + extra_nonce
 
-        # We currently always provide a coinbase witness, even for empty
-        # blocks, but this may change, so always check:
         has_witness = coinbase_res.witness is not None
         if has_witness:
             coinbase_tx.wit.vtxinwit = [CTxInWitness()]
             coinbase_tx.wit.vtxinwit[0].scriptWitness.stack = [coinbase_res.witness]
+        if expect_witness is not None:
+            assert_equal(has_witness, expect_witness)
 
         # First output is our payout
         coinbase_tx.vout = [CTxOut()]
         coinbase_tx.vout[0].scriptPubKey = miniwallet.get_output_script()
         coinbase_tx.vout[0].nValue = coinbase_res.blockRewardRemaining
-        # Add SegWit OP_RETURN. This is currently always present even for
-        # empty blocks, but this may change.
+        found_witness_op_return = False
         for output_data in coinbase_res.requiredOutputs:
             output = CTxOut()
             output.deserialize(BytesIO(output_data))
             coinbase_tx.vout.append(output)
+            if len(output.scriptPubKey) >= 6 and output.scriptPubKey[2:6] == WITNESS_COMMITMENT_HEADER:
+                found_witness_op_return = True
+        assert_equal(found_witness_op_return, has_witness)
 
         coinbase_tx.nLockTime = coinbase_res.lockTime
         return coinbase_tx
@@ -238,6 +240,17 @@ class IPCMiningTest(BitcoinTestFramework):
                 assert_equal(len(txfees.result), 0)
                 txsigops = await template.getTxSigops(ctx)
                 assert_equal(len(txsigops.result), 0)
+                coinbase = await mining_get_coinbase_tx(template, ctx)
+                assert_not_equal(coinbase.witness, None)
+                assert_equal(len(coinbase.requiredOutputs), 1)
+
+                self.log.debug("Check that coinbase commitment can be omitted for empty templates")
+                opts = self.capnp_modules['mining'].BlockCreateOptions()
+                opts.alwaysAddCoinbaseCommitment = False
+                template_with_opts = await mining_create_block_template(mining, stack, ctx, opts)
+                coinbase_with_opts = await mining_get_coinbase_tx(template_with_opts, ctx)
+                assert_equal(coinbase_with_opts.witness, None)
+                assert_equal(coinbase_with_opts.requiredOutputs, [])
 
                 self.log.debug("Wait for a new template")
                 waitoptions = self.capnp_modules['mining'].BlockWaitOptions()
@@ -468,7 +481,7 @@ class IPCMiningTest(BitcoinTestFramework):
             async with destroying((await mining.createNewBlock(ctx, self.default_block_create_options)).result, ctx) as template:
                 block = await mining_get_block(template, ctx)
                 balance = self.miniwallet.get_balance()
-                coinbase = await self.build_coinbase_test(template, ctx, self.miniwallet)
+                coinbase = await self.build_coinbase_test(template, ctx, self.miniwallet, expect_witness=True)
                 # Reduce payout for balance comparison simplicity
                 coinbase.vout[0].nValue = COIN
                 block.vtx[0] = coinbase
