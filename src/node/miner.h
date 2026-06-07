@@ -39,6 +39,13 @@ using interfaces::BlockRef;
 namespace node {
 class KernelNotifications;
 
+struct TemplateChunk {
+    FeePerWeight feerate;
+    std::vector<Wtxid> chunk_wtxids;
+    int64_t weight; //!< Actual serialized weight (may differ from feerate.size which is sigops-adjusted).
+    int64_t sigops_cost;
+};
+
 struct CBlockTemplate
 {
     CBlock block;
@@ -46,9 +53,10 @@ struct CBlockTemplate
     std::vector<CAmount> vTxFees;
     // Sigops per transaction, not including coinbase transaction (unlike CBlock::vtx).
     std::vector<int64_t> vTxSigOpsCost;
-    /* A vector of package fee rates, ordered by the sequence in which
-     * packages are selected for inclusion in the block template.*/
-    std::vector<FeePerVSize> m_package_feerates;
+    /* Chunks included in the block template, ordered by selection sequence.
+     * Each entry records the chunk feerate, unadjusted weight, sigops cost,
+     * and the wtxids of the transactions in the chunk. */
+    std::vector<TemplateChunk> m_template_chunks;
     /*
      * Template containing all coinbase transaction fields that are set by our
      * miner code.
