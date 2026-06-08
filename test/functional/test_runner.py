@@ -184,6 +184,7 @@ BASE_SCRIPTS = [
     'wallet_txn_doublespend.py --mineblock',
     'tool_bitcoin_chainstate.py',
     'tool_wallet.py',
+    'tool_wallet_bip329.py',
     'tool_utils.py',
     'tool_signet_miner.py',
     'wallet_txn_clone.py',
