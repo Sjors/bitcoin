@@ -22,7 +22,11 @@ ONE_HASH = "01" + "00" * 31
 
 class TxProofTest(BitcoinTestFramework):
     def set_test_params(self):
-        self.num_nodes = 1
+        self.num_nodes = 2
+        self.extra_args = [
+            ["-wtxindex"],
+            [],
+        ]
         self.setup_clean_chain = True
 
     def _verify(self, proof):
@@ -99,6 +103,7 @@ class TxProofTest(BitcoinTestFramework):
 
     def run_test(self):
         node = self.nodes[0]
+        node_no_wtxindex = self.nodes[1]
         miniwallet = MiniWallet(node)
         vectors_path = Path(__file__).with_name("data") / "rpc_txproof.json"
         genesis_hash = node.getblockhash(0)
@@ -116,8 +121,12 @@ class TxProofTest(BitcoinTestFramework):
         tx_chain = miniwallet.send_self_transfer_chain(from_node=node, chain_length=4)
         assert_raises_rpc_error(-5, "Not all transactions found in specified block", node.gettxproof, [tx_chain[-1]["wtxid"]], genesis_hash)
         blockhash = self.generate(node, 1)[0]
+        self.wait_until(lambda: node.getindexinfo("wtxindex")["wtxindex"]["synced"])
         witness_proof = node.gettxproof([tx_chain[-1]["wtxid"]], blockhash)
         self._check_witness_commitment_proof(witness_proof, expected_target_positions=[4])
+        assert_equal(node.gettxproof([tx_chain[-1]["wtxid"]]), witness_proof)
+        assert_equal(node_no_wtxindex.gettxproof([tx_chain[-1]["wtxid"]], blockhash), witness_proof)
+        assert_raises_rpc_error(-5, "Block hash must be provided when -wtxindex is not enabled", node_no_wtxindex.gettxproof, [tx_chain[-1]["wtxid"]])
 
         self.log.info("Check a coinbase-only proof")
         coinbase_wtxid = witness_proof["transactions"][0]["wtxid"]
@@ -127,6 +136,7 @@ class TxProofTest(BitcoinTestFramework):
         }
         assert_equal(node.gettxproof([], blockhash), coinbase_only_proof)
         assert_equal(node.gettxproof([coinbase_wtxid], blockhash), coinbase_only_proof)
+        assert_equal(node.gettxproof([coinbase_wtxid]), coinbase_only_proof)
 
         with vectors_path.open(encoding="utf8") as f:
             vectors = json.load(f)
@@ -140,7 +150,9 @@ class TxProofTest(BitcoinTestFramework):
         assert_raises_rpc_error(-8, "wtxids[0] must be of length 64", node.gettxproof, ["00000000"], blockhash)
         assert_raises_rpc_error(-8, "Invalid parameter, duplicated wtxid", node.gettxproof, [tx_chain[-1]["wtxid"], tx_chain[-1]["wtxid"]], blockhash)
         assert_raises_rpc_error(-8, "Parameter 'wtxids' accepts at most one element", node.gettxproof, [tx_chain[-2]["wtxid"], tx_chain[-1]["wtxid"]], blockhash)
+        assert_raises_rpc_error(-8, "Parameter 'blockhash' is required when 'wtxids' is empty", node.gettxproof, [])
         assert_raises_rpc_error(-5, "Block not found", node.gettxproof, [tx_chain[-1]["wtxid"]], ZERO_HASH)
+        assert_raises_rpc_error(-5, "Transaction not yet in block", node.gettxproof, [ONE_HASH])
 
         self.log.info("Check invalid multi-transaction proof")
         self._invalid(self._mutate(witness_proof, lambda p: p["transactions"].append(deepcopy(p["transactions"][-1]))))

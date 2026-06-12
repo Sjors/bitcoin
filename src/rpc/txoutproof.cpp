@@ -204,6 +204,42 @@ static const CBlockIndex* GetTxProofBlockIndex(ChainstateManager& chainman, cons
     return pblockindex;
 }
 
+static const CBlockIndex* GetTxProofBlockIndexByWtxid(ChainstateManager& chainman, const std::optional<Wtxid>& wtxid, const UniValue& blockhash_param)
+{
+    if (!blockhash_param.isNull()) {
+        LOCK(cs_main);
+        const uint256 block_hash{ParseHashV(blockhash_param, "blockhash")};
+        const CBlockIndex* pblockindex{chainman.m_blockman.LookupBlockIndex(block_hash)};
+        if (!pblockindex) {
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
+        }
+        return pblockindex;
+    }
+
+    if (!wtxid) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Parameter 'blockhash' is required when 'wtxids' is empty");
+    }
+    if (!g_wtxindex) {
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block hash must be provided when -wtxindex is not enabled");
+    }
+    if (!g_wtxindex->BlockUntilSyncedToCurrentChain()) {
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Blockchain transactions are still in the process of being indexed");
+    }
+
+    CTransactionRef tx;
+    uint256 block_hash;
+    if (!g_wtxindex->FindTx(*wtxid, block_hash, tx) || block_hash.IsNull()) {
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Transaction not yet in block");
+    }
+
+    LOCK(cs_main);
+    const CBlockIndex* pblockindex{chainman.m_blockman.LookupBlockIndex(block_hash)};
+    if (!pblockindex) {
+        throw JSONRPCError(RPC_INTERNAL_ERROR, "Witness transaction index corrupt");
+    }
+    return pblockindex;
+}
+
 static RPCMethod gettxproof()
 {
     return RPCMethod{
@@ -216,14 +252,15 @@ static RPCMethod gettxproof()
         "is always included at position 0 so verifiers can prove the presence or absence of the\n"
         "witness commitment. Passing an empty wtxids array returns only this coinbase proof, which\n"
         "is equivalent to requesting the coinbase transaction's wtxid. The wtxids array is reserved\n"
-        "for future expansion, but currently accepts at most one element.\n",
+        "for future expansion, but currently accepts at most one element.\n"
+        "If blockhash is omitted, -wtxindex must be enabled and wtxids must contain one element.\n",
         {
             {"wtxids", RPCArg::Type::ARR, RPCArg::Optional::NO, "The witness transaction id to prove. Accepts at most one element. Empty array returns only the coinbase proof",
                 {
                     {"wtxid", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "A witness transaction id"},
                 },
             },
-            {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The block hash"},
+            {"blockhash", RPCArg::Type::STR_HEX, RPCArg::Optional::OMITTED, "If specified, looks for wtxid in the block with this hash. If omitted, the block is located using -wtxindex"},
         },
         RPCResult{
             RPCResult::Type::OBJ, "", "",
@@ -267,15 +304,10 @@ static RPCMethod gettxproof()
                 wtxid = *wtxids.begin();
             }
 
-            const uint256 block_hash{ParseHashV(request.params[1], "blockhash")};
             ChainstateManager& chainman = EnsureAnyChainman(request.context);
-            const CBlockIndex* pblockindex{nullptr};
+            const CBlockIndex* pblockindex{GetTxProofBlockIndexByWtxid(chainman, wtxid, request.params[1])};
             {
                 LOCK(cs_main);
-                pblockindex = chainman.m_blockman.LookupBlockIndex(block_hash);
-                if (!pblockindex) {
-                    throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
-                }
                 CheckBlockDataAvailability(chainman.m_blockman, *pblockindex, /*check_for_undo=*/false);
             }
             CBlock block;
