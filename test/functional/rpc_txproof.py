@@ -2,8 +2,9 @@
 # Copyright (c) 2026-present The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or https://opensource.org/license/mit.
-"""Test gettxproof RPC."""
+"""Test gettxproof and verifytxproof RPCs."""
 
+from copy import deepcopy
 import json
 from pathlib import Path
 
@@ -16,12 +17,24 @@ from test_framework.wallet import MiniWallet
 
 
 ZERO_HASH = "00" * 32
+ONE_HASH = "01" + "00" * 31
 
 
 class TxProofTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 1
         self.setup_clean_chain = True
+
+    def _verify(self, proof):
+        return self.nodes[0].verifytxproof(proof)
+
+    def _invalid(self, proof):
+        assert_equal(self._verify(proof), {})
+
+    def _mutate(self, proof, mutator):
+        proof = deepcopy(proof)
+        mutator(proof)
+        return proof
 
     def _check_no_commitment_proof(self, proof):
         coinbase = proof["transactions"][0]
@@ -30,6 +43,21 @@ class TxProofTest(BitcoinTestFramework):
         assert_equal(coinbase["pos"], 0)
         assert "wtxid" not in coinbase["proof"]
         assert_equal(coinbase["proof"]["txid"], [])
+
+        assert_equal(self._verify(proof), {
+            "blockhash": proof["blockhash"],
+            "block_tx_count": proof["block_tx_count"],
+            "transactions": [{
+                "pos": coinbase["pos"],
+                "txid": coinbase["txid"],
+                "wtxid": coinbase["wtxid"],
+            }],
+        })
+
+        self._invalid(self._mutate(proof, lambda p: p.__setitem__("block_tx_count", 2)))
+        self._invalid(self._mutate(proof, lambda p: p["transactions"][0].__setitem__("pos", 1)))
+        self._invalid(self._mutate(proof, lambda p: p["transactions"][0].__setitem__("wtxid", ZERO_HASH)))
+        self._invalid(self._mutate(proof, lambda p: p["transactions"][0]["proof"].__setitem__("wtxid", [])))
 
     def _check_witness_commitment_proof(self, proof, *, expected_target_positions):
         coinbase = proof["transactions"][0]
@@ -42,6 +70,32 @@ class TxProofTest(BitcoinTestFramework):
         for target in targets:
             assert "wtxid" in target["proof"]
             assert "txid" not in target["proof"]
+
+        assert_equal(self._verify(proof), {
+            "blockhash": proof["blockhash"],
+            "block_tx_count": proof["block_tx_count"],
+            "transactions": [{
+                "pos": coinbase["pos"],
+                "txid": coinbase["txid"],
+            }] + [{
+                "pos": target["pos"],
+                "wtxid": target["wtxid"],
+            } for target in targets],
+        })
+
+        self._invalid(self._mutate(proof, lambda p: p.__setitem__("block_tx_count", 4)))
+        self._invalid(self._mutate(proof, lambda p: p["transactions"][-1].__setitem__("pos", 2)))
+        self._invalid(self._mutate(proof, lambda p: p["transactions"][0]["proof"]["txid"].__setitem__(0, ONE_HASH)))
+        self._invalid(self._mutate(proof, lambda p: p["transactions"][-1]["proof"]["wtxid"].__setitem__(0, ZERO_HASH)))
+        self._invalid(self._mutate(proof, lambda p: p["transactions"][-1]["proof"].pop("wtxid")))
+        self._invalid(self._mutate(proof, lambda p: p["transactions"][-1]["proof"].__setitem__("txid", [])))
+
+        assert_raises_rpc_error(
+            -8,
+            "transactions[0].proof.txid must be an array",
+            self._verify,
+            self._mutate(proof, lambda p: p["transactions"][0]["proof"].__setitem__("txid", "not an array")),
+        )
 
     def run_test(self):
         node = self.nodes[0]
@@ -87,6 +141,24 @@ class TxProofTest(BitcoinTestFramework):
         assert_raises_rpc_error(-8, "Invalid parameter, duplicated wtxid", node.gettxproof, [tx_chain[-1]["wtxid"], tx_chain[-1]["wtxid"]], blockhash)
         assert_raises_rpc_error(-8, "Parameter 'wtxids' accepts at most one element", node.gettxproof, [tx_chain[-2]["wtxid"], tx_chain[-1]["wtxid"]], blockhash)
         assert_raises_rpc_error(-5, "Block not found", node.gettxproof, [tx_chain[-1]["wtxid"]], ZERO_HASH)
+
+        self.log.info("Check invalid multi-transaction proof")
+        self._invalid(self._mutate(witness_proof, lambda p: p["transactions"].append(deepcopy(p["transactions"][-1]))))
+
+        self.log.info("Check active-chain verification")
+        node.invalidateblock(blockhash)
+        assert_raises_rpc_error(-5, "Block not found in active chain", node.verifytxproof, witness_proof)
+        assert_equal(node.verifytxproof(witness_proof, require_active_chain=False), {
+            "blockhash": witness_proof["blockhash"],
+            "block_tx_count": witness_proof["block_tx_count"],
+            "transactions": [{
+                "pos": witness_proof["transactions"][0]["pos"],
+                "txid": witness_proof["transactions"][0]["txid"],
+            }, {
+                "pos": witness_proof["transactions"][1]["pos"],
+                "wtxid": witness_proof["transactions"][1]["wtxid"],
+            }],
+        })
 
 
 if __name__ == "__main__":
