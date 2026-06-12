@@ -7,6 +7,27 @@
 #include <hash.h>
 #include <util/check.h>
 
+std::optional<uint256> ComputeMerkleRootFromBranch(const uint256& leaf, const std::vector<uint256>& branch, uint32_t position, uint32_t leaf_count)
+{
+    if (leaf_count == 0 || position >= leaf_count) return std::nullopt;
+
+    uint256 hash{leaf};
+    uint32_t count{leaf_count};
+    uint32_t index{position};
+    for (const uint256& sibling : branch) {
+        if (count <= 1) return std::nullopt;
+
+        const bool duplicate{(index ^ 1U) >= count};
+        if (duplicate && sibling != hash) return std::nullopt;
+
+        hash = (index & 1) ? Hash(sibling, hash) : Hash(hash, sibling);
+        index >>= 1;
+        count = (count + 1) / 2;
+    }
+    if (count != 1) return std::nullopt;
+    return hash;
+}
+
 /* This implements a constant-space merkle path calculator, limited to 2^32 leaves. */
 static void MerkleComputation(const std::vector<uint256>& leaves, uint32_t leaf_pos, std::vector<uint256>& path)
 {

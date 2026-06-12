@@ -9,7 +9,15 @@
 #include <uint256.h>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
+
+/**
+ * Compute the Merkle root for a leaf from a merkle branch and a known tree
+ * shape, or nullopt if the branch is inconsistent with the supplied position
+ * and leaf count.
+ */
+std::optional<uint256> ComputeMerkleRootFromBranch(const uint256& leaf, const std::vector<uint256>& branch, uint32_t position, uint32_t leaf_count);
 
 /**
  * Compute merkle path to the specified transaction

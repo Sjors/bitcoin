@@ -61,7 +61,6 @@ uint256 ComputeMerkleRoot(std::vector<uint256> hashes, bool* mutated) {
     return hashes[0];
 }
 
-
 uint256 BlockMerkleRoot(const CBlock& block, bool* mutated)
 {
     std::vector<uint256> leaves;
