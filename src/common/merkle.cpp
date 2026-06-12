@@ -122,3 +122,16 @@ std::vector<uint256> TransactionMerklePath(const CBlock& block, uint32_t positio
     }
     return ComputeMerklePath(leaves, position);
 }
+
+std::vector<uint256> WitnessMerklePath(const CBlock& block, uint32_t position)
+{
+    std::vector<uint256> leaves;
+    leaves.resize(block.vtx.size());
+    if (!leaves.empty()) {
+        leaves[0] = uint256{};
+    }
+    for (size_t s = 1; s < block.vtx.size(); s++) {
+        leaves[s] = block.vtx[s]->GetWitnessHash().ToUint256();
+    }
+    return ComputeMerklePath(leaves, position);
+}

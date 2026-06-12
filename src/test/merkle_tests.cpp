@@ -194,6 +194,29 @@ BOOST_AUTO_TEST_CASE(merkle_branch_shape_test)
     BOOST_CHECK(!::ComputeMerkleRootFromBranch(block.vtx[pos]->GetHash().ToUint256(), invalid_path, pos, block.vtx.size()));
 }
 
+BOOST_AUTO_TEST_CASE(witness_merkle_path_test)
+{
+    CBlock block;
+    block.vtx.resize(3);
+    for (std::size_t pos = 0; pos < block.vtx.size(); pos++) {
+        CMutableTransaction mtx;
+        mtx.nLockTime = pos;
+        if (pos > 0) {
+            mtx.vin.resize(1);
+            mtx.vin[0].scriptWitness.stack.emplace_back(std::vector<unsigned char>{uint8_t(pos)});
+        }
+        block.vtx[pos] = MakeTransactionRef(std::move(mtx));
+    }
+
+    for (uint32_t pos = 0; pos < block.vtx.size(); ++pos) {
+        const uint256 leaf{pos == 0 ? uint256{} : block.vtx[pos]->GetWitnessHash().ToUint256()};
+        const auto path{WitnessMerklePath(block, pos)};
+        const auto root{::ComputeMerkleRootFromBranch(leaf, path, pos, block.vtx.size())};
+        BOOST_REQUIRE(root);
+        BOOST_CHECK_EQUAL(*root, BlockWitnessMerkleRoot(block));
+    }
+}
+
 BOOST_AUTO_TEST_CASE(merkle_test_oneTx_block)
 {
     bool mutated = false;
