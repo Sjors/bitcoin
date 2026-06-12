@@ -234,6 +234,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "converttopsbt", 3, "psbt_version"},
     { "gettxout", 1, "n" },
     { "gettxout", 2, "include_mempool" },
+    { "gettxproof", 0, "wtxids" },
     { "gettxoutproof", 0, "txids" },
     { "gettxoutsetinfo", 1, "hash_or_height", ParamFormat::JSON_OR_STRING },
     { "gettxoutsetinfo", 2, "use_index"},
