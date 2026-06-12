@@ -29,4 +29,14 @@ std::optional<uint256> ComputeMerkleRootFromBranch(const uint256& leaf, const st
  */
 std::vector<uint256> TransactionMerklePath(const CBlock& block, uint32_t position);
 
+/**
+ * Compute merkle path to the specified transaction's witness transaction id.
+ *
+ * @param[in] block the block
+ * @param[in] position transaction for which to calculate the merkle path (0 is the coinbase's null wtxid)
+ *
+ * @return merkle path ordered from the deepest
+ */
+std::vector<uint256> WitnessMerklePath(const CBlock& block, uint32_t position);
+
 #endif // BITCOIN_COMMON_MERKLE_H
