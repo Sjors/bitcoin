@@ -150,6 +150,9 @@ public:
     void StopTrackingFeeInflow(uint64_t template_id)
         EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
+    /** Submit a block via ProcessNewBlock and capture validation state. */
+    bool SubmitBlock(const std::shared_ptr<const CBlock>& block, bool* new_block, std::string& reason, std::string& debug);
+
     /** Test-only: verify invariants. */
     void SanityCheck() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
