@@ -12,6 +12,7 @@
 #include <interfaces/mining.h>
 #include <interfaces/types.h>
 #include <kernel/chainparams.h>
+#include <node/block_template_manager.h>
 #include <node/miner.h>
 #include <node/mining_args.h>
 #include <node/mining_types.h>
@@ -70,6 +71,7 @@ struct MinerTestingSetup : public TestingSetup {
     }
     CTxMemPool& MakeMempool()
     {
+        ResetBlockTemplateManager();
         // Delete the previous mempool to ensure with valgrind that the old
         // pointer is not accessed, when the new one should be accessed
         // instead.
@@ -82,6 +84,7 @@ struct MinerTestingSetup : public TestingSetup {
         opts.limits.cluster_size_vbytes = 1'200'000;
         m_node.mempool = std::make_unique<CTxMemPool>(opts, error);
         Assert(error.empty());
+        CreateBlockTemplateManager();
         return *m_node.mempool;
     }
     std::unique_ptr<Mining> MakeMining()
@@ -905,6 +908,14 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
     m_node.chainman->ActiveChain().Tip()->nHeight--;
 
     TestPrioritisedMining(scriptPubKey, txFirst);
+}
+
+BOOST_AUTO_TEST_CASE(block_template_manager)
+{
+    auto& block_template_manager = *Assert(m_node.block_template_manager);
+    BlockCreateOptions options;
+    auto block_template = block_template_manager.CreateNewTemplate(options);
+    BOOST_CHECK(block_template != nullptr);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

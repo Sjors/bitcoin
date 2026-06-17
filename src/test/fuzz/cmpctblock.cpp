@@ -112,13 +112,16 @@ void ResetChainmanAndMempool(TestingSetup& setup)
     SetMockTime(Params().GenesisBlock().Time());
 
     bilingual_str error{};
-    setup.m_node.mempool.reset();
-    setup.m_node.mempool = std::make_unique<CTxMemPool>(MemPoolOptionsForTest(setup.m_node), error);
+    auto& node = setup.m_node;
+    node.mempool.reset();
+    node.mempool = std::make_unique<CTxMemPool>(MemPoolOptionsForTest(node), error);
     Assert(error.empty());
 
-    setup.m_node.chainman.reset();
+    setup.ResetBlockTemplateManager();
+    node.chainman.reset();
     setup.m_make_chainman();
     setup.LoadVerifyActivateChainstate();
+    setup.CreateBlockTemplateManager();
 
     node::BlockCreateOptions options;
     options.coinbase_output_script = P2WSH_OP_TRUE;
