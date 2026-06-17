@@ -121,6 +121,7 @@ add_executable(test_bitcoin
   txindex_tests.cpp
   txospenderindex_tests.cpp
   txpackage_tests.cpp
+  txproof_tests.cpp
   txreconciliation_tests.cpp
   txrequest_tests.cpp
   txvalidation_tests.cpp
@@ -150,6 +151,7 @@ target_json_data_sources(test_bitcoin
   data/key_io_valid.json
   data/script_tests.json
   data/sighash.json
+  data/txproof.json
   data/tx_invalid.json
   data/tx_valid.json
 )
