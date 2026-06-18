@@ -62,6 +62,7 @@ struct CBlockTemplate
      * miner code.
      */
     CoinbaseTx m_coinbase_tx;
+
     //! Height of the block template.
     int m_height{0};
     //! Median-time-past cutoff used for transaction finality checks.

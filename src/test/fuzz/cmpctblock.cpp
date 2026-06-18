@@ -158,6 +158,7 @@ void initialize_cmpctblock()
     g_nBits = Params().GenesisBlock().nBits;
     // Replace validation_signals before creating chainman and mempool so they use it.
     testing_setup->m_node.validation_signals = std::make_unique<ValidationSignals>(std::make_unique<ImmediateBackgroundTaskRunner>());
+    MockableSteadyClock::SetMockTime(MockableSteadyClock::INITIAL_MOCK_TIME);
     ResetChainmanAndMempool(*g_setup);
 }
 
@@ -165,6 +166,7 @@ FUZZ_TARGET(cmpctblock, .init = initialize_cmpctblock)
 {
     SeedRandomStateForTest(SeedRand::ZEROS);
     FuzzedDataProvider fuzzed_data_provider(buffer.data(), buffer.size());
+    MockableSteadyClock::SetMockTime(MockableSteadyClock::INITIAL_MOCK_TIME);
 
     FakeNodeClock clock{1610000000s};
 

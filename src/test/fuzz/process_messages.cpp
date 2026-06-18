@@ -62,6 +62,7 @@ void initialize_process_messages()
             {}),
     };
     g_setup = testing_setup.get();
+    MockableSteadyClock::SetMockTime(MockableSteadyClock::INITIAL_MOCK_TIME);
     ResetChainman(*g_setup);
 }
 
@@ -69,6 +70,7 @@ FUZZ_TARGET(process_messages, .init = initialize_process_messages)
 {
     SeedRandomStateForTest(SeedRand::ZEROS);
     FuzzedDataProvider fuzzed_data_provider(buffer.data(), buffer.size());
+    MockableSteadyClock::SetMockTime(MockableSteadyClock::INITIAL_MOCK_TIME);
 
     auto& node{g_setup->m_node};
     auto& connman{static_cast<ConnmanTestMsg&>(*node.connman)};
