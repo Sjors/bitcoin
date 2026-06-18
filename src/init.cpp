@@ -375,6 +375,12 @@ void Shutdown(NodeContext& node)
         }
     }
 
+    if (node.block_template_manager) {
+        Assert(node.validation_signals);
+        node.validation_signals->UnregisterValidationInterface(node.block_template_manager.get());
+        node.block_template_manager.reset();
+    }
+
     // FlushStateToDisk generates a ChainStateFlushed callback, which we should avoid missing
     if (node.chainman) {
         LOCK(cs_main);
@@ -430,7 +436,6 @@ void Shutdown(NodeContext& node)
     if (node.validation_signals) {
         node.validation_signals->UnregisterAllValidationInterfaces();
     }
-    node.block_template_manager.reset();
     node.mempool.reset();
     node.fee_estimator.reset();
     node.chainman.reset();
@@ -1914,6 +1919,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     auto mining_args{node::ReadMiningArgs(args)};
     Assert(mining_args); // no error can happen, already checked in AppInitParameterInteraction
     node.block_template_manager = std::make_unique<node::BlockTemplateManager>(*node.mempool, chainman, std::move(*mining_args));
+    validation_signals.RegisterValidationInterface(node.block_template_manager.get());
 
     assert(!node.peerman);
     node.peerman = PeerManager::make(*node.connman, *node.addrman,

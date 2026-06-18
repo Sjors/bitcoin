@@ -60,9 +60,9 @@ using node::TemplateSnapshot;
 
 namespace miner_tests {
 struct MinerTestingSetup : public TestingSetup {
-    void TestPackageSelection(const CScript& scriptPubKey, const std::vector<CTransactionRef>& txFirst) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
-    void TestBasicMining(const CScript& scriptPubKey, const std::vector<CTransactionRef>& txFirst, int baseheight) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
-    void TestPrioritisedMining(const CScript& scriptPubKey, const std::vector<CTransactionRef>& txFirst) EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
+    void TestPackageSelection(const CScript& scriptPubKey, const std::vector<CTransactionRef>& txFirst);
+    void TestBasicMining(const CScript& scriptPubKey, const std::vector<CTransactionRef>& txFirst, int baseheight);
+    void TestPrioritisedMining(const CScript& scriptPubKey, const std::vector<CTransactionRef>& txFirst);
     bool TestSequenceLocks(const CTransaction& tx, CTxMemPool& tx_mempool) EXCLUSIVE_LOCKS_REQUIRED(::cs_main)
     {
         CCoinsViewMemPool view_mempool{&m_node.chainman->ActiveChainstate().CoinsTip(), tx_mempool};
@@ -141,8 +141,10 @@ void MinerTestingSetup::TestPackageSelection(const CScript& scriptPubKey, const 
         .coinbase_output_script = scriptPubKey,
     };
 
-    LOCK(tx_mempool.cs);
-    BOOST_CHECK(tx_mempool.size() == 0);
+    {
+        LOCK(tx_mempool.cs);
+        BOOST_CHECK(tx_mempool.size() == 0);
+    }
 
     // Block template should only have a coinbase when there's nothing in the mempool
     std::unique_ptr<BlockTemplate> block_template = mining->createNewBlock(options, /*cooldown=*/false);
@@ -253,7 +255,7 @@ void MinerTestingSetup::TestPackageSelection(const CScript& scriptPubKey, const 
     // Test that packages above the min relay fee do get included, even if one
     // of the transactions is below the min relay fee
     // Remove the low fee transaction and replace with a higher fee transaction
-    tx_mempool.removeRecursive(CTransaction(tx), MemPoolRemovalReason::REPLACED);
+    WITH_LOCK(tx_mempool.cs, tx_mempool.removeRecursive(CTransaction(tx), MemPoolRemovalReason::REPLACED));
     tx.vout[0].nValue -= 2; // Now we should be just over the min relay fee
     hashLowFeeTx = tx.GetHash();
     TryAddToMempool(tx_mempool, entry.Fee(feeToUse + 2).FromTx(tx));
@@ -519,7 +521,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
 
     {
         CTxMemPool& tx_mempool{MakeMempool()};
-        LOCK(tx_mempool.cs);
+        LOCK2(cs_main, tx_mempool.cs);
 
         // subsidy changing
         int nHeight = m_node.chainman->ActiveChain().Height();
@@ -575,7 +577,7 @@ void MinerTestingSetup::TestBasicMining(const CScript& scriptPubKey, const std::
     }
 
     CTxMemPool& tx_mempool{MakeMempool()};
-    LOCK(tx_mempool.cs);
+    LOCK2(cs_main, tx_mempool.cs);
 
     // non-final txs in mempool
     clock.set(std::chrono::seconds{m_node.chainman->ActiveChain().Tip()->GetMedianTimePast() + 1});
@@ -904,16 +906,20 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
         }
     }
 
-    LOCK(cs_main);
-
     TestBasicMining(scriptPubKey, txFirst, baseheight);
-
-    m_node.chainman->ActiveChain().Tip()->nHeight--;
+    {
+        LOCK(cs_main);
+        m_node.chainman->ActiveChain().Tip()->nHeight--;
+        SetMockTime(0);
+    }
 
     TestPackageSelection(scriptPubKey, txFirst);
 
-    m_node.chainman->ActiveChain().Tip()->nHeight--;
-
+    {
+        LOCK(cs_main);
+        m_node.chainman->ActiveChain().Tip()->nHeight--;
+        SetMockTime(0);
+    }
     TestPrioritisedMining(scriptPubKey, txFirst);
 }
 
@@ -923,6 +929,20 @@ BOOST_AUTO_TEST_CASE(block_template_manager)
     BlockCreateOptions options;
     auto block_template = block_template_manager.CreateNewTemplate(options);
     BOOST_CHECK(block_template != nullptr);
+    uint64_t template_id_1{0};
+    uint64_t template_id_2{0};
+    auto tracked_template_1 = block_template_manager.CreateNewTemplate(options, &template_id_1);
+    auto tracked_template_2 = block_template_manager.CreateNewTemplate(options, &template_id_2);
+    BOOST_CHECK(tracked_template_1 != nullptr);
+    BOOST_CHECK(tracked_template_2 != nullptr);
+    BOOST_CHECK(template_id_1 != 0);
+    BOOST_CHECK(template_id_2 != 0);
+    BOOST_CHECK(template_id_1 != template_id_2);
+    BOOST_CHECK(block_template_manager.IsTrackingFeeInflow(template_id_1));
+    BOOST_CHECK(block_template_manager.IsTrackingFeeInflow(template_id_2));
+    block_template_manager.StopTrackingFeeInflow(template_id_1);
+    BOOST_CHECK(!block_template_manager.IsTrackingFeeInflow(template_id_1));
+    BOOST_CHECK(block_template_manager.IsTrackingFeeInflow(template_id_2));
 }
 
 BOOST_AUTO_TEST_CASE(block_template_manager_template_snapshot)
