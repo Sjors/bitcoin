@@ -30,6 +30,18 @@ namespace wallet {
  * Restoring from an encrypted backup creates a watch-only wallet.
  */
 
+/** Encryption algorithm identifiers */
+enum class EncryptionAlgorithm : uint8_t {
+    RESERVED = 0x00,
+    CHACHA20_POLY1305 = 0x01,
+};
+
+/** Size of the nonce for ChaCha20-Poly1305 */
+static constexpr size_t ENCRYPTED_BACKUP_NONCE_SIZE = 12;
+
+/** Size of the authentication tag */
+static constexpr size_t ENCRYPTED_BACKUP_TAG_SIZE = 16;
+
 /** Prefix for deriving the decryption secret */
 static constexpr std::string_view BIP_DECRYPTION_SECRET_TAG = "BIP138_DECRYPTION_SECRET";
 
