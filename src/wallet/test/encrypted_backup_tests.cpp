@@ -11,6 +11,7 @@
 #include <test/data/bip138_individual_secrets.json.h>
 #include <test/data/bip138_content_type.json.h>
 #include <test/data/bip138_chacha20poly1305_encryption.json.h>
+#include <test/data/bip138_encrypted_backup.json.h>
 
 #include <test/util/json.h>
 #include <test/util/setup_common.h>
@@ -24,7 +25,6 @@
 #include <univalue.h>
 
 #include <algorithm>
-#include <array>
 #include <cstring>
 #include <string_view>
 
@@ -383,6 +383,196 @@ BOOST_AUTO_TEST_CASE(chacha20poly1305_vector_test)
         BOOST_CHECK(aead.Decrypt(MakeByteSpan(ciphertext), {}, ReadAEADNonce(nonce), MakeWritableByteSpan(decrypted)));
         BOOST_CHECK(decrypted == plaintext);
     }
+}
+
+BOOST_AUTO_TEST_CASE(full_backup_vector_test)
+{
+    UniValue vectors = read_json(json_tests::bip138_encrypted_backup);
+
+    for (size_t i = 0; i < vectors.size(); ++i) {
+        const UniValue& vec = vectors[i];
+        std::string description = vec["description"].get_str();
+
+        BOOST_TEST_MESSAGE("Testing: " << description);
+
+        std::vector<XOnlyPubKey> keys;
+        const UniValue& keys_arr = vec["keys"];
+        for (size_t j = 0; j < keys_arr.size(); ++j) {
+            auto key = HexPublicKeyToXOnly(keys_arr[j].get_str());
+            BOOST_REQUIRE_MESSAGE(key, description << ": invalid public key");
+            keys.push_back(*key);
+        }
+        std::sort(keys.begin(), keys.end());
+        keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+
+        uint256 decryption_secret = ComputeDecryptionSecret(keys);
+        auto individual_secrets = ComputeAllIndividualSecrets(decryption_secret, keys);
+
+        std::vector<DerivationPath> derivation_paths;
+        const UniValue& paths_arr = vec["derivation_paths"];
+        for (size_t j = 0; j < paths_arr.size(); ++j) {
+            DerivationPath path;
+            BOOST_REQUIRE(ParseNonEmptyHDKeypath(paths_arr[j].get_str(), path));
+            derivation_paths.push_back(path);
+        }
+
+        auto content = ParseHex(vec["content"].get_str());
+        std::string plaintext_str = vec["plaintext"].get_str();
+        std::vector<uint8_t> payload{content.begin(), content.end()};
+        DataStream plaintext_size;
+        WriteCompactSize(plaintext_size, plaintext_str.size());
+        payload.insert(payload.end(), UCharCast(plaintext_size.data()), UCharCast(plaintext_size.data()) + plaintext_size.size());
+        payload.insert(payload.end(), plaintext_str.begin(), plaintext_str.end());
+
+        // Additional CONTENT/LENGTH/PLAINTEXT items packed into the same payload.
+        std::vector<std::string> all_plaintexts{plaintext_str};
+        if (vec.exists("extra")) {
+            for (const UniValue& item : vec["extra"].getValues()) {
+                auto extra_content = ParseHex(item["content"].get_str());
+                std::string extra_plaintext = item["plaintext"].get_str();
+                payload.insert(payload.end(), extra_content.begin(), extra_content.end());
+                DataStream extra_size;
+                WriteCompactSize(extra_size, extra_plaintext.size());
+                payload.insert(payload.end(), UCharCast(extra_size.data()), UCharCast(extra_size.data()) + extra_size.size());
+                payload.insert(payload.end(), extra_plaintext.begin(), extra_plaintext.end());
+                all_plaintexts.push_back(std::move(extra_plaintext));
+            }
+        }
+
+        auto nonce_bytes = ParseHex(vec["nonce"].get_str());
+        BOOST_REQUIRE_EQUAL(nonce_bytes.size(), ENCRYPTED_BACKUP_NONCE_SIZE);
+        std::array<uint8_t, ENCRYPTED_BACKUP_NONCE_SIZE> nonce;
+        std::memcpy(nonce.data(), nonce_bytes.data(), nonce.size());
+
+        AEADChaCha20Poly1305 aead{MakeByteSpan(decryption_secret)};
+        std::vector<uint8_t> ciphertext(payload.size() + AEADChaCha20Poly1305::EXPANSION);
+        aead.Encrypt(MakeByteSpan(payload), {}, ReadAEADNonce(nonce), MakeWritableByteSpan(ciphertext));
+
+        EncryptedBackup backup;
+        backup.version = vec["version"].getInt<int>();
+        backup.derivation_paths = std::move(derivation_paths);
+        backup.individual_secrets = std::move(individual_secrets);
+        backup.encryption = static_cast<EncryptionAlgorithm>(vec["encryption"].getInt<int>());
+        backup.nonce = nonce;
+        backup.ciphertext = std::move(ciphertext);
+
+        const auto encoded = EncodeEncryptedBackup(backup);
+        BOOST_CHECK_EQUAL(HexStr(encoded), vec["expected"].get_str());
+        BOOST_CHECK_EQUAL(EncodeBase64(encoded), vec["expected_base64"].get_str());
+
+        auto decoded = DecodeEncryptedBackup(ParseHex(vec["expected"].get_str()));
+        BOOST_REQUIRE_MESSAGE(decoded, util::ErrorString(decoded).original);
+        BOOST_CHECK_EQUAL(HexStr(EncodeEncryptedBackup(*decoded)), vec["expected"].get_str());
+
+        auto decrypted = DecryptBackupWithKey(*decoded, keys.front());
+        BOOST_REQUIRE(decrypted.has_value());
+        BOOST_CHECK(std::vector<uint8_t>(plaintext_str.begin(), plaintext_str.end()) == *decrypted);
+
+        auto all_decrypted = DecryptBackupContentsWithKey(*decoded, keys.front());
+        BOOST_REQUIRE(all_decrypted.has_value());
+        BOOST_REQUIRE_EQUAL(all_decrypted->size(), all_plaintexts.size());
+        for (size_t j = 0; j < all_plaintexts.size(); ++j) {
+            BOOST_CHECK(std::vector<uint8_t>(all_plaintexts[j].begin(), all_plaintexts[j].end()) == all_decrypted->at(j));
+        }
+
+        if (vec.exists("trailing")) {
+            auto with_trailing = ParseHex(vec["expected"].get_str());
+            auto trailing = ParseHex(vec["trailing"].get_str());
+            with_trailing.insert(with_trailing.end(), trailing.begin(), trailing.end());
+            auto decoded_with_trailing = DecodeEncryptedBackup(with_trailing);
+            BOOST_REQUIRE_MESSAGE(decoded_with_trailing, util::ErrorString(decoded_with_trailing).original);
+            BOOST_CHECK_EQUAL(HexStr(EncodeEncryptedBackup(*decoded_with_trailing)), vec["expected"].get_str());
+        }
+    }
+}
+
+BOOST_AUTO_TEST_CASE(full_backup_roundtrip_test)
+{
+    // Test full backup creation and decryption with a real descriptor
+    // Use testnet tpub since we're running on RegTest
+    std::string descriptor = "wpkh([d34db33f/84h/1h/0h]tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba/0/*)";
+
+    // Create backup
+    EncryptedBackupContent content;
+    content.type = ContentType::BIP_NUMBER;
+    content.bip_number = BIP_DESCRIPTORS;
+
+    std::vector<uint8_t> plaintext(descriptor.begin(), descriptor.end());
+
+    auto backup_result = CreateEncryptedBackup(descriptor, plaintext, content, {});
+    BOOST_REQUIRE_MESSAGE(backup_result, util::ErrorString(backup_result).original);
+
+    // Encode to binary
+    auto encoded = EncodeEncryptedBackup(*backup_result);
+    BOOST_CHECK(!encoded.empty());
+
+    // Check magic bytes
+    BOOST_CHECK(std::equal(ENCRYPTED_BACKUP_MAGIC.begin(), ENCRYPTED_BACKUP_MAGIC.end(), encoded.begin()));
+
+    // Decode back
+    auto decoded_result = DecodeEncryptedBackup(encoded);
+    BOOST_REQUIRE_MESSAGE(decoded_result, util::ErrorString(decoded_result).original);
+
+    // Decrypt using the same descriptor
+    auto decrypted = DecryptBackupWithDescriptor(*decoded_result, descriptor);
+    BOOST_REQUIRE_MESSAGE(decrypted, util::ErrorString(decrypted).original);
+
+    // Verify plaintext matches
+    std::string decrypted_str(decrypted->begin(), decrypted->end());
+    BOOST_CHECK_EQUAL(decrypted_str, descriptor);
+}
+
+BOOST_AUTO_TEST_CASE(base64_encoding_test)
+{
+    // Test base64 encoding roundtrip
+    // Use testnet tpub since we're running on RegTest
+    std::string descriptor = "wpkh([d34db33f/84h/1h/0h]tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba/0/*)";
+
+    EncryptedBackupContent content;
+    content.type = ContentType::BIP_NUMBER;
+    content.bip_number = BIP_DESCRIPTORS;
+
+    std::vector<uint8_t> plaintext(descriptor.begin(), descriptor.end());
+
+    auto backup_result = CreateEncryptedBackup(descriptor, plaintext, content, {});
+    BOOST_REQUIRE_MESSAGE(backup_result, util::ErrorString(backup_result).original);
+
+    // Encode to base64
+    std::string base64_str = EncodeEncryptedBackupBase64(*backup_result);
+    BOOST_CHECK(!base64_str.empty());
+
+    // Decode from base64
+    auto decoded_result = DecodeEncryptedBackupBase64(base64_str);
+    BOOST_REQUIRE_MESSAGE(decoded_result, util::ErrorString(decoded_result).original);
+
+    // Decrypt
+    auto decrypted = DecryptBackupWithDescriptor(*decoded_result, descriptor);
+    BOOST_REQUIRE_MESSAGE(decrypted, util::ErrorString(decrypted).original);
+
+    std::string decrypted_str(decrypted->begin(), decrypted->end());
+    BOOST_CHECK_EQUAL(decrypted_str, descriptor);
+}
+
+BOOST_AUTO_TEST_CASE(wrong_key_decryption_test)
+{
+    // Test that decryption fails with wrong key
+    // Use testnet tpub keys since we're running on RegTest
+    std::string descriptor1 = "wpkh([11111111/84h/1h/0h]tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba/0/*)";
+    std::string descriptor2 = "wpkh([22222222/84h/1h/0h]tpubDCBEcmVKbfC9KfdydyLbJ2gfNL88grZu1XcWSW9ytTM6fitvaRmVyr8Ddf7SjZ2ZfMx9RicjYAXhuh3fmLiVLPodPEqnQQURUfrBKiiVZc8/0/*)";
+
+    EncryptedBackupContent content;
+    content.type = ContentType::BIP_NUMBER;
+    content.bip_number = BIP_DESCRIPTORS;
+
+    std::vector<uint8_t> plaintext(descriptor1.begin(), descriptor1.end());
+
+    // Create backup with descriptor1
+    auto backup_result = CreateEncryptedBackup(descriptor1, plaintext, content, {});
+    BOOST_REQUIRE_MESSAGE(backup_result, util::ErrorString(backup_result).original);
+
+    // Try to decrypt with descriptor2 - should fail
+    auto decrypted = DecryptBackupWithDescriptor(*backup_result, descriptor2);
+    BOOST_CHECK_MESSAGE(!decrypted, "Decryption should fail with wrong key");
 }
 
 BOOST_AUTO_TEST_SUITE_END()

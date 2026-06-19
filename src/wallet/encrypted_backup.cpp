@@ -5,14 +5,20 @@
 #include <wallet/encrypted_backup.h>
 
 #include <algorithm>
+#include <cstring>
 #include <set>
 #include <span>
 
+#include <crypto/chacha20poly1305.h>
 #include <hash.h>
+#include <key_io.h>
+#include <random.h>
 #include <script/descriptor.h>
 #include <serialize.h>
+#include <span.h>
 #include <streams.h>
 #include <util/bip32.h>
+#include <util/strencodings.h>
 
 namespace wallet {
 
@@ -282,6 +288,301 @@ util::Result<std::pair<std::optional<EncryptedBackupContent>, size_t>> DecodeCon
     } catch (const std::ios_base::failure& e) {
         return util::Error{Untranslated(strprintf("Failed to decode content: %s", e.what()))};
     }
+}
+
+util::Result<EncryptedBackup> CreateEncryptedBackup(
+    const std::string& descriptor,
+    std::span<const uint8_t> plaintext,
+    const EncryptedBackupContent& content,
+    const std::vector<DerivationPath>& derivation_paths)
+{
+    if (plaintext.empty()) {
+        return util::Error{Untranslated("Plaintext cannot be empty")};
+    }
+
+    // Extract keys from descriptor
+    auto keys_result = ExtractKeysFromDescriptor(descriptor);
+    if (!keys_result) {
+        return util::Error{util::ErrorString(keys_result)};
+    }
+    const std::vector<XOnlyPubKey>& keys = *keys_result;
+
+    // Compute secrets
+    uint256 decryption_secret = ComputeDecryptionSecret(keys);
+    std::vector<uint256> individual_secrets = ComputeAllIndividualSecrets(decryption_secret, keys);
+
+    auto content_encoded = EncodeContent(content);
+    if (!content_encoded) {
+        return util::Error{util::ErrorString(content_encoded)};
+    }
+
+    std::vector<uint8_t> payload{content_encoded->begin(), content_encoded->end()};
+    DataStream plaintext_size;
+    WriteCompactSize(plaintext_size, plaintext.size());
+    payload.insert(payload.end(), UCharCast(plaintext_size.data()), UCharCast(plaintext_size.data()) + plaintext_size.size());
+    payload.insert(payload.end(), plaintext.begin(), plaintext.end());
+
+    std::array<uint8_t, ENCRYPTED_BACKUP_NONCE_SIZE> nonce;
+    do {
+        GetStrongRandBytes(nonce);
+    } while (std::all_of(nonce.begin(), nonce.end(), [](uint8_t byte) { return byte == 0; }));
+
+    AEADChaCha20Poly1305::Nonce96 nonce96;
+    SpanReader{std::span{nonce}} >> nonce96.first >> nonce96.second;
+
+    AEADChaCha20Poly1305 aead{MakeByteSpan(decryption_secret)};
+    std::vector<uint8_t> ciphertext(payload.size() + AEADChaCha20Poly1305::EXPANSION);
+    aead.Encrypt(MakeByteSpan(payload), {}, nonce96, MakeWritableByteSpan(ciphertext));
+
+    // Build result
+    EncryptedBackup backup;
+    backup.version = ENCRYPTED_BACKUP_VERSION;
+    backup.derivation_paths = derivation_paths;
+    backup.individual_secrets = std::move(individual_secrets);
+    backup.encryption = EncryptionAlgorithm::CHACHA20_POLY1305;
+    backup.nonce = nonce;
+    backup.ciphertext = std::move(ciphertext);
+
+    return backup;
+}
+
+std::vector<uint8_t> EncodeEncryptedBackup(const EncryptedBackup& backup)
+{
+    std::vector<uint8_t> result;
+
+    // MAGIC (6 bytes)
+    result.insert(result.end(), ENCRYPTED_BACKUP_MAGIC.begin(), ENCRYPTED_BACKUP_MAGIC.end());
+
+    // VERSION (1 byte)
+    result.push_back(backup.version);
+
+    // DERIVATION_PATHS
+    auto paths_encoded = EncodeDerivationPaths(backup.derivation_paths);
+    if (paths_encoded) {
+        result.insert(result.end(), paths_encoded->begin(), paths_encoded->end());
+    } else {
+        // Empty paths on error
+        result.push_back(0);
+    }
+
+    // INDIVIDUAL_SECRETS
+    auto secrets_encoded = EncodeIndividualSecrets(backup.individual_secrets);
+    if (secrets_encoded) {
+        result.insert(result.end(), secrets_encoded->begin(), secrets_encoded->end());
+    }
+
+    // ENCRYPTION (1 byte)
+    result.push_back(static_cast<uint8_t>(backup.encryption));
+
+    // ENCRYPTED_PAYLOAD: NONCE || LENGTH || CIPHERTEXT
+    result.insert(result.end(), backup.nonce.begin(), backup.nonce.end());
+
+    // CompactSize encoding for ciphertext length
+    {
+        DataStream ss;
+        WriteCompactSize(ss, backup.ciphertext.size());
+        result.insert(result.end(), UCharCast(ss.data()), UCharCast(ss.data()) + ss.size());
+    }
+
+    result.insert(result.end(), backup.ciphertext.begin(), backup.ciphertext.end());
+
+    return result;
+}
+
+std::string EncodeEncryptedBackupBase64(const EncryptedBackup& backup)
+{
+    std::vector<uint8_t> binary = EncodeEncryptedBackup(backup);
+    return EncodeBase64(binary);
+}
+
+util::Result<EncryptedBackup> DecodeEncryptedBackup(std::span<const uint8_t> data)
+{
+    if (data.size() < 6 + 1 + 1 + 1 + 1 + 12 + 1) {
+        return util::Error{Untranslated("Data too short for encrypted backup")};
+    }
+
+    size_t pos = 0;
+    EncryptedBackup backup;
+
+    // Check MAGIC
+    if (!std::equal(ENCRYPTED_BACKUP_MAGIC.begin(), ENCRYPTED_BACKUP_MAGIC.end(), data.begin())) {
+        return util::Error{Untranslated("Invalid magic bytes")};
+    }
+    pos += 6;
+
+    // VERSION
+    backup.version = data[pos++];
+    if (backup.version != ENCRYPTED_BACKUP_VERSION) {
+        return util::Error{Untranslated(strprintf("Unsupported version: %d", backup.version))};
+    }
+
+    // DERIVATION_PATHS
+    auto paths_result = DecodeDerivationPaths(data.subspan(pos));
+    if (!paths_result) {
+        return util::Error{util::ErrorString(paths_result)};
+    }
+    backup.derivation_paths = *paths_result;
+
+    // Calculate consumed bytes for derivation paths
+    size_t paths_size = 1; // count byte
+    for (const auto& path : backup.derivation_paths) {
+        paths_size += 1 + path.size() * 4; // child_count + children
+    }
+    pos += paths_size;
+
+    // INDIVIDUAL_SECRETS
+    if (pos >= data.size()) {
+        return util::Error{Untranslated("Missing individual secrets")};
+    }
+    auto secrets_result = DecodeIndividualSecrets(data.subspan(pos));
+    if (!secrets_result) {
+        return util::Error{util::ErrorString(secrets_result)};
+    }
+    backup.individual_secrets = *secrets_result;
+    pos += 1 + backup.individual_secrets.size() * 32;
+
+    // ENCRYPTION
+    if (pos >= data.size()) {
+        return util::Error{Untranslated("Missing encryption algorithm")};
+    }
+    uint8_t enc_byte = data[pos++];
+    if (enc_byte != static_cast<uint8_t>(EncryptionAlgorithm::CHACHA20_POLY1305)) {
+        return util::Error{Untranslated("Unsupported encryption algorithm")};
+    }
+    backup.encryption = EncryptionAlgorithm::CHACHA20_POLY1305;
+
+    // NONCE
+    if (pos + ENCRYPTED_BACKUP_NONCE_SIZE > data.size()) {
+        return util::Error{Untranslated("Missing nonce")};
+    }
+    std::memcpy(backup.nonce.data(), data.data() + pos, ENCRYPTED_BACKUP_NONCE_SIZE);
+    pos += ENCRYPTED_BACKUP_NONCE_SIZE;
+
+    // LENGTH (CompactSize) and CIPHERTEXT
+    try {
+        SpanReader reader{data.subspan(pos)};
+        uint64_t cipher_len = ReadCompactSize(reader);
+        if (cipher_len > reader.size()) {
+            return util::Error{Untranslated("Truncated ciphertext")};
+        }
+        backup.ciphertext.resize(cipher_len);
+        reader.read(MakeWritableByteSpan(backup.ciphertext));
+    } catch (const std::ios_base::failure& e) {
+        return util::Error{Untranslated(strprintf("Invalid ciphertext length: %s", e.what()))};
+    }
+
+    return backup;
+}
+
+util::Result<EncryptedBackup> DecodeEncryptedBackupBase64(const std::string& base64_str)
+{
+    auto decoded = DecodeBase64(base64_str);
+    if (!decoded) {
+        return util::Error{Untranslated("Invalid base64 encoding")};
+    }
+    return DecodeEncryptedBackup(*decoded);
+}
+
+static std::optional<std::vector<std::vector<uint8_t>>> FindPlaintextsForContent(std::span<const uint8_t> payload, std::optional<uint16_t> bip_number)
+{
+    std::vector<std::vector<uint8_t>> plaintexts;
+    size_t pos{0};
+
+    while (pos < payload.size()) {
+        auto content_result = DecodeContent(payload.subspan(pos));
+        if (!content_result) return std::nullopt;
+
+        const auto& content{content_result->first};
+        pos += content_result->second;
+
+        SpanReader reader{payload.subspan(pos)};
+        uint64_t plaintext_size;
+        size_t plaintext_size_len;
+        try {
+            const size_t initial_size{reader.size()};
+            plaintext_size = ReadCompactSize(reader);
+            plaintext_size_len = initial_size - reader.size();
+        } catch (const std::ios_base::failure&) {
+            return std::nullopt;
+        }
+
+        pos += plaintext_size_len;
+        if (plaintext_size > payload.size() - pos) {
+            return std::nullopt;
+        }
+
+        if (content && (!bip_number || (content->type == ContentType::BIP_NUMBER && content->bip_number == *bip_number))) {
+            plaintexts.emplace_back(payload.begin() + pos, payload.begin() + pos + plaintext_size);
+        }
+        pos += plaintext_size;
+    }
+
+    if (plaintexts.empty()) return std::nullopt;
+    return plaintexts;
+}
+
+static std::optional<std::vector<std::vector<uint8_t>>> DecryptBackupContentsWithKey(const EncryptedBackup& backup,
+                                                                                     const XOnlyPubKey& key,
+                                                                                     std::optional<uint16_t> bip_number)
+{
+    if (backup.ciphertext.size() < AEADChaCha20Poly1305::EXPANSION) {
+        return std::nullopt;
+    }
+
+    // Compute individual secret for this key
+    uint256 si = ComputeIndividualSecret(key);
+
+    AEADChaCha20Poly1305::Nonce96 nonce96;
+    SpanReader{std::span{backup.nonce}} >> nonce96.first >> nonce96.second;
+
+    // Try each individual secret in the backup
+    for (const auto& ci : backup.individual_secrets) {
+        // Reconstruct decryption secret: s = ci XOR si
+        uint256 reconstructed_secret;
+        for (size_t i = 0; i < 32; ++i) {
+            reconstructed_secret.data()[i] = ci.data()[i] ^ si.data()[i];
+        }
+
+        AEADChaCha20Poly1305 aead{MakeByteSpan(reconstructed_secret)};
+        std::vector<uint8_t> result(backup.ciphertext.size() - AEADChaCha20Poly1305::EXPANSION);
+        if (aead.Decrypt(MakeByteSpan(backup.ciphertext), {}, nonce96, MakeWritableByteSpan(result))) {
+            return FindPlaintextsForContent(result, bip_number);
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<std::vector<uint8_t>> DecryptBackupWithKey(const EncryptedBackup& backup,
+                                                          const XOnlyPubKey& key)
+{
+    auto plaintexts{DecryptBackupContentsWithKey(backup, key, std::nullopt)};
+    if (!plaintexts) return std::nullopt;
+    return plaintexts->front();
+}
+
+std::optional<std::vector<std::vector<uint8_t>>> DecryptBackupContentsWithKey(const EncryptedBackup& backup,
+                                                                               const XOnlyPubKey& key)
+{
+    return DecryptBackupContentsWithKey(backup, key, std::nullopt);
+}
+
+util::Result<std::vector<uint8_t>> DecryptBackupWithDescriptor(const EncryptedBackup& backup,
+                                                                const std::string& descriptor)
+{
+    auto keys_result = ExtractKeysFromDescriptor(descriptor);
+    if (!keys_result) {
+        return util::Error{util::ErrorString(keys_result)};
+    }
+
+    for (const auto& key : *keys_result) {
+        auto plaintexts = DecryptBackupContentsWithKey(backup, key, BIP_DESCRIPTORS);
+        if (plaintexts) {
+            return plaintexts->front();
+        }
+    }
+
+    return util::Error{Untranslated("No matching key found for decryption")};
 }
 
 } // namespace wallet

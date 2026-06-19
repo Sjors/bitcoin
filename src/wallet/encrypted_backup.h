@@ -5,6 +5,7 @@
 #ifndef BITCOIN_WALLET_ENCRYPTED_BACKUP_H
 #define BITCOIN_WALLET_ENCRYPTED_BACKUP_H
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -29,6 +30,12 @@ namespace wallet {
  * IMPORTANT: This format intentionally does NOT backup private key material.
  * Restoring from an encrypted backup creates a watch-only wallet.
  */
+
+/** Magic bytes for encrypted backup format */
+static constexpr std::array<uint8_t, 6> ENCRYPTED_BACKUP_MAGIC = {'B', 'I', 'P', '1', '3', '8'};
+
+/** Current format version */
+static constexpr uint8_t ENCRYPTED_BACKUP_VERSION = 0x01;
 
 /** Encryption algorithm identifiers */
 enum class EncryptionAlgorithm : uint8_t {
@@ -67,12 +74,29 @@ static constexpr uint16_t BIP_WALLET_POLICIES = 388;
 static constexpr uint16_t BIP_LABELS = 329;
 
 /**
- * Represents the content metadata in an encrypted backup.
+ * Represents encrypted backup content metadata.
  */
 struct EncryptedBackupContent {
     ContentType type{ContentType::RESERVED};
     uint16_t bip_number{0};                    // Used when type == BIP_NUMBER
     std::vector<uint8_t> payload;               // Used when type == VENDOR_SPECIFIC
+};
+
+/**
+ * Represents a complete encrypted backup structure.
+ *
+ * This struct represents the parsed/encoded backup format. Note that content
+ * metadata and plaintext are stored inside the encrypted payload, not in this struct.
+ * The content type is passed separately to CreateEncryptedBackup() and decoded
+ * separately after decryption.
+ */
+struct EncryptedBackup {
+    uint8_t version{ENCRYPTED_BACKUP_VERSION};
+    std::vector<DerivationPath> derivation_paths;
+    std::vector<uint256> individual_secrets;
+    EncryptionAlgorithm encryption{EncryptionAlgorithm::CHACHA20_POLY1305};
+    std::array<uint8_t, ENCRYPTED_BACKUP_NONCE_SIZE> nonce;
+    std::vector<uint8_t> ciphertext;  // Includes content metadata, plaintext, and authentication tag
 };
 
 /**
@@ -167,6 +191,89 @@ util::Result<std::vector<uint8_t>> EncodeContent(const EncryptedBackupContent& c
  * @return Content metadata, if a supported type was found, and bytes consumed; or error message
  */
 util::Result<std::pair<std::optional<EncryptedBackupContent>, size_t>> DecodeContent(std::span<const uint8_t> data);
+
+/**
+ * Create an encrypted backup from a descriptor and plaintext payload.
+ *
+ * @param[in] descriptor The wallet descriptor (used to derive encryption key)
+ * @param[in] plaintext The data to encrypt (typically the descriptor itself or labels)
+ * @param[in] content Content type metadata
+ * @param[in] derivation_paths Optional derivation paths to include
+ * @return The encrypted backup structure, or error message
+ */
+util::Result<EncryptedBackup> CreateEncryptedBackup(
+    const std::string& descriptor,
+    std::span<const uint8_t> plaintext,
+    const EncryptedBackupContent& content,
+    const std::vector<DerivationPath>& derivation_paths = {});
+
+/**
+ * Encode an encrypted backup to binary format.
+ *
+ * @param[in] backup The backup structure to encode
+ * @return Encoded binary data
+ */
+std::vector<uint8_t> EncodeEncryptedBackup(const EncryptedBackup& backup);
+
+/**
+ * Encode an encrypted backup to base64 string.
+ *
+ * @param[in] backup The backup structure to encode
+ * @return Base64-encoded string
+ */
+std::string EncodeEncryptedBackupBase64(const EncryptedBackup& backup);
+
+/**
+ * Decode an encrypted backup from binary format.
+ *
+ * @param[in] data The encoded binary data
+ * @return The backup structure, or error message
+ */
+util::Result<EncryptedBackup> DecodeEncryptedBackup(std::span<const uint8_t> data);
+
+/**
+ * Decode an encrypted backup from base64 string.
+ *
+ * @param[in] base64_str The base64-encoded string
+ * @return The backup structure, or error message
+ */
+util::Result<EncryptedBackup> DecodeEncryptedBackupBase64(const std::string& base64_str);
+
+/**
+ * Attempt to decrypt an encrypted backup using a single public key.
+ *
+ * Tries to reconstruct the decryption secret using the individual secrets
+ * in the backup and the provided key.
+ *
+ * @param[in] backup The encrypted backup
+ * @param[in] key The normalized x-only public key to try
+ * @return Decrypted plaintext, or nullopt if key doesn't match or decryption fails
+ */
+std::optional<std::vector<uint8_t>> DecryptBackupWithKey(const EncryptedBackup& backup,
+                                                          const XOnlyPubKey& key);
+
+/**
+ * Attempt to decrypt an encrypted backup using a single public key.
+ *
+ * Like DecryptBackupWithKey, but returns every decrypted plaintext item in the
+ * payload rather than only the first one.
+ *
+ * @param[in] backup The encrypted backup
+ * @param[in] key The normalized x-only public key to try
+ * @return Decrypted plaintext items, or nullopt if key doesn't match or decryption fails
+ */
+std::optional<std::vector<std::vector<uint8_t>>> DecryptBackupContentsWithKey(const EncryptedBackup& backup,
+                                                                              const XOnlyPubKey& key);
+
+/**
+ * Attempt to decrypt an encrypted backup using any matching key from a descriptor.
+ *
+ * @param[in] backup The encrypted backup
+ * @param[in] descriptor A descriptor containing potential decryption keys
+ * @return Decrypted plaintext, or error message
+ */
+util::Result<std::vector<uint8_t>> DecryptBackupWithDescriptor(const EncryptedBackup& backup,
+                                                                const std::string& descriptor);
 
 } // namespace wallet
 
