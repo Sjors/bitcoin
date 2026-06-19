@@ -437,6 +437,15 @@ BOOST_AUTO_TEST_CASE(full_backup_vector_test)
 
         BOOST_TEST_MESSAGE("Testing: " << description);
 
+        // Vectors marked invalid carry a crafted encoding that decoders MUST
+        // reject; only check that decoding fails (an encoder would never emit
+        // such a backup, so re-encoding it is not meaningful).
+        if (vec.exists("valid") && !vec["valid"].get_bool()) {
+            auto rejected = DecodeEncryptedBackup(ParseHex(vec["expected"].get_str()));
+            BOOST_CHECK_MESSAGE(!rejected, description << ": invalid backup must be rejected on decode");
+            continue;
+        }
+
         std::vector<XOnlyPubKey> keys;
         const UniValue& keys_arr = vec["keys"];
         for (size_t j = 0; j < keys_arr.size(); ++j) {
@@ -526,6 +535,19 @@ BOOST_AUTO_TEST_CASE(full_backup_vector_test)
             BOOST_CHECK_EQUAL(HexStr(EncodeEncryptedBackup(*decoded_with_trailing)), vec["expected"].get_str());
         }
     }
+}
+
+BOOST_AUTO_TEST_CASE(reject_all_zero_nonce_test)
+{
+    UniValue vectors = read_json(json_tests::bip138_encrypted_backup);
+    BOOST_REQUIRE(!vectors.empty());
+
+    auto decoded = DecodeEncryptedBackup(ParseHex(vectors[0]["expected"].get_str()));
+    BOOST_REQUIRE_MESSAGE(decoded, util::ErrorString(decoded).original);
+    decoded->nonce.fill(0);
+
+    auto rejected = DecodeEncryptedBackup(EncodeEncryptedBackup(*decoded));
+    BOOST_CHECK_MESSAGE(!rejected, "All-zero nonce should be rejected");
 }
 
 BOOST_AUTO_TEST_CASE(full_backup_roundtrip_test)

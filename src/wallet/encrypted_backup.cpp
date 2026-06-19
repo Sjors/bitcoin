@@ -549,6 +549,9 @@ util::Result<EncryptedBackup> DecodeEncryptedBackup(std::span<const uint8_t> dat
         return util::Error{Untranslated("Missing nonce")};
     }
     std::memcpy(backup.nonce.data(), data.data() + pos, ENCRYPTED_BACKUP_NONCE_SIZE);
+    if (std::all_of(backup.nonce.begin(), backup.nonce.end(), [](uint8_t byte) { return byte == 0; })) {
+        return util::Error{Untranslated("Invalid all-zero nonce")};
+    }
     pos += ENCRYPTED_BACKUP_NONCE_SIZE;
 
     // LENGTH (CompactSize) and CIPHERTEXT
