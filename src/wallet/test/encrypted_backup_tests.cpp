@@ -4,21 +4,27 @@
 
 #include <wallet/encrypted_backup.h>
 
+#include <crypto/chacha20poly1305.h>
 #include <test/data/bip138_keys_types.json.h>
 #include <test/data/bip138_encryption_secret.json.h>
 #include <test/data/bip138_derivation_path.json.h>
 #include <test/data/bip138_individual_secrets.json.h>
 #include <test/data/bip138_content_type.json.h>
+#include <test/data/bip138_chacha20poly1305_encryption.json.h>
 
 #include <test/util/json.h>
 #include <test/util/setup_common.h>
 #include <util/bip32.h>
 #include <util/strencodings.h>
 
+#include <span.h>
+#include <streams.h>
+
 #include <boost/test/unit_test.hpp>
 #include <univalue.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <string_view>
 
@@ -62,6 +68,13 @@ static std::string DescriptorForKeyExpression(const std::string& key_str)
 static bool ParseNonEmptyHDKeypath(const std::string& path_str, DerivationPath& path)
 {
     return ParseHDKeypath(path_str, path) && !path.empty();
+}
+
+static AEADChaCha20Poly1305::Nonce96 ReadAEADNonce(std::span<const uint8_t, ENCRYPTED_BACKUP_NONCE_SIZE> nonce)
+{
+    AEADChaCha20Poly1305::Nonce96 nonce96;
+    SpanReader{std::span{nonce}} >> nonce96.first >> nonce96.second;
+    return nonce96;
 }
 
 BOOST_AUTO_TEST_CASE(key_normalization_test)
@@ -302,6 +315,73 @@ BOOST_AUTO_TEST_CASE(content_type_encoding_test)
             BOOST_REQUIRE_MESSAGE(reencoded, util::ErrorString(reencoded).original);
             BOOST_CHECK_EQUAL(HexStr(*reencoded), content_hex);
         }
+    }
+}
+
+BOOST_AUTO_TEST_CASE(chacha20poly1305_roundtrip_test)
+{
+    // Test basic encryption/decryption roundtrip
+    std::vector<uint8_t> plaintext = {'H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd'};
+    uint256 secret;
+    GetStrongRandBytes(secret);
+
+    std::array<uint8_t, ENCRYPTED_BACKUP_NONCE_SIZE> nonce;
+    GetStrongRandBytes(nonce);
+
+    AEADChaCha20Poly1305 aead{MakeByteSpan(secret)};
+    std::vector<uint8_t> ciphertext(plaintext.size() + AEADChaCha20Poly1305::EXPANSION);
+    aead.Encrypt(MakeByteSpan(plaintext), {}, ReadAEADNonce(nonce), MakeWritableByteSpan(ciphertext));
+    BOOST_CHECK_EQUAL(ciphertext.size(), plaintext.size() + ENCRYPTED_BACKUP_TAG_SIZE);
+
+    std::vector<uint8_t> decrypted(plaintext.size());
+    BOOST_CHECK(aead.Decrypt(MakeByteSpan(ciphertext), {}, ReadAEADNonce(nonce), MakeWritableByteSpan(decrypted)));
+    BOOST_CHECK(decrypted == plaintext);
+
+    uint256 wrong_secret;
+    GetStrongRandBytes(wrong_secret);
+    AEADChaCha20Poly1305 wrong_aead{MakeByteSpan(wrong_secret)};
+    BOOST_CHECK(!wrong_aead.Decrypt(MakeByteSpan(ciphertext), {}, ReadAEADNonce(nonce), MakeWritableByteSpan(decrypted)));
+}
+
+BOOST_AUTO_TEST_CASE(chacha20poly1305_vector_test)
+{
+    UniValue vectors = read_json(json_tests::bip138_chacha20poly1305_encryption);
+
+    for (size_t i = 0; i < vectors.size(); ++i) {
+        const UniValue& vec = vectors[i];
+        std::string description = vec["description"].get_str();
+
+        BOOST_TEST_MESSAGE("Testing: " << description);
+
+        auto nonce_bytes = ParseHex(vec["nonce"].get_str());
+        BOOST_REQUIRE_EQUAL(nonce_bytes.size(), ENCRYPTED_BACKUP_NONCE_SIZE);
+        std::array<uint8_t, ENCRYPTED_BACKUP_NONCE_SIZE> nonce;
+        std::memcpy(nonce.data(), nonce_bytes.data(), nonce.size());
+
+        auto secret_bytes = ParseHex(vec["secret"].get_str());
+        BOOST_REQUIRE_EQUAL(secret_bytes.size(), 32u);
+        uint256 secret;
+        std::memcpy(secret.data(), secret_bytes.data(), 32);
+
+        if (vec["ciphertext"].isNull()) {
+            BOOST_CHECK_MESSAGE(vec["plaintext"].get_str().empty() ||
+                    std::all_of(nonce.begin(), nonce.end(), [](uint8_t byte) { return byte == 0; }),
+                description << ": expected invalid input");
+            continue;
+        }
+
+        auto plaintext = ParseHex(vec["plaintext"].get_str());
+        BOOST_REQUIRE(!plaintext.empty());
+        BOOST_REQUIRE(!std::all_of(nonce.begin(), nonce.end(), [](uint8_t byte) { return byte == 0; }));
+
+        AEADChaCha20Poly1305 aead{MakeByteSpan(secret)};
+        std::vector<uint8_t> ciphertext(plaintext.size() + AEADChaCha20Poly1305::EXPANSION);
+        aead.Encrypt(MakeByteSpan(plaintext), {}, ReadAEADNonce(nonce), MakeWritableByteSpan(ciphertext));
+        BOOST_CHECK_EQUAL(HexStr(ciphertext), vec["ciphertext"].get_str());
+
+        std::vector<uint8_t> decrypted(plaintext.size());
+        BOOST_CHECK(aead.Decrypt(MakeByteSpan(ciphertext), {}, ReadAEADNonce(nonce), MakeWritableByteSpan(decrypted)));
+        BOOST_CHECK(decrypted == plaintext);
     }
 }
 
