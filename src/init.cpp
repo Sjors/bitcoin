@@ -1918,7 +1918,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     auto& kernel_notifications{*Assert(node.notifications)};
     auto mining_args{node::ReadMiningArgs(args)};
     Assert(mining_args); // no error can happen, already checked in AppInitParameterInteraction
-    node.block_template_manager = std::make_unique<node::BlockTemplateManager>(*node.mempool, chainman, std::move(*mining_args));
+    node.block_template_manager = std::make_unique<node::BlockTemplateManager>(*node.mempool, chainman, kernel_notifications, std::move(*mining_args));
     validation_signals.RegisterValidationInterface(node.block_template_manager.get());
 
     assert(!node.peerman);

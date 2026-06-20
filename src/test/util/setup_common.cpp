@@ -343,7 +343,7 @@ void ChainTestingSetup::ResetBlockTemplateManager()
 void ChainTestingSetup::CreateBlockTemplateManager()
 {
     Assert(!m_node.block_template_manager);
-    m_node.block_template_manager = std::make_unique<node::BlockTemplateManager>(*m_node.mempool, *m_node.chainman);
+    m_node.block_template_manager = std::make_unique<node::BlockTemplateManager>(*m_node.mempool, *m_node.chainman, *Assert(m_node.notifications));
     if (m_node.validation_signals) m_node.validation_signals->RegisterValidationInterface(m_node.block_template_manager.get());
 }
 
