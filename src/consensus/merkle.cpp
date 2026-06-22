@@ -42,6 +42,10 @@
        root.
 */
 
+uint256 TxMerkleNodeHash(const uint256& left, const uint256& right)
+{
+    return Hash(left, right);
+}
 
 uint256 ComputeMerkleRoot(std::vector<uint256> hashes, bool* mutated) {
     bool mutation = false;
@@ -118,7 +122,7 @@ static void MerkleComputation(const std::vector<uint256>& leaves, uint32_t leaf_
                 path.push_back(h);
                 matchh = true;
             }
-            h = Hash(inner[level], h);
+            h = TxMerkleNodeHash(inner[level], h);
         }
         // Store the resulting hash at inner position level.
         inner[level] = h;
@@ -144,7 +148,7 @@ static void MerkleComputation(const std::vector<uint256>& leaves, uint32_t leaf_
         if (matchh) {
             path.push_back(h);
         }
-        h = Hash(h, h);
+        h = TxMerkleNodeHash(h, h);
         // Increment count to the value it would have if two entries at this
         // level had existed.
         count += ((uint32_t{1}) << level);
@@ -157,7 +161,7 @@ static void MerkleComputation(const std::vector<uint256>& leaves, uint32_t leaf_
                 path.push_back(h);
                 matchh = true;
             }
-            h = Hash(inner[level], h);
+            h = TxMerkleNodeHash(inner[level], h);
             level++;
         }
     }
