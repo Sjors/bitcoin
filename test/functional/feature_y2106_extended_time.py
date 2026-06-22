@@ -10,7 +10,7 @@ from test_framework.blocktools import (
     NORMAL_GBT_REQUEST_PARAMS,
     create_block,
 )
-from test_framework.messages import CBlockHeader, uint256_from_compact
+from test_framework.messages import CBlockHeader, ser_uint256, uint256_from_compact
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal, assert_raises_rpc_error
 from test_framework.wallet import MiniWallet
@@ -79,6 +79,13 @@ class Y2106ExtendedTimeTest(BitcoinTestFramework):
 
         self.log.info("Continue the chain with an extended 64-bit timestamp")
         self.nodes[0].setmocktime(TIME_2106 + 1)
+        self.log.info("Reject a post-2106 block with the legacy merkle root")
+        legacy_merkle_block = create_block(tmpl=self.nodes[0].getblocktemplate(NORMAL_GBT_REQUEST_PARAMS))
+        legacy_merkle_block.hashMerkleRoot = legacy_merkle_block.get_merkle_root([ser_uint256(tx.txid_int) for tx in legacy_merkle_block.vtx])
+        assert legacy_merkle_block.hashMerkleRoot != legacy_merkle_block.calc_merkle_root()
+        legacy_merkle_block.solve()
+        assert_equal(self.nodes[0].submitblock(legacy_merkle_block.serialize().hex()), "bad-txnmrklroot")
+
         extended_block = create_block(tmpl=self.nodes[0].getblocktemplate(NORMAL_GBT_REQUEST_PARAMS))
         assert_equal(extended_block.nTime, TIME_2106 + 1)
         self.solve_with_zero_low_nonce_byte(extended_block)

@@ -29,6 +29,7 @@ import time
 import unittest
 
 from test_framework.crypto.siphash import siphash256
+from test_framework.key import TaggedHash
 from test_framework.util import (
     assert_equal,
     assert_not_equal,
@@ -843,7 +844,7 @@ class CBlock(CBlockHeader):
     def calc_merkle_root(self):
         hashes = []
         for tx in self.vtx:
-            hashes.append(ser_uint256(tx.txid_int))
+            hashes.append(TaggedHash("TaggedTxid", tx.serialize_without_witness()) if self.m_extended else ser_uint256(tx.txid_int))
         return self.get_merkle_root(hashes)
 
     def calc_witness_merkle_root(self):

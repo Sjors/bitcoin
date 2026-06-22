@@ -14,12 +14,21 @@
 #include <cstdint>
 #include <vector>
 
-uint256 ComputeMerkleRootFromPath(const CBlock& block, uint32_t position, const std::vector<uint256>& merkle_path) {
+uint256 TransactionMerkleLeaf(const CBlock& block, uint32_t position) {
     if (position >= block.vtx.size()) {
         throw std::out_of_range("Position out of range");
     }
+    if (block.m_extended) {
+        return (HashWriter{TaggedHash("TaggedWtxid")}
+                << COMPACTSIZE(position)
+                << TX_WITH_WITNESS(*block.vtx[position]))
+            .GetSHA256();
+    }
+    return block.vtx[position]->GetHash().ToUint256();
+}
 
-    uint256 current_hash = block.vtx[position]->GetHash().ToUint256();
+uint256 ComputeMerkleRootFromPath(const CBlock& block, uint32_t position, const std::vector<uint256>& merkle_path) {
+    uint256 current_hash = TransactionMerkleLeaf(block, position);
 
     for (const uint256& sibling : merkle_path) {
         if (position % 2 == 0) {
@@ -61,7 +70,7 @@ FUZZ_TARGET(merkle)
 
 
     const uint256 block_merkle_root = BlockMerkleRoot(*block, &mutated);
-    if (tx_hashes.size() == 1) {
+    if (!block->m_extended && tx_hashes.size() == 1) {
         assert(block_merkle_root == tx_hashes[0]);
     }
 
@@ -79,7 +88,9 @@ FUZZ_TARGET(merkle)
     // Check that the root we compute from TransactionMerklePath equals the same merkle_root and block_merkle_root
     if (tx_hashes.size() > 1) {
         uint256 merkle_root_from_merkle_path = ComputeMerkleRootFromPath(*block, position, merkle_path);
-        assert(merkle_root_from_merkle_path == merkle_root);
+        if (!block->m_extended) {
+            assert(merkle_root_from_merkle_path == merkle_root);
+        }
         assert(merkle_root_from_merkle_path == block_merkle_root);
     }
 

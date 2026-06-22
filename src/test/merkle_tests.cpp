@@ -3,6 +3,8 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <consensus/merkle.h>
+#include <hash.h>
+#include <serialize.h>
 #include <test/util/common.h>
 #include <test/util/random.h>
 #include <test/util/setup_common.h>
@@ -174,6 +176,38 @@ BOOST_AUTO_TEST_CASE(merkle_test_oneTx_block)
     uint256 root = BlockMerkleRoot(block, &mutated);
     BOOST_CHECK_EQUAL(root, block.vtx[0]->GetHash().ToUint256());
     BOOST_CHECK_EQUAL(mutated, false);
+}
+
+BOOST_AUTO_TEST_CASE(merkle_test_extended_domain_separation)
+{
+    const uint256 left{1};
+    const uint256 right{2};
+    const uint256 legacy_inner{Hash(left, right)};
+
+    CMutableTransaction mtx;
+    const CTransaction tx{mtx};
+    const uint256 legacy_leaf{tx.GetHash().ToUint256()};
+    const uint256 tagged_leaf{(HashWriter{TaggedHash("TaggedTxid")} << TX_NO_WITNESS(tx)).GetSHA256()};
+
+    BOOST_CHECK_EQUAL(TxMerkleNodeHash(left, right), legacy_inner);
+    BOOST_CHECK_NE(tagged_leaf, legacy_leaf);
+
+    CBlock block;
+    block.nTime = CBlockHeader::EXTENDED_TIME_THRESHOLD;
+    block.SetExtendedTimeEncoding();
+    block.vtx.resize(2);
+    for (std::size_t pos = 0; pos < block.vtx.size(); pos++) {
+        CMutableTransaction tx_mut;
+        tx_mut.nLockTime = pos;
+        block.vtx[pos] = MakeTransactionRef(std::move(tx_mut));
+    }
+
+    const uint256 root{BlockMerkleRoot(block)};
+    BOOST_CHECK_NE(root, ComputeMerkleRoot({block.vtx[0]->GetHash().ToUint256(), block.vtx[1]->GetHash().ToUint256()}));
+    for (uint32_t pos{0}; pos < block.vtx.size(); ++pos) {
+        const uint256 extended_leaf{(HashWriter{TaggedHash("TaggedTxid")} << TX_NO_WITNESS(*block.vtx[pos])).GetSHA256()};
+        BOOST_CHECK_EQUAL(ComputeMerkleRootFromBranch(extended_leaf, TransactionMerklePath(block, pos), pos), root);
+    }
 }
 
 BOOST_AUTO_TEST_CASE(merkle_test_OddTxWithRepeatedLastTx_block)
