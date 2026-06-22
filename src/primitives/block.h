@@ -30,16 +30,48 @@ public:
     int32_t nVersion;
     uint256 hashPrevBlock;
     uint256 hashMerkleRoot;
-    uint32_t nTime;
+    uint64_t nTime;
     uint32_t nBits;
     uint32_t nNonce;
+    //! Memory-only marker for the extended header encoding. This draft derives
+    //! the value from a negative nVersion when parsing from the wire or disk.
+    bool m_extended;
+
+    static constexpr uint64_t EXTENDED_TIME_THRESHOLD{uint64_t{1} << 32};
 
     CBlockHeader()
     {
         SetNull();
     }
 
-    SERIALIZE_METHODS(CBlockHeader, obj) { READWRITE(obj.nVersion, obj.hashPrevBlock, obj.hashMerkleRoot, obj.nTime, obj.nBits, obj.nNonce); }
+    template <typename Stream>
+    void Serialize(Stream& s) const
+    {
+        const uint32_t time_low{static_cast<uint32_t>(nTime)};
+        s << nVersion << hashPrevBlock << hashMerkleRoot;
+        s << time_low;
+        if (m_extended) {
+            const uint32_t time_high{static_cast<uint32_t>(nTime >> 32)};
+            s << time_high;
+        }
+        s << nBits << nNonce;
+    }
+
+    template <typename Stream>
+    void Unserialize(Stream& s)
+    {
+        uint32_t time_low;
+        s >> nVersion >> hashPrevBlock >> hashMerkleRoot;
+        m_extended = nVersion < 0;
+        s >> time_low;
+        nTime = time_low;
+        if (m_extended) {
+            uint32_t time_high;
+            s >> time_high;
+            nTime |= uint64_t{time_high} << 32;
+        }
+        s >> nBits >> nNonce;
+    }
 
     void SetNull()
     {
@@ -49,6 +81,7 @@ public:
         nTime = 0;
         nBits = 0;
         nNonce = 0;
+        m_extended = false;
     }
 
     bool IsNull() const
@@ -58,14 +91,27 @@ public:
 
     uint256 GetHash() const;
 
+    void SetExtendedTimeEncoding()
+    {
+        m_extended = true;
+        if (nVersion >= 0) {
+            nVersion = nVersion == 0 ? -1 : -nVersion;
+        }
+    }
+
+    void SetLegacyTimeEncoding()
+    {
+        m_extended = false;
+    }
+
     NodeSeconds Time() const
     {
         return NodeSeconds{std::chrono::seconds{nTime}};
     }
 
-    int64_t GetBlockTime() const
+    uint64_t GetBlockTime() const
     {
-        return (int64_t)nTime;
+        return nTime;
     }
 };
 

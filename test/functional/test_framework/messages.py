@@ -730,7 +730,9 @@ class CTransaction:
 
 class CBlockHeader:
     __slots__ = ("hashMerkleRoot", "hashPrevBlock", "nBits", "nNonce",
-                 "nTime", "nVersion")
+                 "nTime", "nVersion", "m_extended")
+
+    EXTENDED_TIME_THRESHOLD = 2**32
 
     def __init__(self, header=None):
         if header is None:
@@ -742,6 +744,7 @@ class CBlockHeader:
             self.nTime = header.nTime
             self.nBits = header.nBits
             self.nNonce = header.nNonce
+            self.m_extended = header.m_extended
 
     def set_null(self):
         self.nVersion = 4
@@ -750,24 +753,40 @@ class CBlockHeader:
         self.nTime = 0
         self.nBits = 0
         self.nNonce = 0
+        self.m_extended = False
 
     def deserialize(self, f):
         self.nVersion = int.from_bytes(f.read(4), "little", signed=True)
+        self.m_extended = self.nVersion < 0
         self.hashPrevBlock = deser_uint256(f)
         self.hashMerkleRoot = deser_uint256(f)
-        self.nTime = int.from_bytes(f.read(4), "little")
+        time_low = int.from_bytes(f.read(4), "little")
+        self.nTime = time_low
+        if self.m_extended:
+            time_high = int.from_bytes(f.read(4), "little")
+            self.nTime |= time_high << 32
         self.nBits = int.from_bytes(f.read(4), "little")
         self.nNonce = int.from_bytes(f.read(4), "little")
 
     def serialize(self):
         return self._serialize_header()
 
+    def uses_extended_time_encoding(self):
+        return self.m_extended
+
+    def set_extended_time_encoding(self):
+        self.m_extended = True
+        if self.nVersion >= 0:
+            self.nVersion = -self.nVersion if self.nVersion else -1
+
     def _serialize_header(self):
         r = b""
         r += self.nVersion.to_bytes(4, "little", signed=True)
         r += ser_uint256(self.hashPrevBlock)
         r += ser_uint256(self.hashMerkleRoot)
-        r += self.nTime.to_bytes(4, "little")
+        r += (self.nTime & 0xffffffff).to_bytes(4, "little")
+        if self.m_extended:
+            r += (self.nTime >> 32).to_bytes(4, "little")
         r += self.nBits.to_bytes(4, "little")
         r += self.nNonce.to_bytes(4, "little")
         return r

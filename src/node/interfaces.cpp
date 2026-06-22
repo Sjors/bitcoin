@@ -75,6 +75,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -100,6 +101,11 @@ using node::BlockCreateOptions;
 using node::BlockWaitOptions;
 using node::CoinbaseTx;
 using util::Join;
+
+static int64_t SaturatingBlockTime(uint64_t nTime)
+{
+    return nTime > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ? std::numeric_limits<int64_t>::max() : static_cast<int64_t>(nTime);
+}
 
 namespace node {
 // All members of the classes in this namespace are intentionally public, as the
@@ -304,7 +310,7 @@ public:
         auto best_header = chainman().m_best_header;
         if (best_header) {
             height = best_header->nHeight;
-            block_time = best_header->GetBlockTime();
+            block_time = SaturatingBlockTime(best_header->GetBlockTime());
             return true;
         }
         return false;
@@ -423,7 +429,7 @@ public:
     std::unique_ptr<Handler> handleNotifyBlockTip(NotifyBlockTipFn fn) override
     {
         return MakeSignalHandler(::uiInterface.NotifyBlockTip.connect([fn](SynchronizationState sync_state, const CBlockIndex& block, double verification_progress) {
-            fn(sync_state, BlockTip{block.nHeight, block.GetBlockTime(), block.GetBlockHash()}, verification_progress);
+            fn(sync_state, BlockTip{block.nHeight, SaturatingBlockTime(block.GetBlockTime()), block.GetBlockHash()}, verification_progress);
         }));
     }
     std::unique_ptr<Handler> handleNotifyHeaderTip(NotifyHeaderTipFn fn) override
@@ -449,9 +455,9 @@ bool FillBlock(const CBlockIndex* index, const FoundBlock& block, UniqueLock<Rec
     if (!index) return false;
     if (block.m_hash) *block.m_hash = index->GetBlockHash();
     if (block.m_height) *block.m_height = index->nHeight;
-    if (block.m_time) *block.m_time = index->GetBlockTime();
-    if (block.m_max_time) *block.m_max_time = index->GetBlockTimeMax();
-    if (block.m_mtp_time) *block.m_mtp_time = index->GetMedianTimePast();
+    if (block.m_time) *block.m_time = SaturatingBlockTime(index->GetBlockTime());
+    if (block.m_max_time) *block.m_max_time = SaturatingBlockTime(index->GetBlockTimeMax());
+    if (block.m_mtp_time) *block.m_mtp_time = SaturatingBlockTime(index->GetMedianTimePast());
     if (block.m_in_active_chain) *block.m_in_active_chain = active[index->nHeight] == index;
     if (block.m_locator) { *block.m_locator = GetLocator(index); }
     if (block.m_next_block) FillBlock(active[index->nHeight] == index ? active[index->nHeight + 1] : nullptr, *block.m_next_block, lock, active, blockman);
@@ -917,7 +923,7 @@ public:
         return TransactionMerklePath(m_block_template->block, 0);
     }
 
-    bool submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CTransactionRef coinbase) override
+    bool submitSolution(uint32_t version, uint64_t timestamp, uint32_t nonce, CTransactionRef coinbase) override
     {
         AddMerkleRootAndCoinbase(m_block_template->block, std::move(coinbase), version, timestamp, nonce);
         std::string reason;

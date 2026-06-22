@@ -50,7 +50,7 @@ using wallet::WALLET_FLAG_DESCRIPTORS;
 struct TipBlock
 {
     uint256 prev_block_hash;
-    int64_t prev_block_time;
+    uint64_t prev_block_time;
     int tip_height;
 };
 

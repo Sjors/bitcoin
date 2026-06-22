@@ -115,7 +115,10 @@ std::optional<SignetTxs> SignetTxs::Create(const CBlock& block, const CScript& c
     writer << block.nVersion;
     writer << block.hashPrevBlock;
     writer << signet_merkle;
-    writer << block.nTime;
+    writer << static_cast<uint32_t>(block.nTime);
+    if (block.m_extended) {
+        writer << static_cast<uint32_t>(block.nTime >> 32);
+    }
     tx_to_spend.vin[0].scriptSig << block_data;
     tx_spending.vin[0].prevout = COutPoint(tx_to_spend.GetHash(), 0);
 

@@ -518,6 +518,12 @@ class IPCMiningTest(BitcoinTestFramework):
                 except capnp.lib.capnp.KjException as e:
                     assert_capnp_failed(e, "remote exception: std::exception: SpanReader::read(): end of data:")
 
+                self.log.debug("submitSolution should carry a 64-bit timestamp")
+                submitted = (await template.submitSolution(ctx, block.nVersion, CBlockHeader.EXTENDED_TIME_THRESHOLD, block.nNonce, coinbase.serialize())).result
+                assert_equal(submitted, False)
+                remote_high_time_block = await mining_get_block(template, ctx)
+                assert_equal(remote_high_time_block.nTime, CBlockHeader.EXTENDED_TIME_THRESHOLD)
+
                 self.log.debug("Submit a block with a bad version")
                 block.nVersion = 0
                 block.solve()

@@ -47,17 +47,19 @@ unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHead
     return CalculateNextWorkRequired(pindexLast, pindexFirst->GetBlockTime(), params);
 }
 
-unsigned int CalculateNextWorkRequired(const CBlockIndex* pindexLast, int64_t nFirstBlockTime, const Consensus::Params& params)
+unsigned int CalculateNextWorkRequired(const CBlockIndex* pindexLast, uint64_t nFirstBlockTime, const Consensus::Params& params)
 {
     if (params.fPowNoRetargeting)
         return pindexLast->nBits;
 
     // Limit adjustment step
-    int64_t nActualTimespan = pindexLast->GetBlockTime() - nFirstBlockTime;
-    if (nActualTimespan < params.nPowTargetTimespan/4)
-        nActualTimespan = params.nPowTargetTimespan/4;
-    if (nActualTimespan > params.nPowTargetTimespan*4)
-        nActualTimespan = params.nPowTargetTimespan*4;
+    const uint64_t nLastBlockTime{pindexLast->GetBlockTime()};
+    const uint64_t nPowTargetTimespan{static_cast<uint64_t>(params.nPowTargetTimespan)};
+    uint64_t nActualTimespan{nLastBlockTime > nFirstBlockTime ? nLastBlockTime - nFirstBlockTime : 0};
+    if (nActualTimespan < nPowTargetTimespan / 4)
+        nActualTimespan = nPowTargetTimespan / 4;
+    if (nActualTimespan > nPowTargetTimespan * 4)
+        nActualTimespan = nPowTargetTimespan * 4;
 
     // Retarget
     const arith_uint256 bnPowLimit = UintToArith256(params.powLimit);

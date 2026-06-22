@@ -75,7 +75,7 @@ public:
      *       the solved block is constructed and broadcast by multiple nodes
      *       (e.g. both the miner who constructed the template and the pool).
      */
-    virtual bool submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CTransactionRef coinbase) = 0;
+    virtual bool submitSolution(uint32_t version, uint64_t timestamp, uint32_t nonce, CTransactionRef coinbase) = 0;
 
     /**
      * Waits for fees in the next block to rise, a new tip or the timeout.

@@ -17,6 +17,7 @@ from .address import (
 )
 from .messages import (
     CBlock,
+    CBlockHeader,
     COIN,
     COutPoint,
     CTransaction,
@@ -102,6 +103,8 @@ def create_block(hashprev=None, coinbase=None, *, ntime=None, height=None, versi
         tmpl = {}
     block.nVersion = version or tmpl.get('version') or VERSIONBITS_LAST_OLD_BLOCK_VERSION
     block.nTime = ntime or tmpl.get('curtime') or int(time.time() + 600)
+    if block.nTime >= CBlockHeader.EXTENDED_TIME_THRESHOLD:
+        block.set_extended_time_encoding()
     block.hashPrevBlock = hashprev or int(tmpl['previousblockhash'], 0x10)
     if tmpl and tmpl.get('bits') is not None:
         block.nBits = struct.unpack('>I', bytes.fromhex(tmpl['bits']))[0]

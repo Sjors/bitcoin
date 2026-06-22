@@ -22,6 +22,16 @@
 #include <vector>
 
 namespace {
+bool MedianTimePastBefore(uint64_t median_time_past, int64_t time)
+{
+    return time > 0 && median_time_past < static_cast<uint64_t>(time);
+}
+
+bool MedianTimePastAtOrAfter(uint64_t median_time_past, int64_t time)
+{
+    return time <= 0 || median_time_past >= static_cast<uint64_t>(time);
+}
+
 class TestConditionChecker : public VersionBitsConditionChecker
 {
 private:
@@ -285,13 +295,13 @@ FUZZ_TARGET(versionbits, .init = initialize)
         case ThresholdState::DEFINED:
             assert(since == 0);
             assert(exp_state == ThresholdState::DEFINED);
-            assert(current_block->GetMedianTimePast() < dep.nStartTime);
+            assert(MedianTimePastBefore(current_block->GetMedianTimePast(), dep.nStartTime));
             return;
         case ThresholdState::STARTED:
-            assert(current_block->GetMedianTimePast() >= dep.nStartTime);
+            assert(MedianTimePastAtOrAfter(current_block->GetMedianTimePast(), dep.nStartTime));
             if (exp_state == ThresholdState::STARTED) {
                 assert(blocks_sig < dep.threshold);
-                assert(current_block->GetMedianTimePast() < dep.nTimeout);
+                assert(MedianTimePastBefore(current_block->GetMedianTimePast(), dep.nTimeout));
             } else {
                 assert(exp_state == ThresholdState::DEFINED);
             }
@@ -309,7 +319,7 @@ FUZZ_TARGET(versionbits, .init = initialize)
             assert(exp_state == ThresholdState::ACTIVE || exp_state == ThresholdState::LOCKED_IN);
             return;
         case ThresholdState::FAILED:
-            assert(never_active_test || current_block->GetMedianTimePast() >= dep.nTimeout);
+            assert(never_active_test || MedianTimePastAtOrAfter(current_block->GetMedianTimePast(), dep.nTimeout));
             if (exp_state == ThresholdState::STARTED) {
                 assert(blocks_sig < dep.threshold);
             } else {
