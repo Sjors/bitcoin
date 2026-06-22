@@ -18,6 +18,7 @@ from test_framework.wallet import MiniWallet
 
 TIME_2106 = 2**32 - 1
 MAX_UINT64 = 2**64 - 1
+TIME_EXTRA_NONCE = 0x5a
 
 
 class Y2106ExtendedTimeTest(BitcoinTestFramework):
@@ -87,16 +88,18 @@ class Y2106ExtendedTimeTest(BitcoinTestFramework):
         assert_equal(self.nodes[0].submitblock(legacy_merkle_block.serialize().hex()), "bad-txnmrklroot")
 
         extended_block = create_block(tmpl=self.nodes[0].getblocktemplate(NORMAL_GBT_REQUEST_PARAMS))
-        assert_equal(extended_block.nTime, TIME_2106 + 1)
+        extended_time = TIME_2106 + 1
+        assert_equal(extended_block.nTime, extended_time)
+        extended_block.nTime |= TIME_EXTRA_NONCE
         self.solve_with_zero_low_nonce_byte(extended_block)
         extended_block_hex = extended_block.serialize().hex()
         assert_equal(self.nodes[0].submitblock(extended_block_hex), None)
         extended_header = CBlockHeader()
         extended_header.deserialize(BytesIO(bytes.fromhex(extended_block_hex)))
-        assert_equal(extended_header.nTime, TIME_2106 + 1)
+        assert_equal(extended_header.nTime, extended_time | TIME_EXTRA_NONCE)
+        assert_equal(extended_header.masked_time(), extended_time)
         assert extended_header.uses_extended_time_encoding()
         assert extended_header.nVersion < 0
-        assert_equal(self.nodes[0].getblockheader(extended_block.hash_hex)["time"], TIME_2106 + 1)
         assert_raises_rpc_error(
             -5,
             "gettxoutproof is not supported for extended-header blocks",

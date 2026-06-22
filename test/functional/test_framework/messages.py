@@ -734,6 +734,8 @@ class CBlockHeader:
                  "nTime", "nVersion", "m_extended")
 
     EXTENDED_TIME_THRESHOLD = 2**32
+    EXTENDED_TIME_EXTRA_NONCE_MASK = 0xff
+    EXTENDED_TIME_MASK = 0xffffffffffffffff ^ EXTENDED_TIME_EXTRA_NONCE_MASK
 
     def __init__(self, header=None):
         if header is None:
@@ -774,6 +776,9 @@ class CBlockHeader:
 
     def uses_extended_time_encoding(self):
         return self.m_extended
+
+    def masked_time(self):
+        return self.nTime & self.EXTENDED_TIME_MASK if self.m_extended else self.nTime
 
     def set_extended_time_encoding(self):
         self.m_extended = True

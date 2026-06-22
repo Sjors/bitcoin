@@ -68,7 +68,8 @@ uint64_t GetMinimumTime(const CBlockIndex* pindexPrev, const int64_t difficulty_
     // Account for BIP94 timewarp rule on all networks. This makes future
     // activation safer.
     if (height % difficulty_adjustment_interval == 0) {
-        min_time = std::max<uint64_t>(min_time, pindexPrev->nTime > MAX_TIMEWARP ? pindexPrev->nTime - MAX_TIMEWARP : 0);
+        const uint64_t prev_time{pindexPrev->GetBlockTime()};
+        min_time = std::max<uint64_t>(min_time, prev_time > MAX_TIMEWARP ? prev_time - MAX_TIMEWARP : 0);
     }
     return min_time;
 }
@@ -79,6 +80,7 @@ int64_t UpdateTime(CBlockHeader* pblock, const Consensus::Params& consensusParam
     const int64_t now{TicksSinceEpoch<std::chrono::seconds>(NodeClock::now())};
     uint64_t nNewTime{std::max<uint64_t>(GetMinimumTime(pindexPrev, consensusParams.DifficultyAdjustmentInterval()),
                                          static_cast<uint64_t>(std::max<int64_t>(now, 0)))};
+    nNewTime = CBlockHeader::MinRawTimeForMaskedTime(nNewTime);
 
     if (nOldTime < nNewTime) {
         pblock->nTime = nNewTime;
@@ -158,7 +160,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock()
         pblock->nVersion = gArgs.GetIntArg("-blockversion", pblock->nVersion);
     }
 
-    pblock->nTime = TicksSinceEpoch<std::chrono::seconds>(NodeClock::now());
+    pblock->nTime = CBlockHeader::MinRawTimeForMaskedTime(TicksSinceEpoch<std::chrono::seconds>(NodeClock::now()));
     if (pblock->nTime >= CBlockHeader::EXTENDED_TIME_THRESHOLD) {
         pblock->SetExtendedTimeEncoding();
     }
@@ -487,8 +489,9 @@ std::unique_ptr<CBlockTemplate> WaitAndCreateNewBlock(ChainstateManager& chainma
         // On test networks return a minimum difficulty block after 20 minutes
         if (!tip_changed && allow_min_difficulty) {
             const CBlockIndex* tip{chainman.ActiveChain().Tip()};
-            if (tip->nTime <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) &&
-                now > NodeClock::time_point{std::chrono::seconds{static_cast<int64_t>(tip->nTime)}} + 20min) {
+            const uint64_t tip_time{tip->GetBlockTime()};
+            if (tip_time <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) &&
+                now > NodeClock::time_point{std::chrono::seconds{static_cast<int64_t>(tip_time)}} + 20min) {
                 tip_changed = true;
             }
         }

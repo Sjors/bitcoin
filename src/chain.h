@@ -218,12 +218,12 @@ public:
 
     NodeSeconds Time() const
     {
-        return NodeSeconds{std::chrono::seconds{nTime}};
+        return NodeSeconds{std::chrono::seconds{GetBlockTime()}};
     }
 
     uint64_t GetBlockTime() const
     {
-        return nTime;
+        return CBlockHeader::MaskedBlockTime(nTime, nVersion < 0);
     }
 
     uint64_t GetBlockTimeMax() const

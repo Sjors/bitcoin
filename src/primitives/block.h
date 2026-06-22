@@ -12,6 +12,7 @@
 #include <util/time.h>
 
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,10 +39,27 @@ public:
     bool m_extended;
 
     static constexpr uint64_t EXTENDED_TIME_THRESHOLD{uint64_t{1} << 32};
+    //! The low byte remains part of the serialized header and block hash, but
+    //! is ignored when interpreting extended-header consensus time.
+    static constexpr uint64_t EXTENDED_TIME_EXTRA_NONCE_MASK{0xff};
+    static constexpr uint64_t EXTENDED_TIME_MASK{~EXTENDED_TIME_EXTRA_NONCE_MASK};
 
     CBlockHeader()
     {
         SetNull();
+    }
+
+    static constexpr uint64_t MaskedBlockTime(uint64_t nTime, bool extended)
+    {
+        return extended ? nTime & EXTENDED_TIME_MASK : nTime;
+    }
+
+    static constexpr uint64_t MinRawTimeForMaskedTime(uint64_t nTime)
+    {
+        if (nTime < EXTENDED_TIME_THRESHOLD || (nTime & EXTENDED_TIME_EXTRA_NONCE_MASK) == 0) return nTime;
+        const uint64_t increment{uint64_t{1} << 8};
+        if (nTime > std::numeric_limits<uint64_t>::max() - increment) return nTime & EXTENDED_TIME_MASK;
+        return (nTime + EXTENDED_TIME_EXTRA_NONCE_MASK) & EXTENDED_TIME_MASK;
     }
 
     template <typename Stream>
@@ -106,12 +124,12 @@ public:
 
     NodeSeconds Time() const
     {
-        return NodeSeconds{std::chrono::seconds{nTime}};
+        return NodeSeconds{std::chrono::seconds{GetBlockTime()}};
     }
 
     uint64_t GetBlockTime() const
     {
-        return nTime;
+        return MaskedBlockTime(nTime, m_extended);
     }
 };
 

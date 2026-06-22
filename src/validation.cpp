@@ -4117,14 +4117,17 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, BlockValidatio
     if (block.nBits != GetNextWorkRequired(pindexPrev, &block, consensusParams))
         return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "bad-diffbits", "incorrect proof of work");
 
-    if (pindexPrev->nTime >= CBlockHeader::EXTENDED_TIME_THRESHOLD) {
-        if (!block.m_extended || block.nTime < CBlockHeader::EXTENDED_TIME_THRESHOLD) {
+    const uint64_t block_time{block.GetBlockTime()};
+    const uint64_t prev_block_time{pindexPrev->GetBlockTime()};
+
+    if (prev_block_time >= CBlockHeader::EXTENDED_TIME_THRESHOLD) {
+        if (!block.m_extended || block_time < CBlockHeader::EXTENDED_TIME_THRESHOLD) {
             return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "bad-time-encoding", "post-threshold block must use extended timestamp encoding");
         }
     }
 
     // Check timestamp against prev
-    if (block.nTime <= pindexPrev->GetMedianTimePast())
+    if (block_time <= pindexPrev->GetMedianTimePast())
         return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "time-too-old", "block's timestamp is too early");
 
     // Testnet4 and regtest only: Check timestamp against prev for difficulty-adjustment
@@ -4133,14 +4136,14 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, BlockValidatio
         // Check timestamp for the first block of each difficulty adjustment
         // interval, except the genesis block.
         if (nHeight % consensusParams.DifficultyAdjustmentInterval() == 0) {
-            if (block.nTime < pindexPrev->nTime && pindexPrev->nTime - block.nTime > MAX_TIMEWARP) {
+            if (block_time < prev_block_time && prev_block_time - block_time > MAX_TIMEWARP) {
                 return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "time-timewarp-attack", "block's timestamp is too early on diff adjustment block");
             }
         }
     }
 
     // Check timestamp
-    if (BlockTimeTooNew(block.nTime)) {
+    if (BlockTimeTooNew(block_time)) {
         return state.Invalid(BlockValidationResult::BLOCK_TIME_FUTURE, "time-too-new", "block timestamp too far in the future");
     }
 
