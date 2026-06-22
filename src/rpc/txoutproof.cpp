@@ -106,6 +106,9 @@ static RPCMethod gettxoutproof()
             if (!chainman.m_blockman.ReadBlock(block, *pblockindex)) {
                 throw JSONRPCError(RPC_INTERNAL_ERROR, "Can't read block from disk");
             }
+            if (block.m_extended) {
+                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "gettxoutproof is not supported for extended-header blocks");
+            }
 
             unsigned int ntxFound = 0;
             for (const auto& tx : block.vtx) {

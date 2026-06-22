@@ -12,7 +12,7 @@ from test_framework.blocktools import (
 )
 from test_framework.messages import CBlockHeader, uint256_from_compact
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal
+from test_framework.util import assert_equal, assert_raises_rpc_error
 from test_framework.wallet import MiniWallet
 
 
@@ -90,6 +90,13 @@ class Y2106ExtendedTimeTest(BitcoinTestFramework):
         assert extended_header.uses_extended_time_encoding()
         assert extended_header.nVersion < 0
         assert_equal(self.nodes[0].getblockheader(extended_block.hash_hex)["time"], TIME_2106 + 1)
+        assert_raises_rpc_error(
+            -5,
+            "gettxoutproof is not supported for extended-header blocks",
+            self.nodes[0].gettxoutproof,
+            [extended_block.vtx[0].txid_hex],
+            extended_block.hash_hex,
+        )
 
         self.log.info("Previous release rejects the extended-time block")
         self.submit_to_previous_release(extended_block_hex)
