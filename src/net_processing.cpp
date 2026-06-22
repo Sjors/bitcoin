@@ -2470,7 +2470,10 @@ void PeerManagerImpl::ProcessGetBlockData(CNode& pfrom, Peer& peer, const CInv& 
             CMerkleBlock merkleBlock;
             if (auto tx_relay = peer.GetTxRelay(); tx_relay != nullptr) {
                 LOCK(tx_relay->m_bloom_filter_mutex);
-                if (tx_relay->m_bloom_filter) {
+                if (tx_relay->m_bloom_filter && !pblock->m_extended) {
+                    // Partial merkle proofs only carry txids; this draft
+                    // disables them for extended-header blocks instead of
+                    // defining a new proof format.
                     sendMerkleBlock = true;
                     merkleBlock = CMerkleBlock(*pblock, *tx_relay->m_bloom_filter);
                 }
