@@ -3898,6 +3898,20 @@ static bool CheckMerkleRoot(const CBlock& block, BlockValidationState& state)
  * first transaction needs to have at least one input. */
 static bool CheckWitnessMalleation(const CBlock& block, bool expect_witness_commitment, BlockValidationState& state)
 {
+    if (block.m_extended) {
+        if (GetWitnessCommitmentIndex(block) != NO_WITNESS_COMMITMENT) {
+            return state.Invalid(
+                /*result=*/BlockValidationResult::BLOCK_MUTATED,
+                /*reject_reason=*/"unexpected-witness-commitment",
+                /*debug_message=*/strprintf("%s : unexpected witness commitment found", __func__));
+        }
+
+        // Extended blocks commit to witness data in hashMerkleRoot, so the
+        // legacy witness merkle tree and coinbase commitment are not used.
+        block.m_checked_witness_commitment = true;
+        return true;
+    }
+
     if (expect_witness_commitment) {
         if (block.m_checked_witness_commitment) return true;
 
@@ -4013,6 +4027,8 @@ bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensu
 
 void ChainstateManager::UpdateUncommittedBlockStructures(CBlock& block, const CBlockIndex* pindexPrev) const
 {
+    if (block.m_extended) return;
+
     int commitpos = GetWitnessCommitmentIndex(block);
     static const std::vector<unsigned char> nonce(32, 0x00);
     if (commitpos != NO_WITNESS_COMMITMENT && DeploymentActiveAfter(pindexPrev, *this, Consensus::DEPLOYMENT_SEGWIT) && !block.vtx[0]->HasWitness()) {
@@ -4025,6 +4041,8 @@ void ChainstateManager::UpdateUncommittedBlockStructures(CBlock& block, const CB
 
 void ChainstateManager::GenerateCoinbaseCommitment(CBlock& block, const CBlockIndex* pindexPrev) const
 {
+    if (block.m_extended) return;
+
     int commitpos = GetWitnessCommitmentIndex(block);
     std::vector<unsigned char> ret(32, 0x00);
     if (commitpos == NO_WITNESS_COMMITMENT) {

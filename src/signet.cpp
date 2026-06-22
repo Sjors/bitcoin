@@ -7,11 +7,13 @@
 #include <consensus/merkle.h>
 #include <consensus/params.h>
 #include <consensus/validation.h>
+#include <hash.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <script/interpreter.h>
 #include <script/script.h>
 #include <script/verify_flags.h>
+#include <serialize.h>
 #include <streams.h>
 #include <uint256.h>
 #include <util/log.h>
@@ -22,6 +24,7 @@
 #include <exception>
 #include <memory>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -60,9 +63,16 @@ static uint256 ComputeModifiedMerkleRoot(const CMutableTransaction& cb, const CB
 {
     std::vector<uint256> leaves;
     leaves.reserve((block.vtx.size() + 1) & ~1ULL); // capacity rounded up to even
-    leaves.push_back(TxMerkleLeafHash(CTransaction{cb}, block.m_extended));
+    auto add_leaf{[&](const CTransaction& tx) {
+        if (block.m_extended) {
+            leaves.push_back((HashWriter{TaggedHash("TaggedWtxid")} << TX_WITH_WITNESS(tx)).GetSHA256());
+        } else {
+            leaves.push_back(tx.GetHash().ToUint256());
+        }
+    }};
+    add_leaf(CTransaction{cb});
     for (size_t s = 1; s < block.vtx.size(); ++s) {
-        leaves.push_back(TxMerkleLeafHash(*block.vtx[s], block.m_extended));
+        add_leaf(*block.vtx[s]);
     }
     return ComputeMerkleRoot(std::move(leaves));
 }

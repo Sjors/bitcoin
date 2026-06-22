@@ -73,10 +73,10 @@ uint256 BlockMerkleRoot(const CBlock& block, bool* mutated)
     leaves.reserve((block.vtx.size() + 1) & ~1ULL); // capacity rounded up to even
     for (size_t s = 0; s < block.vtx.size(); s++) {
         if (block.m_extended) {
-            // This draft tags the no-witness transaction serialization before
-            // using it as a merkle leaf. A real hardfork would likely define a
-            // tagged wtxid and remove the separate witness merkle tree.
-            leaves.push_back((HashWriter{TaggedHash("TaggedTxid")} << TX_NO_WITNESS(*block.vtx[s])).GetSHA256());
+            // Extended blocks commit to witness data directly in the transaction
+            // merkle tree, so they do not use the legacy separate witness
+            // merkle commitment.
+            leaves.push_back((HashWriter{TaggedHash("TaggedWtxid")} << TX_WITH_WITNESS(*block.vtx[s])).GetSHA256());
         } else {
             leaves.push_back(block.vtx[s]->GetHash().ToUint256());
         }
@@ -186,7 +186,7 @@ std::vector<uint256> TransactionMerklePath(const CBlock& block, uint32_t positio
     leaves.resize(block.vtx.size());
     for (size_t s = 0; s < block.vtx.size(); s++) {
         if (block.m_extended) {
-            leaves[s] = (HashWriter{TaggedHash("TaggedTxid")} << TX_NO_WITNESS(*block.vtx[s])).GetSHA256();
+            leaves[s] = (HashWriter{TaggedHash("TaggedWtxid")} << TX_WITH_WITNESS(*block.vtx[s])).GetSHA256();
         } else {
             leaves[s] = block.vtx[s]->GetHash().ToUint256();
         }

@@ -7,10 +7,13 @@
 from io import BytesIO
 
 from test_framework.blocktools import (
+    COINBASE_MATURITY,
     NORMAL_GBT_REQUEST_PARAMS,
+    WITNESS_COMMITMENT_HEADER,
     create_block,
 )
-from test_framework.messages import CBlockHeader, ser_uint256, uint256_from_compact
+from test_framework.key import TaggedHash
+from test_framework.messages import CBlockHeader, CTxOut, tx_from_hex, uint256_from_compact
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal, assert_raises_rpc_error
 from test_framework.wallet import MiniWallet
@@ -47,6 +50,9 @@ class Y2106ExtendedTimeTest(BitcoinTestFramework):
         while block.hash_int > target:
             block.nNonce += 256
 
+    def calc_extended_merkle_root_without_witness(self, block):
+        return block.get_merkle_root([TaggedHash("TaggedTxid", tx.serialize_without_witness()) for tx in block.vtx])
+
     def run_test(self):
         self.start_nodes()
         wallet = MiniWallet(self.nodes[0])
@@ -68,7 +74,7 @@ class Y2106ExtendedTimeTest(BitcoinTestFramework):
         assert_equal(self.nodes[0].submitblock(max_time_block.serialize().hex()), "time-too-new")
 
         self.log.info("Build a shared chain whose MTP reaches the last 32-bit timestamp")
-        block_hashes = self.generate(wallet, 8, sync_fun=self.no_op)
+        block_hashes = self.generate(wallet, COINBASE_MATURITY, sync_fun=self.no_op)
         self.nodes[1].setmocktime(TIME_2106)
         self.nodes[0].setmocktime(TIME_2106)
         block_hashes += self.generate(wallet, 6, sync_fun=self.no_op)
@@ -76,21 +82,35 @@ class Y2106ExtendedTimeTest(BitcoinTestFramework):
 
         for block_hash in block_hashes:
             assert_equal(self.nodes[1].submitblock(self.nodes[0].getblock(block_hash, 0)), None)
-        assert_equal(self.nodes[1].getbestblockhash(), self.nodes[0].getblockhash(14))
+        assert_equal(self.nodes[1].getbestblockhash(), block_hashes[-1])
 
         self.log.info("Continue the chain with an extended 64-bit timestamp")
         self.nodes[0].setmocktime(TIME_2106 + 1)
-        self.log.info("Reject a post-2106 block with the legacy merkle root")
-        legacy_merkle_block = create_block(tmpl=self.nodes[0].getblocktemplate(NORMAL_GBT_REQUEST_PARAMS))
-        legacy_merkle_block.hashMerkleRoot = legacy_merkle_block.get_merkle_root([ser_uint256(tx.txid_int) for tx in legacy_merkle_block.vtx])
+        witness_tx = tx_from_hex(wallet.send_self_transfer(from_node=self.nodes[0])["hex"])
+        assert witness_tx.serialize_with_witness() != witness_tx.serialize_without_witness()
+
+        tmpl = self.nodes[0].getblocktemplate(NORMAL_GBT_REQUEST_PARAMS)
+        assert "default_witness_commitment" not in tmpl
+
+        self.log.info("Reject a post-2106 block with the old no-witness extended merkle root")
+        legacy_merkle_block = create_block(tmpl=tmpl, txlist=[witness_tx])
+        legacy_merkle_block.hashMerkleRoot = self.calc_extended_merkle_root_without_witness(legacy_merkle_block)
         assert legacy_merkle_block.hashMerkleRoot != legacy_merkle_block.calc_merkle_root()
         legacy_merkle_block.solve()
         assert_equal(self.nodes[0].submitblock(legacy_merkle_block.serialize().hex()), "bad-txnmrklroot")
 
-        extended_block = create_block(tmpl=self.nodes[0].getblocktemplate(NORMAL_GBT_REQUEST_PARAMS))
+        self.log.info("Reject a post-2106 block with the legacy witness commitment output")
+        old_commitment_block = create_block(tmpl=tmpl, txlist=[witness_tx])
+        old_commitment_block.vtx[0].vout.append(CTxOut(0, bytes([0x6a, 0x24]) + WITNESS_COMMITMENT_HEADER + bytes(32)))
+        old_commitment_block.hashMerkleRoot = old_commitment_block.calc_merkle_root()
+        old_commitment_block.solve()
+        assert_equal(self.nodes[0].submitblock(old_commitment_block.serialize().hex()), "unexpected-witness-commitment")
+
+        extended_block = create_block(tmpl=tmpl, txlist=[witness_tx])
         extended_time = TIME_2106 + 1
         assert_equal(extended_block.nTime, extended_time)
         extended_block.nTime |= TIME_EXTRA_NONCE
+        assert not any(bytes(vout.scriptPubKey).startswith(bytes([0x6a, 0x24]) + WITNESS_COMMITMENT_HEADER) for vout in extended_block.vtx[0].vout)
         self.solve_with_zero_low_nonce_byte(extended_block)
         extended_block_hex = extended_block.serialize().hex()
         assert_equal(self.nodes[0].submitblock(extended_block_hex), None)

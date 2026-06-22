@@ -76,9 +76,9 @@ struct BlockCreateOptions {
      *
      * Note that higher level code like the getblocktemplate RPC may omit the
      * coinbase transaction entirely. It's instead constructed by pool software
-     * using fields like coinbasevalue, coinbaseaux and default_witness_commitment.
-     * This software typically also controls the payout outputs, even for solo
-     * mining.
+     * using fields like coinbasevalue, coinbaseaux and, for legacy blocks,
+     * default_witness_commitment. This software typically also controls the
+     * payout outputs, even for solo mining.
      *
      * The size and sigops are not checked against
      * coinbase_max_additional_weight and coinbase_output_max_additional_sigops.

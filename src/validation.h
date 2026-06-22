@@ -1314,13 +1314,13 @@ public:
     void MaybeRebalanceCaches() EXCLUSIVE_LOCKS_REQUIRED(::cs_main);
 
     /**
-     * Update uncommitted block structures (currently: only the witness reserved
-     * value). This is safe for submitted blocks as long as they honor
-     * default_witness_commitment from the template.
+     * Update uncommitted block structures for legacy witness commitments
+     * (currently: only the witness reserved value). This is safe for submitted
+     * blocks as long as they honor default_witness_commitment from the template.
      */
     void UpdateUncommittedBlockStructures(CBlock& block, const CBlockIndex* pindexPrev) const;
 
-    /** Produce the necessary coinbase commitment for a block (modifies the hash, don't call for mined blocks). */
+    /** Produce the necessary legacy coinbase witness commitment for a block (modifies the hash, don't call for mined blocks). */
     void GenerateCoinbaseCommitment(CBlock& block, const CBlockIndex* pindexPrev) const;
 
     /** This is used by net_processing to report pre-synchronization progress of headers, as
