@@ -848,8 +848,8 @@ class CBlock(CBlockHeader):
 
     def calc_merkle_root(self):
         hashes = []
-        for tx in self.vtx:
-            hashes.append(TaggedHash("TaggedWtxid", tx.serialize_with_witness()) if self.m_extended else ser_uint256(tx.txid_int))
+        for position, tx in enumerate(self.vtx):
+            hashes.append(TaggedHash("TaggedWtxid", ser_compact_size(position) + tx.serialize_with_witness()) if self.m_extended else ser_uint256(tx.txid_int))
         return self.get_merkle_root(hashes)
 
     def calc_witness_merkle_root(self):

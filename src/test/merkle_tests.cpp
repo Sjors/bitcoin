@@ -189,7 +189,8 @@ BOOST_AUTO_TEST_CASE(merkle_test_extended_domain_separation)
     mtx.vin[0].scriptWitness.stack.emplace_back(std::vector<unsigned char>{0x01});
     const CTransaction tx{mtx};
     const uint256 legacy_leaf{tx.GetHash().ToUint256()};
-    const uint256 tagged_leaf{(HashWriter{TaggedHash("TaggedWtxid")} << TX_WITH_WITNESS(tx)).GetSHA256()};
+    uint32_t position{0};
+    const uint256 tagged_leaf{(HashWriter{TaggedHash("TaggedWtxid")} << COMPACTSIZE(position) << TX_WITH_WITNESS(tx)).GetSHA256()};
 
     BOOST_CHECK_EQUAL(TxMerkleNodeHash(left, right), legacy_inner);
     BOOST_CHECK_NE(tagged_leaf, legacy_leaf);
@@ -208,7 +209,7 @@ BOOST_AUTO_TEST_CASE(merkle_test_extended_domain_separation)
     const uint256 root{BlockMerkleRoot(block)};
     BOOST_CHECK_NE(root, ComputeMerkleRoot({block.vtx[0]->GetHash().ToUint256(), block.vtx[1]->GetHash().ToUint256()}));
     for (uint32_t pos{0}; pos < block.vtx.size(); ++pos) {
-        const uint256 extended_leaf{(HashWriter{TaggedHash("TaggedWtxid")} << TX_WITH_WITNESS(*block.vtx[pos])).GetSHA256()};
+        const uint256 extended_leaf{(HashWriter{TaggedHash("TaggedWtxid")} << COMPACTSIZE(pos) << TX_WITH_WITNESS(*block.vtx[pos])).GetSHA256()};
         BOOST_CHECK_EQUAL(ComputeMerkleRootFromBranch(extended_leaf, TransactionMerklePath(block, pos), pos), root);
     }
 }
@@ -235,6 +236,16 @@ BOOST_AUTO_TEST_CASE(merkle_test_OddTxWithRepeatedLastTx_block)
     uint256 rootofBlockWithRepeatedLastTx = BlockMerkleRoot(blockWithRepeatedLastTx, &mutated);
     BOOST_CHECK_EQUAL(rootofBlock, rootofBlockWithRepeatedLastTx);
     BOOST_CHECK_EQUAL(mutated, true);
+
+    block.SetExtendedTimeEncoding();
+    blockWithRepeatedLastTx.SetExtendedTimeEncoding();
+
+    rootofBlock = BlockMerkleRoot(block, &mutated);
+    BOOST_CHECK_EQUAL(mutated, false);
+
+    rootofBlockWithRepeatedLastTx = BlockMerkleRoot(blockWithRepeatedLastTx, &mutated);
+    BOOST_CHECK_NE(rootofBlock, rootofBlockWithRepeatedLastTx);
+    BOOST_CHECK_EQUAL(mutated, false);
 }
 
 BOOST_AUTO_TEST_CASE(merkle_test_LeftSubtreeRightSubtree)

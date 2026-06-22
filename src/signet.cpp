@@ -63,16 +63,16 @@ static uint256 ComputeModifiedMerkleRoot(const CMutableTransaction& cb, const CB
 {
     std::vector<uint256> leaves;
     leaves.reserve((block.vtx.size() + 1) & ~1ULL); // capacity rounded up to even
-    auto add_leaf{[&](const CTransaction& tx) {
+    auto add_leaf{[&](const CTransaction& tx, size_t position) {
         if (block.m_extended) {
-            leaves.push_back((HashWriter{TaggedHash("TaggedWtxid")} << TX_WITH_WITNESS(tx)).GetSHA256());
+            leaves.push_back((HashWriter{TaggedHash("TaggedWtxid")} << COMPACTSIZE(position) << TX_WITH_WITNESS(tx)).GetSHA256());
         } else {
             leaves.push_back(tx.GetHash().ToUint256());
         }
     }};
-    add_leaf(CTransaction{cb});
+    add_leaf(CTransaction{cb}, 0);
     for (size_t s = 1; s < block.vtx.size(); ++s) {
-        add_leaf(*block.vtx[s]);
+        add_leaf(*block.vtx[s], s);
     }
     return ComputeMerkleRoot(std::move(leaves));
 }
