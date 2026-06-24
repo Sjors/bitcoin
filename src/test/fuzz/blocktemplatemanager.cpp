@@ -108,6 +108,8 @@ FUZZ_TARGET(block_template_manager, .init = initialize_block_template_manager)
     }
     auto block_template = block_template_manager.CreateNewTemplate(options);
     assert(block_template);
+    block_template_manager.TrackTemplateTransactions(block_template->block.vtx);
+    block_template_manager.SanityCheck();
 
     // Use an empty mempool so fee inflow can be modeled independently.
     {
@@ -247,6 +249,8 @@ FUZZ_TARGET(block_template_manager, .init = initialize_block_template_manager)
         previous_fee_threshold = fee_threshold;
         block_template_manager.SanityCheck();
     }
+    block_template_manager.StopTrackingTemplateTransactions(block_template->block.vtx);
+    block_template_manager.SanityCheck();
     node.validation_signals->BlockDisconnected(block, chain_tip);
     node.validation_signals->SyncWithValidationInterfaceQueue();
 }

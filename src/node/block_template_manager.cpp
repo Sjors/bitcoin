@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <numeric>
+#include <ranges>
 #include <vector>
 
 namespace node {
@@ -224,6 +225,28 @@ void BlockTemplateManager::StopTrackingFeeInflow(uint64_t template_id)
     m_template_snapshots.erase(template_id);
 }
 
+void BlockTemplateManager::TrackTemplateTransactions(const std::vector<CTransactionRef>& txs)
+{
+    LOCK(m_mutex);
+    // Don't track the dummy coinbase, because it can be modified in-place
+    // by submitSolution()
+    for (const CTransactionRef& tx : txs | std::views::drop(1)) {
+        ++m_template_tx_refs[tx];
+    }
+}
+
+void BlockTemplateManager::StopTrackingTemplateTransactions(const std::vector<CTransactionRef>& txs)
+{
+    LOCK(m_mutex);
+    for (const CTransactionRef& tx : txs | std::views::drop(1)) {
+        auto ref_count{m_template_tx_refs.find(tx)};
+        if (!Assume(ref_count != m_template_tx_refs.end())) break;
+        if (--ref_count->second == 0) {
+            m_template_tx_refs.erase(ref_count);
+        }
+    }
+}
+
 bool BlockTemplateManager::IsStale(const BlockCreateOptions& options,
                                    uint64_t template_id,
                                    CAmount fee_threshold) const
@@ -239,6 +262,10 @@ bool BlockTemplateManager::IsStale(const BlockCreateOptions& options,
 void BlockTemplateManager::SanityCheck() const
 {
     LOCK(m_mutex);
+    for (const auto& [tx_ref, count] : m_template_tx_refs) {
+        Assume(tx_ref);
+        Assume(count > 0);
+    }
     for (const auto& [_, snapshot] : m_template_snapshots) {
         snapshot.SanityCheck();
         Assume(snapshot.total_fees >= 0);

@@ -7,9 +7,11 @@
 
 #include <consensus/amount.h>
 #include <node/mining_types.h>
+#include <primitives/transaction.h>
 #include <sync.h>
 #include <uint256.h>
 #include <util/feefrac.h>
+#include <util/hasher.h>
 #include <util/time.h>
 #include <validationinterface.h>
 
@@ -19,6 +21,8 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <unordered_map>
+#include <vector>
 
 class ChainstateManager;
 class CTxMemPool;
@@ -128,6 +132,9 @@ private:
     mutable Mutex m_mutex;
     /** Tracked template snapshots keyed by unique nonzero identifier. */
     std::map<uint64_t, TemplateSnapshot> m_template_snapshots GUARDED_BY(m_mutex);
+    using TxTemplateMap = std::unordered_map<CTransactionRef, size_t, CTransactionRefSaltedHash, CTransactionRefComp>;
+    /** Live template transaction references keyed by wtxid. */
+    TxTemplateMap m_template_tx_refs GUARDED_BY(m_mutex);
     uint64_t m_next_template_id GUARDED_BY(m_mutex){1};
 
 public:
@@ -156,6 +163,14 @@ public:
 
     /** Stop tracking fee inflow for the given template id. */
     void StopTrackingFeeInflow(uint64_t template_id)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
+    /** Track transaction references held by a live block template. */
+    void TrackTemplateTransactions(const std::vector<CTransactionRef>& txs)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
+    /** Stop tracking transaction references held by a live block template. */
+    void StopTrackingTemplateTransactions(const std::vector<CTransactionRef>& txs)
         EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
     /** Submit a block via ProcessNewBlock and capture validation state. */
