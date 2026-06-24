@@ -81,6 +81,7 @@ public:
     std::string operator()(const CNoDestination& no) const { return {}; }
     std::string operator()(const PubKeyDestination& pk) const { return {}; }
 };
+} // namespace
 
 CTxDestination DecodeDestination(const std::string& str, const CChainParams& params, std::string& error_str, std::vector<int>* error_locations)
 {
@@ -209,7 +210,6 @@ CTxDestination DecodeDestination(const std::string& str, const CChainParams& par
     if (error_locations) *error_locations = std::move(res.second);
     return CNoDestination();
 }
-} // namespace
 
 CKey DecodeSecret(const std::string& str)
 {

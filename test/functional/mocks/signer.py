@@ -49,12 +49,19 @@ def displayaddress(args):
         "sh(wpkh([00000001/49h/1h/0h/0/0]02c97dc3f4420402e01a113984311bf4a1b8de376cac0bdcfaf1b3ac81f13433c7))#kz9y5w82": "2N2gQKzjUe47gM8p1JZxaAkTcoHPXV6YyVp",
         "pkh([00000001/44h/1h/0h/0/0]02c97dc3f4420402e01a113984311bf4a1b8de376cac0bdcfaf1b3ac81f13433c7)#q3pqd8wh": "n1LKejAadN6hg2FrBXoU1KrwX4uK16mco9",
         "tr([00000001/86h/1h/0h/0/0]c97dc3f4420402e01a113984311bf4a1b8de376cac0bdcfaf1b3ac81f13433c7)#puqqa90m": "tb1phw4cgpt6cd30kz9k4wkpwm872cdvhss29jga2xpmftelhqll62mscq0k4g",
+        "tr([296d4e60/0/0]d5b810749f280dac8114cdb1c44fdcd6a725cb73669477b478f2172f0b32129a)#7luf7va9": "bcrt1p6s0wuy6g4ggh4qds9cju533wve82fnazzp4xkpk3p780gz30m5us9dqyaa",
         "wpkh([00000001/84h/1h/0h/0/1]03a20a46308be0b8ded6dff0a22b10b4245c587ccf23f3b4a303885be3a524f172)#aqpjv5xr": "wrong_address",
     }
     if args.desc not in expected_desc:
         return sys.stdout.write(json.dumps({"error": "Unexpected descriptor", "desc": args.desc}))
 
     return sys.stdout.write(json.dumps({"address": expected_desc[args.desc]}))
+
+def register(args):
+    if args.fingerprint != "00000001":
+        return sys.stdout.write(json.dumps({"error": "Unexpected fingerprint", "fingerprint": args.fingerprint}))
+
+    return sys.stdout.write(json.dumps({"hmac": "0000000000000000000000000000000000000000000000000000000000000000"}))
 
 def signtx(args):
     if args.fingerprint != "00000001":
@@ -89,6 +96,12 @@ parser_getdescriptors.add_argument('--account', metavar='account')
 parser_displayaddress = subparsers.add_parser('displayaddress', help='display address on signer')
 parser_displayaddress.add_argument('--desc', metavar='desc')
 parser_displayaddress.set_defaults(func=displayaddress)
+
+parser_register = subparsers.add_parser('register')
+parser_register.add_argument('--name')
+parser_register.add_argument('--desc')
+parser_register.add_argument('--key', action='append')
+parser_register.set_defaults(func=register)
 
 parser_signtx = subparsers.add_parser('signtx')
 parser_signtx.add_argument('psbt', metavar='psbt')

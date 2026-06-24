@@ -244,6 +244,43 @@ static UniValue ProcessDescriptorImport(CWallet& wallet, const UniValue& data, c
                warnings.push_back(w);
             }
 
+            // Auto-bind any descriptor xpubs whose corresponding xprv the wallet
+            // already knows (via `addhdkey` or an active descriptor). This lets the
+            // caller import e.g. `tr(musig([fp_A/87h/1h/0h]xpub_A,[fp_B/87h/1h/0h]xpub_B)/<0;1>/*)`
+            // without having to manually splice the hot cosigner's xprv into the
+            // descriptor string.
+            if (!wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
+                std::vector<std::pair<KeyOriginInfo, CExtPubKey>> origins;
+                parsed_desc->GetKeyOrigins(origins);
+                if (!origins.empty()) {
+                    std::map<uint32_t, CExtKey> seeds = wallet.GetHDSeeds();
+                    bool bound_any = false;
+                    for (const auto& [origin, root_extkey] : origins) {
+                        // Skip if we already know this xprv.
+                        if (keys.keys.contains(root_extkey.pubkey.GetID())) {
+                            continue;
+                        }
+                        uint32_t fp;
+                        std::memcpy(&fp, origin.fingerprint, 4);
+                        auto it = seeds.find(fp);
+                        if (it == seeds.end()) continue;
+                        std::vector<uint32_t> path(origin.path.begin(), origin.path.end());
+                        auto derived = DeriveExtKey(it->second, path);
+                        if (!derived) continue;
+                        // Verify the derived xpub matches the descriptor's root xpub
+                        // (guards against fingerprint collisions between unrelated seeds).
+                        if (derived->first.Neuter() != root_extkey) continue;
+                        keys.keys.emplace(root_extkey.pubkey.GetID(), derived->first.key);
+                        bound_any = true;
+                    }
+                    if (bound_any) {
+                        // Re-expand to pick up the newly-bound private keys.
+                        expand_keys.keys.clear();
+                        parsed_desc->ExpandPrivate(0, keys, expand_keys);
+                    }
+                }
+            }
+
             // Check if all private keys are provided
             bool have_all_privkeys = !expand_keys.keys.empty();
             for (const auto& entry : expand_keys.origins) {

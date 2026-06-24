@@ -8,6 +8,7 @@
 #include <common/types.h>
 #include <consensus/amount.h>
 #include <core_io.h>
+#include <key.h>
 #include <key_io.h>
 #include <node/types.h>
 #include <outputtype.h>
@@ -15,11 +16,13 @@
 #include <rpc/util.h>
 #include <script/descriptor.h>
 #include <script/interpreter.h>
+#include <script/keyorigin.h>
 #include <script/signingprovider.h>
 #include <script/solver.h>
 #include <tinyformat.h>
 #include <uint256.h>
 #include <univalue.h>
+#include <util/bip32.h>
 #include <util/check.h>
 #include <util/result.h>
 #include <util/strencodings.h>
@@ -1372,6 +1375,28 @@ std::vector<CScript> EvalDescriptorStringOrObject(const UniValue& scanobject, Fl
         }
     }
     return ret;
+}
+
+std::optional<std::pair<CExtKey, KeyOriginInfo>> DeriveExtKey(const CExtKey& ext_key, const std::vector<uint32_t>& path) {
+    CExtKey descendant = ext_key;
+    KeyOriginInfo origin;
+    origin.clear(); // Prevent spurious uninitialized variable warning
+    const CKeyID id = ext_key.key.GetPubKey().GetID();
+    std::copy(id.begin(), id.begin() + sizeof(origin.fingerprint), origin.fingerprint);
+    origin.path = path;
+    for (uint32_t i : path) {
+        if (!descendant.Derive(descendant, i)) return std::nullopt;
+    }
+    return std::make_pair(descendant, origin);
+}
+
+std::vector<uint32_t> ParsePathBIP32(const std::string& path)
+{
+    std::vector<uint32_t> out;
+    if (!ParseHDKeypath(path, out)) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid BIP32 keypath");
+    }
+    return out;
 }
 
 /** Convert a vector of bilingual strings to a UniValue::VARR containing their original untranslated values. */

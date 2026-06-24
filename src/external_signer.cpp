@@ -74,6 +74,40 @@ UniValue ExternalSigner::GetDescriptors(const int account)
     return RunCommandParseJSON(Cat(m_command, Cat(Cat({"--fingerprint", m_fingerprint}, NetworkArg()), {"getdescriptors", "--account", strprintf("%d", account)})), "");
 }
 
+UniValue ExternalSigner::RegisterPolicy(const std::string& name, const std::string& descriptor_template, const std::vector<std::string>& keys_info) const
+{
+    std::vector<std::string> command = Cat(m_command, Cat(Cat({"--fingerprint", m_fingerprint}, NetworkArg()), {"register", "--name", name, "--desc", descriptor_template}));
+    for (const std::string& key_info : keys_info) {
+        command.emplace_back("--key");
+        command.emplace_back(key_info);
+    }
+    return RunCommandParseJSON(command, "");
+}
+
+UniValue ExternalSigner::DisplayAddressPolicy(const std::string& name,
+                                              const std::string& descriptor_template,
+                                              const std::vector<std::string>& keys_info,
+                                              const std::optional<std::string>& hmac,
+                                              bool change,
+                                              uint32_t index) const
+{
+    std::vector<std::string> command = Cat(m_command, Cat(Cat({"--fingerprint", m_fingerprint}, NetworkArg()),
+        {"displayaddress",
+         "--policy-name", name,
+         "--policy-desc", descriptor_template,
+         "--index", strprintf("%u", index)}));
+    if (hmac) {
+        command.emplace_back("--hmac");
+        command.emplace_back(*hmac);
+    }
+    for (const std::string& key_info : keys_info) {
+        command.emplace_back("--key");
+        command.emplace_back(key_info);
+    }
+    if (change) command.emplace_back("--change");
+    return RunCommandParseJSON(command, "");
+}
+
 bool ExternalSigner::SignTransaction(PartiallySignedTransaction& psbtx, std::string& error)
 {
     // Serialize the PSBT
@@ -120,5 +154,54 @@ bool ExternalSigner::SignTransaction(PartiallySignedTransaction& psbtx, std::str
 
     psbtx = *signer_psbtx;
 
+    return true;
+}
+
+bool ExternalSigner::SignTransactionPolicy(PartiallySignedTransaction& psbtx,
+                                           const std::string& name,
+                                           const std::string& descriptor_template,
+                                           const std::vector<std::string>& keys_info,
+                                           const std::optional<std::string>& hmac,
+                                           std::string& error)
+{
+    // Serialize the PSBT
+    DataStream ssTx{};
+    ssTx << psbtx;
+
+    const std::vector<std::string> command = Cat(m_command, Cat({"--stdin", "--fingerprint", m_fingerprint}, NetworkArg()));
+
+    // Mirrors the displayaddress wire format: policy args travel on
+    // the same stdin line as `signtx <base64>`. The signer re-parses
+    // the line through its own arg parser, so we just space-join.
+    std::string stdinStr = "signtx " + EncodeBase64(ssTx.str())
+                         + " --policy-name " + name
+                         + " --policy-desc " + descriptor_template;
+    if (hmac) {
+        stdinStr += " --hmac ";
+        stdinStr += *hmac;
+    }
+    for (const std::string& key_info : keys_info) {
+        stdinStr += " --key ";
+        stdinStr += key_info;
+    }
+
+    const UniValue signer_result = RunCommandParseJSON(command, stdinStr);
+
+    if (signer_result.find_value("error").isStr()) {
+        error = signer_result.find_value("error").get_str();
+        return false;
+    }
+    if (!signer_result.find_value("psbt").isStr()) {
+        error = "Unexpected result from signer";
+        return false;
+    }
+
+    util::Result<PartiallySignedTransaction> signer_psbtx = DecodeBase64PSBT(signer_result.find_value("psbt").get_str());
+    if (!signer_psbtx) {
+        error = strprintf("TX decode failed %s", util::ErrorString(signer_psbtx).original);
+        return false;
+    }
+
+    psbtx = *signer_psbtx;
     return true;
 }

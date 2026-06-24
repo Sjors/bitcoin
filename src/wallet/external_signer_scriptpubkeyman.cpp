@@ -7,6 +7,7 @@
 #include <common/system.h>
 #include <external_signer.h>
 #include <node/types.h>
+#include <util/strencodings.h>
 #include <wallet/external_signer_scriptpubkeyman.h>
 
 #include <iostream>
@@ -24,6 +25,15 @@ namespace wallet {
 std::unique_ptr<ExternalSignerScriptPubKeyMan> ExternalSignerScriptPubKeyMan::LoadFromStorage(WalletStorage& storage, WalletDescriptor& descriptor, int64_t keypool_size, const KeyMap& keys, const CryptedKeyMap& ckeys)
 {
     return std::unique_ptr<ExternalSignerScriptPubKeyMan>(new ExternalSignerScriptPubKeyMan(storage, descriptor, keypool_size, keys, ckeys));
+}
+
+std::unique_ptr<ExternalSignerScriptPubKeyMan> ExternalSignerScriptPubKeyMan::CreateFromImport(WalletStorage& storage, WalletDescriptor& descriptor, int64_t keypool_size, const FlatSigningProvider& provider)
+{
+    auto spkm = std::unique_ptr<ExternalSignerScriptPubKeyMan>(new ExternalSignerScriptPubKeyMan(storage, descriptor, keypool_size));
+    if (auto res = spkm->UpdateWalletDescriptor(descriptor, provider); !res) {
+        throw std::runtime_error(util::ErrorString(res).original);
+    }
+    return spkm;
 }
 
 std::unique_ptr<ExternalSignerScriptPubKeyMan> ExternalSignerScriptPubKeyMan::CreateNew(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, std::unique_ptr<Descriptor> desc)
@@ -52,15 +62,21 @@ std::unique_ptr<ExternalSignerScriptPubKeyMan> ExternalSignerScriptPubKeyMan::Cr
     return spkm;
 }
 
- util::Result<ExternalSigner> ExternalSignerScriptPubKeyMan::GetExternalSigner() {
+util::Result<std::vector<ExternalSigner>> ExternalSignerScriptPubKeyMan::GetExternalSigners() {
     const std::string command = gArgs.GetArg("-signer", "");
     if (command == "") return util::Error{Untranslated("restart bitcoind with -signer=<cmd>")};
     std::vector<ExternalSigner> signers;
     ExternalSigner::Enumerate(command, signers, Params().GetChainTypeString());
     if (signers.empty()) return util::Error{Untranslated("No external signers found")};
+    return signers;
+}
+
+util::Result<ExternalSigner> ExternalSignerScriptPubKeyMan::GetExternalSigner() {
+    auto signers{GetExternalSigners()};
+    if (!signers) return util::Error{util::ErrorString(signers)};
     // TODO: add fingerprint argument instead of failing in case of multiple signers.
-    if (signers.size() > 1) return util::Error{Untranslated("More than one external signer found. Please connect only one at a time.")};
-    return signers[0];
+    if (signers->size() > 1) return util::Error{Untranslated("More than one external signer found. Please connect only one at a time.")};
+    return std::move(signers->front());
 }
 
 util::Result<void> ExternalSignerScriptPubKeyMan::DisplayAddress(const CTxDestination& dest, const ExternalSigner &signer) const
@@ -79,6 +95,47 @@ util::Result<void> ExternalSignerScriptPubKeyMan::DisplayAddress(const CTxDestin
     if (!ret_address.isStr()) return util::Error{_("Signer did not echo address")};
 
     if (ret_address.getValStr() != EncodeDestination(dest)) {
+        return util::Error{strprintf(_("Signer echoed unexpected address %s"), ret_address.getValStr())};
+    }
+
+    return util::Result<void>();
+}
+
+util::Result<void> ExternalSignerScriptPubKeyMan::DisplayAddressPolicy(const CTxDestination& dest,
+                                                                       const ExternalSigner& signer,
+                                                                       const std::string& name,
+                                                                       const std::string& descriptor_template,
+                                                                       const std::vector<std::string>& keys_info,
+                                                                       const std::optional<std::string>& hmac,
+                                                                       bool change,
+                                                                       uint32_t index) const
+{
+    const UniValue& result{signer.DisplayAddressPolicy(name, descriptor_template, keys_info, hmac, change, index)};
+
+    const UniValue& error = result.find_value("error");
+    if (error.isStr()) return util::Error{strprintf(_("Signer returned error: %s"), error.getValStr())};
+
+    const UniValue& ret_address = result.find_value("address");
+    if (!ret_address.isStr()) return util::Error{_("Signer did not echo address")};
+
+    // Compare the echoed address by witness program rather than by string.
+    // The Ledger Bitcoin app, for instance, encodes addresses with the
+    // testnet "tb1..." HRP even when -chain=regtest is in effect, so a
+    // strict EncodeDestination comparison would spuriously fail. Try each
+    // known chain's params and accept the echo if any of them decodes to
+    // the same scriptPubKey as the requested destination.
+    const CScript expected_script{GetScriptForDestination(dest)};
+    bool address_matches{false};
+    for (const ChainType chain : {ChainType::MAIN, ChainType::TESTNET, ChainType::TESTNET4, ChainType::SIGNET, ChainType::REGTEST}) {
+        std::unique_ptr<const CChainParams> cp = CreateChainParams(gArgs, chain);
+        std::string err;
+        const CTxDestination cand = DecodeDestination(ret_address.getValStr(), *cp, err);
+        if (IsValidDestination(cand) && GetScriptForDestination(cand) == expected_script) {
+            address_matches = true;
+            break;
+        }
+    }
+    if (!address_matches) {
         return util::Error{strprintf(_("Signer echoed unexpected address %s"), ret_address.getValStr())};
     }
 
@@ -113,4 +170,122 @@ std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBT(PartiallySigned
     if (options.finalize) FinalizePSBT(psbt); // This won't work in a multisig setup
     return {};
 }
+
+std::optional<PSBTError> ExternalSignerScriptPubKeyMan::FillPSBTPolicy(PartiallySignedTransaction& psbt,
+                                                                       const PrecomputedTransactionData& txdata,
+                                                                       common::PSBTFillOptions options,
+                                                                       int* n_signed,
+                                                                       ExternalSigner& signer,
+                                                                       const std::string& name,
+                                                                       const std::string& descriptor_template,
+                                                                       const std::vector<std::string>& keys_info,
+                                                                       const std::optional<std::string>& hmac) const
+{
+    if (!options.sign) {
+        return DescriptorScriptPubKeyMan::FillPSBT(psbt, txdata, options, n_signed);
+    }
+
+    // First let the local descriptor signer contribute (e.g. for a
+    // MuSig2 cosigner whose xprv lives in this wallet). It will add
+    // its own pub-nonce in round 1 and its partial signature in round
+    // 2; in single-sig mode it'll just sign with the local xprv. The
+    // signer below works around the Ledger app's quirk of refusing to
+    // run a round when another participant's data is already in the
+    // input, by stashing those entries in hwi-rs before talking to
+    // the device.
+    //
+    // Snapshot the per-input MuSig2 nonce + partial-sig counts before
+    // the local pass so the soft-fail path below can tell whether this
+    // call actually advanced the PSBT (round-1 pubnonce or round-2
+    // partial sig from a hot cosigner) or was a no-op replay.
+    auto musig2_contribution_count = [](const PartiallySignedTransaction& p) {
+        size_t n = 0;
+        for (const auto& input : p.inputs) {
+            for (const auto& [_, nonces] : input.m_musig2_pubnonces) n += nonces.size();
+            for (const auto& [_, sigs] : input.m_musig2_partial_sigs) n += sigs.size();
+        }
+        return n;
+    };
+    const size_t musig2_count_before = musig2_contribution_count(psbt);
+    common::PSBTFillOptions local_options{options};
+    local_options.finalize = false;
+    if (auto err = DescriptorScriptPubKeyMan::FillPSBT(psbt, txdata, local_options, n_signed)) {
+        return err;
+    }
+    const bool local_added_musig2 = musig2_contribution_count(psbt) > musig2_count_before;
+
+    // Already complete if every input is now signed.
+    bool complete = true;
+    for (const auto& input : psbt.inputs) {
+        complete &= PSBTInputSigned(input);
+    }
+    if (complete) return {};
+
+    std::string failure_reason;
+    bool signer_ok;
+    try {
+        signer_ok = signer.SignTransactionPolicy(psbt, name, descriptor_template, keys_info, hmac, failure_reason);
+    } catch (const std::runtime_error& e) {
+        // The signer subprocess exited non-zero (e.g. device unplugged
+        // mid-flow, or hwi-rs reporting a transport error). Treat it
+        // the same as a structured `{"error":...}` response so the
+        // caller sees a uniform EXTERNAL_SIGNER_FAILED instead of an
+        // uncaught exception bubbling up through the RPC layer.
+        signer_ok = false;
+        failure_reason = e.what();
+    }
+    if (!signer_ok) {
+        LogWarning("Failed to sign with policy %s: %s\n", name, failure_reason);
+        // Soft-fail for multi-round MuSig2 flows, but only when the
+        // local pass above actually added a new MuSig2 contribution
+        // (round 1 pubnonce or round 2 partial signature) on this
+        // call. Surfacing the device error as a hard PSBTError would
+        // discard that fresh contribution and force the caller to
+        // start over once the device is back; instead we keep the
+        // partial PSBT and let the outer FillPSBT report
+        // complete=false so a follow-up walletprocesspsbt can drive
+        // the device round. If the local pass was a no-op (single-
+        // round flow, or a replay where the hot cosigner has already
+        // contributed everything it can in a previous call) we hard-
+        // fail, so callers see a clear EXTERNAL_SIGNER_FAILED instead
+        // of an unchanged PSBT being silently returned as "fine".
+        if (!local_added_musig2) {
+            return PSBTError::EXTERNAL_SIGNER_FAILED;
+        }
+        return {};
+    }
+    // For multi-round flows like MuSig2, the local signer above may have
+    // contributed its share (round 1 pubnonce, round 2 partial signature)
+    // before the external signer added its own. After round 2 both
+    // cosigners' partial signatures are present in the PSBT, but neither
+    // FillPSBT call attempted aggregation -- the local one ran before the
+    // external signer's partial sig was available, and the external signer
+    // doesn't aggregate on its own. When the caller asked for finalization,
+    // run FinalizePSBT to aggregate any complete MuSig2 sessions into a
+    // Schnorr key-path signature. Round 1 (only nonces) is a no-op.
+    if (options.finalize) {
+        FinalizePSBT(psbt);
+    }
+    return {};
+}
+
+util::Result<std::optional<std::string>> ExternalSignerScriptPubKeyMan::RegisterPolicy(const ExternalSigner& signer,
+                                                                                       const std::string& name,
+                                                                                       const std::string& descriptor_template,
+                                                                                       const std::vector<std::string>& keys_info) const
+{
+    const UniValue& result{signer.RegisterPolicy(name, descriptor_template, keys_info)};
+
+    const UniValue& error = result.find_value("error");
+    if (error.isStr()) return util::Error{strprintf(_("Signer returned error: %s"), error.getValStr())};
+
+    const UniValue& ret_hmac = result.find_value("hmac");
+    if (ret_hmac.isNull()) return std::optional<std::string>{};
+    if (!ret_hmac.isStr()) return util::Error{_("Signer returned invalid hmac field")};
+    const std::string hmac{ret_hmac.getValStr()};
+    if (!IsHex(hmac)) return util::Error{strprintf(_("Signer return invalid hmac: %s"), hmac)};
+
+    return std::optional<std::string>{hmac};
+}
+
 } // namespace wallet

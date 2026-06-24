@@ -105,6 +105,100 @@ class ImportDescriptorsTest(BitcoinTestFramework):
                              wallet=wallet)
         wallet.unloadwallet()
 
+    def test_autobind_xprv(self):
+        self.log.info("Test importdescriptors autobinds xprvs the wallet already knows")
+
+        # --- Single-key autobind: wpkh(xpub) where the xprv is in `addhdkey` ---
+        self.nodes[0].createwallet(wallet_name="autobind_single", blank=True)
+        wallet = self.nodes[0].get_wallet_rpc("autobind_single")
+        wallet.addhdkey()
+        info = wallet.derivehdkey("m/44h/1h/0h")
+        # `derivehdkey` returns just `[fp/44h/1h/0h]` -- splice in the xpub.
+        origin = info["origin"]
+        xpub = info["xpub"]
+        desc_xpub_only = f"wpkh({origin}{xpub}/0/*)"
+        self.test_importdesc({"desc": descsum_create(desc_xpub_only),
+                              "active": True,
+                              "range": [0, 2],
+                              "timestamp": "now"},
+                             success=True,
+                             wallet=wallet)
+        # If autobind worked we have a fully-signing descriptor.
+        addr = wallet.getnewaddress(address_type="bech32")
+        # w0 lives on node 0 and has the mining coins.
+        w0 = self.nodes[0].get_wallet_rpc("w0")
+        w0.sendtoaddress(addr, 1)
+        self.generate(self.nodes[0], 1)
+        utxo = wallet.listunspent()[0]
+        rawtx = wallet.createrawtransaction([utxo], {w0.getnewaddress(): 0.999})
+        signed = wallet.signrawtransactionwithwallet(rawtx)
+        assert_equal(signed["complete"], True)
+        wallet.unloadwallet()
+
+        # --- Origin fingerprint matches no wallet seed: autobind is a no-op,
+        #     so the import fails with the existing private-keys-required check.
+        #     This documents the boundary autobind operates within. ---
+        self.nodes[0].createwallet(wallet_name="autobind_nomatch", blank=True)
+        nomatch = self.nodes[0].get_wallet_rpc("autobind_nomatch")
+        nomatch.addhdkey()
+        # An xpub from a *different* wallet -> different master fingerprint.
+        self.nodes[0].createwallet(wallet_name="autobind_other", blank=True)
+        other = self.nodes[0].get_wallet_rpc("autobind_other")
+        other.addhdkey()
+        other_info = other.derivehdkey("m/44h/1h/0h")
+        other.unloadwallet()
+        desc_no_match = f"wpkh({other_info['origin']}{other_info['xpub']}/0/*)"
+        self.test_importdesc({"desc": descsum_create(desc_no_match),
+                              "active": True,
+                              "range": [0, 2],
+                              "timestamp": "now"},
+                             success=False,
+                             error_code=-4,
+                             error_message="Cannot import descriptor without private keys to a wallet with private keys enabled",
+                             wallet=nomatch)
+        nomatch.unloadwallet()
+
+        # --- MuSig2 autobind: a single wallet holds *both* cosigner xprvs.
+        #     Import the xpub-only `tr(musig(...))` descriptor and let the
+        #     RPC bind both xprvs by master fingerprint, so the wallet can
+        #     sign locally without a co-signing partner. ---
+        self.nodes[0].createwallet(wallet_name="autobind_musig", blank=True)
+        mw = self.nodes[0].get_wallet_rpc("autobind_musig")
+        a_xpub = mw.addhdkey()["xpub"]
+        b_xpub = mw.addhdkey()["xpub"]
+        a_info = mw.derivehdkey("m/87h/1h/0h", hdkey=a_xpub)
+        b_info = mw.derivehdkey("m/87h/1h/0h", hdkey=b_xpub)
+        cos_a = f"{a_info['origin']}{a_info['xpub']}"
+        cos_b = f"{b_info['origin']}{b_info['xpub']}"
+        musig_desc = f"tr(musig({cos_a},{cos_b})/<0;1>/*)"
+        self.test_importdesc({"desc": descsum_create(musig_desc),
+                              "active": True,
+                              "range": [0, 2],
+                              "timestamp": "now"},
+                             success=True,
+                             warnings=["Not all private keys provided. Some wallet functionality may return unexpected errors",
+                                       "Not all private keys provided. Some wallet functionality may return unexpected errors"],
+                             wallet=mw)
+        # Round-trip a real spend: with both xprvs autobound, walletprocesspsbt
+        # should run both MuSig2 rounds in one shot and finalize.
+        addr = mw.getnewaddress(address_type="bech32m")
+        w0.sendtoaddress(addr, 1)
+        self.generate(self.nodes[0], 1)
+        utxo = mw.listunspent()[0]
+        psbt = mw.walletcreatefundedpsbt(
+            inputs=[utxo],
+            outputs=[{w0.getnewaddress(): 0.5}],
+            change_type="bech32m",
+            changePosition=1,
+        )["psbt"]
+        # Round 1: pubnonces.
+        round1 = mw.walletprocesspsbt(psbt=psbt)["psbt"]
+        # Round 2: partial sigs + finalize.
+        proc = mw.walletprocesspsbt(psbt=round1, finalize=True)
+        assert_equal(proc["complete"], True)
+        mw.sendrawtransaction(proc["hex"])
+        mw.unloadwallet()
+
     def test_import_unused_noprivs(self):
         self.log.info("Test import of unused(KEY) to wallet without privkeys")
         self.nodes[0].createwallet(wallet_name="import_unused_noprivs", disable_private_keys=True)
@@ -960,6 +1054,7 @@ class ImportDescriptorsTest(BitcoinTestFramework):
         self.test_import_unused_key_existing()
         self.test_import_unused_noprivs()
         self.test_rescan_fails_import()
+        self.test_autobind_xprv()
 
 if __name__ == '__main__':
     ImportDescriptorsTest(__file__).main()
