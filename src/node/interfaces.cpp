@@ -884,6 +884,19 @@ public:
                                                           m_node(node)
     {
         assert(m_block_template);
+        if (m_node.block_template_manager) {
+            // Track transaction references here because their memory footprint
+            // is tied to this template object's lifetime.
+            m_node.block_template_manager->TrackTemplateTransactions(m_block_template->block.vtx);
+        }
+    }
+
+    ~BlockTemplateImpl() override
+    {
+        if (m_node.block_template_manager) {
+            // Transaction references are held until this template object is released.
+            m_node.block_template_manager->StopTrackingTemplateTransactions(m_block_template->block.vtx);
+        }
     }
 
     CBlockHeader getBlockHeader() override

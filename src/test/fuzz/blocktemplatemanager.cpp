@@ -101,6 +101,8 @@ FUZZ_TARGET(block_template_manager, .init = initialize_block_template_manager)
         }
         auto block_template = block_template_manager.CreateNewTemplate(options);
         assert(block_template);
+        block_template_manager.TrackTemplateTransactions(block_template->block.vtx);
+        block_template_manager.SanityCheck();
         const auto resolved{node::FlattenMiningOptions(node::MergeMiningOptions(options, block_template_manager.GetInitBlockCreateOptions()))};
         const CBlock& block{block_template->block};
         // Coinbase is first; the per-tx vectors exclude it and track the block.
@@ -122,5 +124,7 @@ FUZZ_TARGET(block_template_manager, .init = initialize_block_template_manager)
         for (const CAmount fee : block_template->vTxFees)
             assert(fee >= 0);
         if (!resolved.use_mempool) assert(block.vtx.size() == 1);
+        block_template_manager.StopTrackingTemplateTransactions(block_template->block.vtx);
+        block_template_manager.SanityCheck();
     }
 }
