@@ -173,6 +173,16 @@ public:
     void StopTrackingTemplateTransactions(const std::vector<CTransactionRef>& txs)
         EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
+    /**
+     * Estimate non-mempool memory footprint of transaction data referenced by block
+     * templates.
+     *
+     * Result is not guaranteed to be an accurate snapshot, because it does not
+     * lock mempool.cs while iterating over transaction references.
+     */
+    size_t GetTemplateMemoryUsage() const
+        EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
     /** Submit a block via ProcessNewBlock and capture validation state. */
     bool SubmitBlock(const std::shared_ptr<const CBlock>& block, bool* new_block, std::string& reason, std::string& debug);
 
