@@ -33,70 +33,38 @@ constexpr uint8_t DB_TXINDEX{'t'};
 std::unique_ptr<TxIndex> g_txindex;
 
 
-/** Access to the txindex database (indexes/txindex/) */
-class TxIndex::DB : public BaseIndex::DB
+/** Access to a transaction location index database. */
+class BaseTransactionIndex::DB : public BaseIndex::DB
 {
 public:
-    explicit DB(size_t n_cache_size, bool f_memory = false, bool f_wipe = false);
-
-    /// Read the disk location of the transaction data with the given hash. Returns false if the
-    /// transaction hash is not indexed.
-    bool ReadTxPos(const Txid& txid, CDiskTxPos& pos) const;
-
-    /// Write a batch of transaction positions to the DB.
-    void WriteTxs(const std::vector<std::pair<Txid, CDiskTxPos>>& v_pos);
+    explicit DB(const fs::path& path, size_t n_cache_size, bool f_memory = false, bool f_wipe = false);
 };
 
-TxIndex::DB::DB(size_t n_cache_size, bool f_memory, bool f_wipe) :
-    BaseIndex::DB(gArgs.GetDataDirNet() / "indexes" / "txindex", n_cache_size, f_memory, f_wipe)
+BaseTransactionIndex::DB::DB(const fs::path& path, size_t n_cache_size, bool f_memory, bool f_wipe) :
+    BaseIndex::DB(path, n_cache_size, f_memory, f_wipe)
 {}
 
-bool TxIndex::DB::ReadTxPos(const Txid& txid, CDiskTxPos& pos) const
-{
-    return Read(std::make_pair(DB_TXINDEX, txid.ToUint256()), pos);
-}
-
-void TxIndex::DB::WriteTxs(const std::vector<std::pair<Txid, CDiskTxPos>>& v_pos)
-{
-    CDBBatch batch(*this);
-    for (const auto& [txid, pos] : v_pos) {
-        batch.Write(std::make_pair(DB_TXINDEX, txid.ToUint256()), pos);
-    }
-    WriteBatch(batch);
-}
-
-TxIndex::TxIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, bool f_memory, bool f_wipe)
-    : BaseIndex(std::move(chain), "txindex", "txidx"), m_db(std::make_unique<TxIndex::DB>(n_cache_size, f_memory, f_wipe))
+BaseTransactionIndex::BaseTransactionIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, std::string index_name, std::string thread_name, const char* path_name, bool f_memory, bool f_wipe)
+    : BaseIndex(std::move(chain), std::move(index_name), std::move(thread_name)),
+      m_db(std::make_unique<BaseTransactionIndex::DB>(gArgs.GetDataDirNet() / "indexes" / path_name, n_cache_size, f_memory, f_wipe))
 {}
 
-TxIndex::~TxIndex() = default;
+BaseTransactionIndex::~BaseTransactionIndex() = default;
 
-bool TxIndex::CustomAppend(const interfaces::BlockInfo& block)
+bool BaseTransactionIndex::CustomAppend(const interfaces::BlockInfo& block)
 {
     // Exclude genesis block transaction because outputs are not spendable.
     if (block.height == 0) return true;
 
     assert(block.data);
-    CDiskTxPos pos({block.file_number, block.data_pos}, GetSizeOfCompactSize(block.data->vtx.size()));
-    std::vector<std::pair<Txid, CDiskTxPos>> vPos;
-    vPos.reserve(block.data->vtx.size());
-    for (const auto& tx : block.data->vtx) {
-        vPos.emplace_back(tx->GetHash(), pos);
-        pos.nTxOffset += ::GetSerializeSize(TX_WITH_WITNESS(*tx));
-    }
-    m_db->WriteTxs(vPos);
+    WriteBlock(block);
     return true;
 }
 
-BaseIndex::DB& TxIndex::GetDB() const { return *m_db; }
+BaseIndex::DB& BaseTransactionIndex::GetDB() const { return *m_db; }
 
-bool TxIndex::FindTx(const Txid& tx_hash, uint256& block_hash, CTransactionRef& tx) const
+bool BaseTransactionIndex::FindTx(const CDiskTxPos& postx, const std::function<bool(const CTransactionRef&)>& match_tx, uint256& block_hash, CTransactionRef& tx) const
 {
-    CDiskTxPos postx;
-    if (!m_db->ReadTxPos(tx_hash, postx)) {
-        return false;
-    }
-
     AutoFile file{m_chainstate->m_blockman.OpenBlockFile(postx, true)};
     if (file.IsNull()) {
         LogError("OpenBlockFile failed");
@@ -111,10 +79,39 @@ bool TxIndex::FindTx(const Txid& tx_hash, uint256& block_hash, CTransactionRef& 
         LogError("Deserialize or I/O error - %s", e.what());
         return false;
     }
-    if (tx->GetHash() != tx_hash) {
-        LogError("txid mismatch");
+    if (!match_tx(tx)) {
+        LogError("transaction index hash mismatch");
         return false;
     }
     block_hash = header.GetHash();
     return true;
+}
+
+TxIndex::TxIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, bool f_memory, bool f_wipe)
+    : BaseTransactionIndex(std::move(chain), n_cache_size, "txindex", "txidx", "txindex", f_memory, f_wipe)
+{}
+
+TxIndex::~TxIndex() = default;
+
+void TxIndex::WriteBlock(const interfaces::BlockInfo& block) const
+{
+    assert(block.data);
+    CDBBatch batch(*m_db);
+    CDiskTxPos pos({block.file_number, block.data_pos}, GetSizeOfCompactSize(block.data->vtx.size()));
+    for (const auto& tx : block.data->vtx) {
+        batch.Write(std::make_pair(DB_TXINDEX, tx->GetHash().ToUint256()), pos);
+        pos.nTxOffset += ::GetSerializeSize(TX_WITH_WITNESS(*tx));
+    }
+    m_db->WriteBatch(batch);
+}
+
+bool TxIndex::FindTx(const Txid& tx_hash, uint256& block_hash, CTransactionRef& tx) const
+{
+    CDiskTxPos postx;
+    if (!m_db->Read(std::make_pair(DB_TXINDEX, tx_hash.ToUint256()), postx)) {
+        return false;
+    }
+    return BaseTransactionIndex::FindTx(postx, [&](const CTransactionRef& candidate) {
+        return candidate->GetHash() == tx_hash;
+    }, block_hash, tx);
 }
