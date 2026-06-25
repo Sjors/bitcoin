@@ -38,6 +38,7 @@ static void SetupWalletToolArgs(ArgsManager& argsman)
     argsman.AddArg("-datadir=<dir>", "Specify data directory", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::OPTIONS);
     argsman.AddArg("-wallet=<wallet-name>", "Specify wallet name", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::OPTIONS);
     argsman.AddArg("-dumpfile=<file name>", "When used with 'dump', writes out the records to this file. When used with 'createfromdump', loads the records into a new wallet.", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::COMMAND_OPTIONS);
+    argsman.AddArg("-labelsfile=<file name>", "When used with 'exportlabels', writes BIP329 wallet label records to this file. When used with 'importlabels', imports BIP329 wallet label records from this file.", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::COMMAND_OPTIONS);
     argsman.AddArg("-debug=<category>", "Output debugging information (default: 0).", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-printtoconsole", "Send trace/debug info to console (default: 1 when no -debug is true, 0 otherwise).", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
 
@@ -45,6 +46,8 @@ static void SetupWalletToolArgs(ArgsManager& argsman)
     argsman.AddCommand("create", "Create a new descriptor wallet file");
     argsman.AddCommand("dump", "Print out all of the wallet key-value records", {"-dumpfile"});
     argsman.AddCommand("createfromdump", "Create new wallet file from dumped records", {"-dumpfile"});
+    argsman.AddCommand("exportlabels", "Export wallet labels in BIP329 format", {"-labelsfile"});
+    argsman.AddCommand("importlabels", "Import wallet labels in BIP329 format", {"-labelsfile"});
 }
 
 static std::optional<int> WalletAppInit(ArgsManager& args, int argc, char* argv[])
