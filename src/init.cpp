@@ -51,6 +51,7 @@
 #include <netaddress.h>
 #include <netbase.h>
 #include <netgroup.h>
+#include <node/block_template_manager.h>
 #include <node/blockmanager_args.h>
 #include <node/blockstorage.h>
 #include <node/caches.h>
@@ -372,6 +373,12 @@ void Shutdown(NodeContext& node)
         if (node.validation_signals) {
             node.validation_signals->UnregisterValidationInterface(node.fee_estimator.get());
         }
+    }
+
+    if (node.block_template_manager) {
+        Assert(node.validation_signals);
+        node.validation_signals->UnregisterValidationInterface(node.block_template_manager.get());
+        node.block_template_manager.reset();
     }
 
     // FlushStateToDisk generates a ChainStateFlushed callback, which we should avoid missing
@@ -1341,9 +1348,6 @@ static ChainstateLoadResult InitAndLoadChainstate(
     if (!mempool_error.empty()) {
         return {ChainstateLoadStatus::FAILURE_FATAL, mempool_error};
     }
-    auto mining_args{node::ReadMiningArgs(args)};
-    Assert(mining_args); // no error can happen, already checked in AppInitParameterInteraction
-    node.mining_args = std::move(*mining_args);
     LogInfo("* Using %.1f MiB for in-memory UTXO set (plus up to %.1f MiB of unused mempool space)",
             cache_sizes.coins / double(1_MiB),
             mempool_opts.max_size_bytes / double(1_MiB));
@@ -1912,6 +1916,10 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     ChainstateManager& chainman = *Assert(node.chainman);
     auto& kernel_notifications{*Assert(node.notifications)};
+    auto mining_args{node::ReadMiningArgs(args)};
+    Assert(mining_args); // no error can happen, already checked in AppInitParameterInteraction
+    node.block_template_manager = std::make_unique<node::BlockTemplateManager>(*node.mempool, chainman, kernel_notifications, std::move(*mining_args));
+    validation_signals.RegisterValidationInterface(node.block_template_manager.get());
 
     assert(!node.peerman);
     node.peerman = PeerManager::make(*node.connman, *node.addrman,

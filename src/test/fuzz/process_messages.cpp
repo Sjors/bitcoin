@@ -41,9 +41,12 @@ TestingSetup* g_setup;
 void ResetChainman(TestingSetup& setup)
 {
     SetMockTime(setup.m_node.chainman->GetParams().GenesisBlock().Time());
+    setup.ResetBlockTemplateManager();
     setup.m_node.chainman.reset();
     setup.m_make_chainman();
     setup.LoadVerifyActivateChainstate();
+    setup.CreateBlockTemplateManager();
+
     node::BlockCreateOptions options;
     for (int i = 0; i < 2 * COINBASE_MATURITY; i++) {
         MineBlock(setup.m_node, options);
@@ -59,6 +62,7 @@ void initialize_process_messages()
             {}),
     };
     g_setup = testing_setup.get();
+    MockableSteadyClock::SetMockTime(MockableSteadyClock::INITIAL_MOCK_TIME);
     ResetChainman(*g_setup);
 }
 
@@ -66,6 +70,7 @@ FUZZ_TARGET(process_messages, .init = initialize_process_messages)
 {
     SeedRandomStateForTest(SeedRand::ZEROS);
     FuzzedDataProvider fuzzed_data_provider(buffer.data(), buffer.size());
+    MockableSteadyClock::SetMockTime(MockableSteadyClock::INITIAL_MOCK_TIME);
 
     auto& node{g_setup->m_node};
     auto& connman{static_cast<ConnmanTestMsg&>(*node.connman)};

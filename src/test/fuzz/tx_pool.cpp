@@ -72,7 +72,7 @@ void initialize_tx_pool()
     static const auto testing_setup = MakeNoLogFileContext<const TestingSetup>();
     g_setup = testing_setup.get();
     SetMockTime(WITH_LOCK(g_setup->m_node.chainman->GetMutex(), return g_setup->m_node.chainman->ActiveTip()->Time()));
-
+    MockableSteadyClock::SetMockTime(MockableSteadyClock::INITIAL_MOCK_TIME);
     for (int i = 0; i < 2 * COINBASE_MATURITY; ++i) {
         COutPoint prevout{MineBlock(g_setup->m_node, {
             .coinbase_output_script = P2WSH_OP_TRUE,
@@ -241,6 +241,7 @@ void CheckATMPInvariants(const MempoolAcceptResult& res, bool txid_in_mempool, b
 
 FUZZ_TARGET(tx_pool_standard, .init = initialize_tx_pool)
 {
+    MockableSteadyClock::SetMockTime(MockableSteadyClock::INITIAL_MOCK_TIME);
     SeedRandomStateForTest(SeedRand::ZEROS);
     FuzzedDataProvider fuzzed_data_provider(buffer.data(), buffer.size());
     const auto& node = g_setup->m_node;
@@ -428,6 +429,7 @@ FUZZ_TARGET(tx_pool_standard, .init = initialize_tx_pool)
 
 FUZZ_TARGET(tx_pool, .init = initialize_tx_pool)
 {
+    MockableSteadyClock::SetMockTime(MockableSteadyClock::INITIAL_MOCK_TIME);
     SeedRandomStateForTest(SeedRand::ZEROS);
     FuzzedDataProvider fuzzed_data_provider(buffer.data(), buffer.size());
     const auto& node = g_setup->m_node;

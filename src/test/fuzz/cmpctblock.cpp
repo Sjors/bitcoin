@@ -112,13 +112,16 @@ void ResetChainmanAndMempool(TestingSetup& setup)
     SetMockTime(Params().GenesisBlock().Time());
 
     bilingual_str error{};
-    setup.m_node.mempool.reset();
-    setup.m_node.mempool = std::make_unique<CTxMemPool>(MemPoolOptionsForTest(setup.m_node), error);
+    auto& node = setup.m_node;
+    node.mempool.reset();
+    node.mempool = std::make_unique<CTxMemPool>(MemPoolOptionsForTest(node), error);
     Assert(error.empty());
 
-    setup.m_node.chainman.reset();
+    setup.ResetBlockTemplateManager();
+    node.chainman.reset();
     setup.m_make_chainman();
     setup.LoadVerifyActivateChainstate();
+    setup.CreateBlockTemplateManager();
 
     node::BlockCreateOptions options;
     options.coinbase_output_script = P2WSH_OP_TRUE;
@@ -155,6 +158,7 @@ void initialize_cmpctblock()
     g_nBits = Params().GenesisBlock().nBits;
     // Replace validation_signals before creating chainman and mempool so they use it.
     testing_setup->m_node.validation_signals = std::make_unique<ValidationSignals>(std::make_unique<ImmediateBackgroundTaskRunner>());
+    MockableSteadyClock::SetMockTime(MockableSteadyClock::INITIAL_MOCK_TIME);
     ResetChainmanAndMempool(*g_setup);
 }
 
@@ -162,6 +166,7 @@ FUZZ_TARGET(cmpctblock, .init = initialize_cmpctblock)
 {
     SeedRandomStateForTest(SeedRand::ZEROS);
     FuzzedDataProvider fuzzed_data_provider(buffer.data(), buffer.size());
+    MockableSteadyClock::SetMockTime(MockableSteadyClock::INITIAL_MOCK_TIME);
 
     FakeNodeClock clock{1610000000s};
 
