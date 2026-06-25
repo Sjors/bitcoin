@@ -32,6 +32,8 @@ static const size_t DBWRAPPER_MAX_FILE_SIZE{32_MiB};
 struct DBOptions {
     //! Compact database on startup.
     bool force_compact = false;
+    //! Maintain LevelDB bloom filters for point lookups.
+    bool use_bloom_filter = true;
 };
 
 //! Application-specific storage settings.
