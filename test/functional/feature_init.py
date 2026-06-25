@@ -20,6 +20,7 @@ from test_framework.util import assert_equal
 
 ALL_INDEX_ARGS = [
     '-txindex=1',
+    '-wtxindex=1',
     '-blockfilterindex=1',
     '-coinstatsindex=1',
     '-txospenderindex=1',
@@ -78,6 +79,7 @@ class InitTest(BitcoinTestFramework):
             b'addcon thread start',
             b'initload thread start',
             b'txidx thread start',
+            b'wtxidx thread start',
             b'blkfltbscidx thread start',
             b'coinstatsidx thread start',
             b'txospenderidx thread start',
@@ -141,6 +143,11 @@ class InitTest(BitcoinTestFramework):
                 'startup_args': ['-txindex=1'],
             },
             {
+                'filepath_glob': 'indexes/wtxindex/MANIFEST*',
+                'error_message': 'LevelDB error: Corruption: CURRENT points to a non-existent file',
+                'startup_args': ['-wtxindex=1'],
+            },
+            {
                 'filepath_glob': 'indexes/txospenderindex/db/MANIFEST*',
                 'error_message': 'LevelDB error: Corruption: CURRENT points to a non-existent file',
                 'startup_args': ['-txospenderindex=1'],
@@ -185,6 +192,16 @@ class InitTest(BitcoinTestFramework):
                 'filepath_glob': 'indexes/txindex/CURRENT',
                 'error_message': 'LevelDB error: Corruption',
                 'startup_args': ['-txindex=1'],
+            },
+            {
+                'filepath_glob': 'indexes/wtxindex/*.log',
+                'error_message': 'LevelDB error: Corruption',
+                'startup_args': ['-wtxindex=1'],
+            },
+            {
+                'filepath_glob': 'indexes/wtxindex/CURRENT',
+                'error_message': 'LevelDB error: Corruption',
+                'startup_args': ['-wtxindex=1'],
             },
             {
                 'filepath_glob': 'indexes/txospenderindex/db/*',
