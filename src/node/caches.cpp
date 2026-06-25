@@ -21,6 +21,8 @@
 // a meaningful difference: https://github.com/bitcoin/bitcoin/pull/8273#issuecomment-229601991
 //! Max memory allocated to tx index DB specific cache in bytes.
 static constexpr size_t MAX_TX_INDEX_CACHE{1_GiB};
+//! Max memory allocated to wtx index DB specific cache in bytes.
+static constexpr size_t MAX_WTX_INDEX_CACHE{1_GiB};
 //! Max memory allocated to all block filter index caches combined in bytes.
 static constexpr size_t MAX_FILTER_INDEX_CACHE{1_GiB};
 //! Max memory allocated to tx spenderindex DB specific cache in bytes.
@@ -61,6 +63,8 @@ CacheSizes CalculateCacheSizes(const ArgsManager& args, size_t n_indexes)
     // Allocate proportional to usage pattern benefit:
     // - txindex (10%): serves getrawtransaction RPCs with mostly unique,
     //   non-repetitive lookups across the entire blockchain.
+    // - wtxindex (10%): serves wtxid lookups with the same usage pattern as
+    //   txindex.
     // - blockfilterindex (5%): serves BIP 157 light clients that repeatedly
     //   query recent blocks, benefiting from LevelDB cache, but the
     //   working set for a typical 2-week offline gap is ~200kiB, well within 5%
@@ -71,6 +75,7 @@ CacheSizes CalculateCacheSizes(const ArgsManager& args, size_t n_indexes)
     //   does not seem to suggest it would be necessary to cache.
     IndexCacheSizes index_sizes;
     index_sizes.tx_index = std::min(total_cache * 10 / 100, args.GetBoolArg("-txindex", DEFAULT_TXINDEX) ? MAX_TX_INDEX_CACHE : 0);
+    index_sizes.wtx_index = std::min(total_cache * 10 / 100, args.GetBoolArg("-wtxindex", DEFAULT_WTXINDEX) ? MAX_WTX_INDEX_CACHE : 0);
     index_sizes.txospender_index = std::min(total_cache * 5 / 100, args.GetBoolArg("-txospenderindex", DEFAULT_TXOSPENDERINDEX) ? MAX_TXOSPENDER_INDEX_CACHE : 0);
     if (n_indexes > 0) {
         size_t max_cache = std::min(total_cache * 5 / 100, MAX_FILTER_INDEX_CACHE);
@@ -78,6 +83,7 @@ CacheSizes CalculateCacheSizes(const ArgsManager& args, size_t n_indexes)
         total_cache -= index_sizes.filter_index * n_indexes;
     }
     total_cache -= index_sizes.tx_index;
+    total_cache -= index_sizes.wtx_index;
     total_cache -= index_sizes.txospender_index;
     return {index_sizes, kernel::CacheSizes{total_cache}};
 }
