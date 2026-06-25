@@ -352,4 +352,111 @@ BOOST_FIXTURE_TEST_CASE(txindex_reorg_keeps_stale_entries, TestChain100Setup)
     txindex.Stop();
 }
 
+BOOST_FIXTURE_TEST_CASE(wtxindex_initial_sync, TestChain100Setup)
+{
+    WtxIndex wtxindex(interfaces::MakeChain(m_node), /*n_cache_size=*/1_MiB, /*f_memory=*/true);
+    BOOST_REQUIRE(wtxindex.Init());
+
+    // Transaction should not be found in the index before it is started.
+    for (const auto& txn : m_coinbase_txns) {
+        BOOST_CHECK(!wtxindex.FindTx(txn->GetWitnessHash()));
+    }
+
+    // BlockUntilSyncedToCurrentChain should return false before wtxindex is started.
+    BOOST_CHECK(!wtxindex.BlockUntilSyncedToCurrentChain());
+
+    wtxindex.Sync();
+
+    // Check that wtxindex excludes genesis block transactions.
+    const CBlock& genesis_block = Params().GenesisBlock();
+    for (const auto& txn : genesis_block.vtx) {
+        BOOST_CHECK(!wtxindex.FindTx(txn->GetWitnessHash()));
+    }
+
+    // Check that wtxindex has all txs that were in the chain before it started.
+    for (const auto& txn : m_coinbase_txns) {
+        const auto result{wtxindex.FindTx(txn->GetWitnessHash())};
+        BOOST_REQUIRE(result);
+        BOOST_CHECK(result->tx->GetWitnessHash() == txn->GetWitnessHash());
+    }
+
+    // Check that new transactions in new blocks make it into the index.
+    for (int i = 0; i < 10; i++) {
+        CScript coinbase_script_pub_key = GetScriptForDestination(PKHash(coinbaseKey.GetPubKey()));
+        std::vector<CMutableTransaction> no_txns;
+        const CBlock& block = CreateAndProcessBlock(no_txns, coinbase_script_pub_key);
+        const CTransaction& txn = *block.vtx[0];
+
+        BOOST_CHECK(wtxindex.BlockUntilSyncedToCurrentChain());
+        const auto result{wtxindex.FindTx(txn.GetWitnessHash())};
+        BOOST_REQUIRE(result);
+        BOOST_CHECK(result->tx->GetWitnessHash() == txn.GetWitnessHash());
+    }
+
+    // shutdown sequence (c.f. Shutdown() in init.cpp)
+    wtxindex.Stop();
+}
+
+BOOST_FIXTURE_TEST_CASE(wtxindex_collision_scan_path, TestChain100Setup)
+{
+    WtxIndex wtxindex(interfaces::MakeChain(m_node), /*n_cache_size=*/1_MiB, /*f_memory=*/true);
+    BOOST_REQUIRE(wtxindex.Init());
+    wtxindex.Sync();
+
+    CDBWrapper& db{TxIndexTest::GetDB(wtxindex)};
+    const SipHasher13UJ hasher{ReadHasher(db)};
+
+    const Wtxid fake_wtxid{m_coinbase_txns.back()->GetWitnessHash()};
+    const Wtxid target_wtxid{m_coinbase_txns.front()->GetWitnessHash()};
+    const auto fake_prefix{txindex::CreateKeyPrefix(hasher, fake_wtxid)};
+    const auto target_prefix{txindex::CreateKeyPrefix(hasher, target_wtxid)};
+    BOOST_REQUIRE(fake_prefix != target_prefix);
+
+    const auto fake_bucket{BucketPositions(db, fake_prefix)};
+    BOOST_REQUIRE_EQUAL(fake_bucket.size(), 1U);
+    const txindex::BlockTxPosition fake_pos{fake_bucket.front()};
+    db.Write(txindex::DBKey{target_prefix, fake_pos}, txindex::EMPTY_VALUE);
+
+    const auto result{wtxindex.FindTx(target_wtxid)};
+    BOOST_REQUIRE(result);
+    BOOST_CHECK(result->tx->GetWitnessHash() == target_wtxid);
+
+    db.Erase(txindex::DBKey{target_prefix, fake_pos});
+    wtxindex.Stop();
+}
+
+BOOST_FIXTURE_TEST_CASE(wtxindex_reorg_ignores_stale_entries, TestChain100Setup)
+{
+    WtxIndex wtxindex(interfaces::MakeChain(m_node), /*n_cache_size=*/1_MiB, /*f_memory=*/true);
+    BOOST_REQUIRE(wtxindex.Init());
+    wtxindex.Sync();
+
+    const CScript stale_coinbase_script{CScript() << OP_TRUE};
+    const CBlock& stale_block{CreateAndProcessBlock({}, stale_coinbase_script)};
+    const Wtxid stale_wtxid{stale_block.vtx.front()->GetWitnessHash()};
+    BOOST_REQUIRE(wtxindex.BlockUntilSyncedToCurrentChain());
+
+    const auto result{wtxindex.FindTx(stale_wtxid)};
+    BOOST_REQUIRE(result);
+    BOOST_CHECK(result->tx->GetWitnessHash() == stale_wtxid);
+    const uint256 stale_block_hash{result->block_hash};
+
+    ChainstateManager& chainman{*m_node.chainman};
+    {
+        CBlockIndex* tip{WITH_LOCK(cs_main, return chainman.ActiveChain().Tip())};
+        BOOST_REQUIRE(tip->GetBlockHash() == stale_block_hash);
+        BlockValidationState state;
+        BOOST_REQUIRE(chainman.ActiveChainstate().InvalidateBlock(state, tip));
+    }
+
+    const CScript replacement_coinbase_script{CScript() << OP_FALSE};
+    CreateAndProcessBlock({}, replacement_coinbase_script);
+    CreateAndProcessBlock({}, replacement_coinbase_script);
+    BOOST_REQUIRE(wtxindex.BlockUntilSyncedToCurrentChain());
+
+    BOOST_CHECK(!wtxindex.FindTx(stale_wtxid));
+
+    wtxindex.Stop();
+}
+
 BOOST_AUTO_TEST_SUITE_END()

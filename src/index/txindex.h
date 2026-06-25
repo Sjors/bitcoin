@@ -23,6 +23,7 @@ class TxIndexTest;
 }
 
 inline constexpr bool DEFAULT_TXINDEX{false};
+inline constexpr bool DEFAULT_WTXINDEX{false};
 
 /// A found transaction and the hash of the block that contains it.
 struct TxIndexResult {
@@ -95,7 +96,30 @@ public:
     std::optional<TxIndexResult> FindTx(const Txid& tx_hash) const;
 };
 
+/**
+ * WtxIndex is used to look up transactions included in the blockchain by wtxid.
+ */
+class WtxIndex final : public BaseTransactionIndex
+{
+private:
+    uint256 GetHash(const CTransaction& tx) const override { return tx.GetWitnessHash().ToUint256(); }
+
+public:
+    /// Constructs the index, which becomes available to be queried.
+    explicit WtxIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, bool f_memory = false, bool f_wipe = false);
+
+    virtual ~WtxIndex() override;
+
+    /// Look up a transaction by wtxid.
+    ///
+    /// @param[in]   wtx_hash  The witness hash of the transaction to be returned.
+    /// @return  the transaction and containing block hash, or nullopt if it is not found
+    std::optional<TxIndexResult> FindTx(const Wtxid& wtx_hash) const;
+};
+
 /// The global transaction index, used in GetTransaction. May be null.
 extern std::unique_ptr<TxIndex> g_txindex;
+/// The global witness transaction index. May be null.
+extern std::unique_ptr<WtxIndex> g_wtxindex;
 
 #endif // BITCOIN_INDEX_TXINDEX_H

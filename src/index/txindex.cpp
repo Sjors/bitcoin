@@ -39,6 +39,7 @@
 #include <vector>
 
 std::unique_ptr<TxIndex> g_txindex;
+std::unique_ptr<WtxIndex> g_wtxindex;
 
 namespace {
 SipHasher13UJ ReadOrCreateHasher(CDBWrapper& db)
@@ -261,3 +262,14 @@ TxIndex::TxIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, 
 }
 
 TxIndex::~TxIndex() = default;
+
+WtxIndex::WtxIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, bool f_memory, bool f_wipe)
+    : BaseTransactionIndex(std::move(chain), n_cache_size, "wtxindex", "wtxidx", "wtxindex", /*has_legacy=*/false, f_memory, f_wipe)
+{}
+
+WtxIndex::~WtxIndex() = default;
+
+std::optional<TxIndexResult> WtxIndex::FindTx(const Wtxid& wtx_hash) const
+{
+    return BaseTransactionIndex::FindTx(wtx_hash.ToUint256(), /*active_only=*/true);
+}
