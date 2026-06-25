@@ -81,6 +81,7 @@ const std::vector<std::string> RPC_COMMANDS_NOT_SAFE_FOR_FUZZING{
     "exportasmap",          // avoid writing to disk
     "generatetoaddress",    // avoid prohibitively slow execution (when `num_blocks` is large)
     "generatetodescriptor", // avoid prohibitively slow execution (when `nblocks` is large)
+    "gettxproof",           // avoid reading blocks from disk
     "gettxoutproof",        // avoid prohibitively slow execution
     "importmempool",        // avoid reading from disk
     "loadtxoutset",         // avoid reading from disk
@@ -187,6 +188,7 @@ const std::vector<std::string> RPC_COMMANDS_SAFE_FOR_FUZZING{
     "validateaddress",
     "verifychain",
     "verifymessage",
+    "verifytxproof",
     "verifytxoutproof",
     "waitforblock",
     "waitforblockheight",
