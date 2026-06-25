@@ -48,7 +48,7 @@ private:
 
 protected:
     /// Constructs the index, which becomes available to be queried.
-    explicit BaseTransactionIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, std::string index_name, std::string thread_name, const char* path_name, bool f_memory = false, bool f_wipe = false);
+    explicit BaseTransactionIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, std::string index_name, std::string thread_name, const char* path_name, bool use_bloom_filter, bool f_memory = false, bool f_wipe = false);
 
     /// Write the transaction locations for this index's key format.
     virtual void WriteBlock(const interfaces::BlockInfo& block) const = 0;

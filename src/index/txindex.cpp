@@ -43,11 +43,11 @@ std::unique_ptr<WtxIndex> g_wtxindex;
 class BaseTransactionIndex::DB : public BaseIndex::DB
 {
 public:
-    explicit DB(const fs::path& path, size_t n_cache_size, bool f_memory = false, bool f_wipe = false);
+    explicit DB(const fs::path& path, size_t n_cache_size, bool use_bloom_filter, bool f_memory = false, bool f_wipe = false);
 };
 
-BaseTransactionIndex::DB::DB(const fs::path& path, size_t n_cache_size, bool f_memory, bool f_wipe) :
-    BaseIndex::DB(path, n_cache_size, f_memory, f_wipe)
+BaseTransactionIndex::DB::DB(const fs::path& path, size_t n_cache_size, bool use_bloom_filter, bool f_memory, bool f_wipe) :
+    BaseIndex::DB(path, n_cache_size, f_memory, f_wipe, /*f_obfuscate=*/false, /*use_bloom_filter=*/use_bloom_filter)
 {}
 
 std::array<uint64_t, 2> InitWtxIndexSipHashKey(CDBWrapper& db)
@@ -61,9 +61,9 @@ std::array<uint64_t, 2> InitWtxIndexSipHashKey(CDBWrapper& db)
     return {siphash_key.first, siphash_key.second};
 }
 
-BaseTransactionIndex::BaseTransactionIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, std::string index_name, std::string thread_name, const char* path_name, bool f_memory, bool f_wipe)
+BaseTransactionIndex::BaseTransactionIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, std::string index_name, std::string thread_name, const char* path_name, bool use_bloom_filter, bool f_memory, bool f_wipe)
     : BaseIndex(std::move(chain), std::move(index_name), std::move(thread_name)),
-      m_db(std::make_unique<BaseTransactionIndex::DB>(gArgs.GetDataDirNet() / "indexes" / path_name, n_cache_size, f_memory, f_wipe))
+      m_db(std::make_unique<BaseTransactionIndex::DB>(gArgs.GetDataDirNet() / "indexes" / path_name, n_cache_size, use_bloom_filter, f_memory, f_wipe))
 {}
 
 BaseTransactionIndex::~BaseTransactionIndex() = default;
@@ -105,7 +105,7 @@ bool BaseTransactionIndex::FindTx(const CDiskTxPos& postx, const std::function<b
 }
 
 TxIndex::TxIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, bool f_memory, bool f_wipe)
-    : BaseTransactionIndex(std::move(chain), n_cache_size, "txindex", "txidx", "txindex", f_memory, f_wipe)
+    : BaseTransactionIndex(std::move(chain), n_cache_size, "txindex", "txidx", "txindex", /*use_bloom_filter=*/true, f_memory, f_wipe)
 {}
 
 TxIndex::~TxIndex() = default;
@@ -134,7 +134,7 @@ bool TxIndex::FindTx(const Txid& tx_hash, uint256& block_hash, CTransactionRef& 
 }
 
 WtxIndex::WtxIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, bool f_memory, bool f_wipe)
-    : BaseTransactionIndex(std::move(chain), n_cache_size, "wtxindex", "wtxidx", "wtxindex", f_memory, f_wipe),
+    : BaseTransactionIndex(std::move(chain), n_cache_size, "wtxindex", "wtxidx", "wtxindex", /*use_bloom_filter=*/false, f_memory, f_wipe),
       m_siphash_key{InitWtxIndexSipHashKey(*m_db)}
 {}
 
