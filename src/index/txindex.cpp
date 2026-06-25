@@ -41,28 +41,29 @@
 std::unique_ptr<TxIndex> g_txindex;
 
 namespace {
-SipHasher13UJ ReadOrCreateTxidHasher(CDBWrapper& db)
+SipHasher13UJ ReadOrCreateHasher(CDBWrapper& db)
 {
     std::pair<uint64_t, uint64_t> salt;
-    if (!db.Read(txindex::DB_TXID_HASH_SALT, salt)) {
+    if (!db.Read(txindex::DB_HASH_SALT, salt)) {
         FastRandomContext rng{};
         salt = {rng.rand64(), rng.rand64()};
-        db.Write(txindex::DB_TXID_HASH_SALT, salt, /*fSync=*/true);
+        db.Write(txindex::DB_HASH_SALT, salt, /*fSync=*/true);
     }
     return SipHasher13UJ{salt.first, salt.second};
 }
 } // namespace
 
-/** Access to the txindex database (indexes/txindex/) */
-class TxIndex::DB : public BaseIndex::DB
+/** Access to a transaction location index database. */
+class BaseTransactionIndex::DB : public BaseIndex::DB
 {
 public:
-    explicit DB(size_t n_cache_size, bool f_memory = false, bool f_wipe = false);
+    explicit DB(const fs::path& path, size_t n_cache_size, bool has_legacy, bool f_memory = false, bool f_wipe = false);
 
     /// Write a block of transaction positions to the DB.
-    void WriteTxs(const interfaces::BlockInfo& block);
+    template <typename HashFn>
+    void WriteTxs(const interfaces::BlockInfo& block, HashFn&& get_hash);
 
-    /// Used to hash the txid to compute the prefix.
+    /// Used to hash the transaction identifier to compute the prefix.
     const SipHasher13UJ m_hasher;
 
     /// Whether the database contains any legacy ('t' + txid) entries.
@@ -70,30 +71,22 @@ public:
 
     CBlockLocator ReadBestBlock() const override;
     void WriteBestBlock(CDBBatch& batch, const CBlockLocator& locator) override;
-
-private:
-    DB(size_t n_cache_size, bool f_memory, bool f_wipe, bool has_legacy);
 };
 
 static fs::path TxIndexDBPath() { return gArgs.GetDataDirNet() / "indexes" / "txindex"; }
 
-TxIndex::DB::DB(size_t n_cache_size, bool f_memory, bool f_wipe) :
+BaseTransactionIndex::DB::DB(const fs::path& path, size_t n_cache_size, bool has_legacy, bool f_memory, bool f_wipe) :
     // Bloom filters are built for every key but only consulted by point reads,
     // which iterators bypass: the per-tx hashed ('x') lookups seek with an
     // iterator, and the 's'/'h' point reads are at most one per block against a
     // tiny keyspace. Only the legacy entries' per-tx point lookups benefit, so
     // enable the filters only for databases still containing them.
-    DB(n_cache_size, f_memory, f_wipe,
-       /*has_legacy=*/!f_memory && !f_wipe && CDBWrapper::HasKeyStartingWith(TxIndexDBPath(), txindex::DB_TXINDEX))
-{}
-
-TxIndex::DB::DB(size_t n_cache_size, bool f_memory, bool f_wipe, bool has_legacy) :
-    BaseIndex::DB(TxIndexDBPath(), n_cache_size, f_memory, f_wipe, /*f_obfuscate=*/false, /*f_bloom=*/has_legacy),
-    m_hasher{ReadOrCreateTxidHasher(*this)},
+    BaseIndex::DB(path, n_cache_size, f_memory, f_wipe, /*f_obfuscate=*/false, /*f_bloom=*/has_legacy),
+    m_hasher{ReadOrCreateHasher(*this)},
     m_has_legacy{has_legacy}
 {}
 
-CBlockLocator TxIndex::DB::ReadBestBlock() const
+CBlockLocator BaseTransactionIndex::DB::ReadBestBlock() const
 {
     CBlockLocator locator;
     if (Read(txindex::DB_BEST_BLOCK_V2, locator)) {
@@ -103,12 +96,13 @@ CBlockLocator TxIndex::DB::ReadBestBlock() const
     return BaseIndex::DB::ReadBestBlock();
 }
 
-void TxIndex::DB::WriteBestBlock(CDBBatch& batch, const CBlockLocator& locator)
+void BaseTransactionIndex::DB::WriteBestBlock(CDBBatch& batch, const CBlockLocator& locator)
 {
     batch.Write(txindex::DB_BEST_BLOCK_V2, locator);
 }
 
-void TxIndex::DB::WriteTxs(const interfaces::BlockInfo& block)
+template <typename HashFn>
+void BaseTransactionIndex::DB::WriteTxs(const interfaces::BlockInfo& block, HashFn&& get_hash)
 {
     // A block may be submitted again after it was already indexed, e.g. when it
     // reconnects after a reorg or is re-processed after an unclean shutdown. It
@@ -124,7 +118,7 @@ void TxIndex::DB::WriteTxs(const interfaces::BlockInfo& block)
     batch.Write(txindex::DB_NEXT_BLOCK_SEQ, block_seq + 1);
     uint32_t tx_offset_in_block{txindex::BLOCK_HEADER_SIZE + GetSizeOfCompactSize(block.data->vtx.size())};
     for (const auto& tx : block.data->vtx) {
-        const txindex::DBKey key{txindex::CreateKeyPrefix(m_hasher, tx->GetHash()),
+        const txindex::DBKey key{txindex::CreateKeyPrefix(m_hasher, get_hash(*tx)),
                                  txindex::BlockTxPosition{block_seq, tx_offset_in_block}};
         batch.Write(key, txindex::EMPTY_VALUE);
         tx_offset_in_block += tx->ComputeTotalSize();
@@ -132,31 +126,31 @@ void TxIndex::DB::WriteTxs(const interfaces::BlockInfo& block)
     WriteBatch(batch);
 }
 
-TxIndex::TxIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, bool f_memory, bool f_wipe)
-    : BaseIndex(std::move(chain), "txindex", "txidx"), m_db(std::make_unique<TxIndex::DB>(n_cache_size, f_memory, f_wipe))
+BaseTransactionIndex::BaseTransactionIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, std::string index_name, std::string thread_name, const char* path_name, bool has_legacy, bool f_memory, bool f_wipe)
+    : BaseIndex(std::move(chain), std::move(index_name), std::move(thread_name)),
+      m_db(std::make_unique<BaseTransactionIndex::DB>(gArgs.GetDataDirNet() / "indexes" / path_name, n_cache_size, has_legacy, f_memory, f_wipe))
+{}
+
+BaseTransactionIndex::~BaseTransactionIndex() = default;
+
+void BaseTransactionIndex::WriteBlock(const interfaces::BlockInfo& block) const
 {
-    if (m_db->m_has_legacy) {
-        LogInfo("txindex contains entries in the legacy format, which uses excessive disk space. "
-                "To reclaim disk space, stop the node, delete %s and restart to rebuild the index.",
-                fs::PathToString(TxIndexDBPath()));
-    }
+    m_db->WriteTxs(block, [this](const CTransaction& tx) { return GetHash(tx); });
 }
 
-TxIndex::~TxIndex() = default;
-
-bool TxIndex::CustomAppend(const interfaces::BlockInfo& block)
+bool BaseTransactionIndex::CustomAppend(const interfaces::BlockInfo& block)
 {
     // Exclude genesis block transaction because outputs are not spendable.
     if (block.height == 0) return true;
 
     assert(block.data);
-    m_db->WriteTxs(block);
+    WriteBlock(block);
     return true;
 }
 
-BaseIndex::DB& TxIndex::GetDB() const { return *m_db; }
+BaseIndex::DB& BaseTransactionIndex::GetDB() const { return *m_db; }
 
-std::optional<TxIndexResult> TxIndex::FindTx(const Txid& tx_hash) const
+std::optional<TxIndexResult> BaseTransactionIndex::FindTx(const uint256& tx_hash, bool active_only) const
 {
     struct Candidate {
         FlatFilePos tx_position;
@@ -175,18 +169,19 @@ std::optional<TxIndexResult> TxIndex::FindTx(const Txid& tx_hash) const
         for (it->Seek(key); it->Valid() && it->GetKey(key) && key.hash_prefix == prefix; it->Next()) {
             uint256 candidate_block_hash;
             if (!m_db->Read(txindex::BlockSeqKey{key.pos.block_seq}, candidate_block_hash)) {
-                LogWarning("Block sequence %u not found for txid %s", key.pos.block_seq, tx_hash.ToString());
+                LogWarning("Block sequence %u not found for transaction %s", key.pos.block_seq, tx_hash.ToString());
                 continue;
             }
             LOCK(cs_main);
             const CBlockIndex* block_index{m_chainstate->m_blockman.LookupBlockIndex(candidate_block_hash)};
             if (!block_index) {
-                LogWarning("Block index entry %s not found for txid %s", candidate_block_hash.ToString(), tx_hash.ToString());
+                LogWarning("Block index entry %s not found for transaction %s", candidate_block_hash.ToString(), tx_hash.ToString());
                 continue;
             }
-            if (!(block_index->nStatus & BLOCK_HAVE_DATA)) continue;
+            const bool in_active_chain{m_chainstate->m_chain.Contains(*block_index)};
+            if (!(block_index->nStatus & BLOCK_HAVE_DATA) || (active_only && !in_active_chain)) continue;
             const FlatFilePos tx_position{block_index->nFile, block_index->nDataPos + key.pos.tx_offset_in_block};
-            candidates.emplace_back(tx_position, candidate_block_hash, key.pos.block_seq, m_chainstate->m_chain.Contains(*block_index));
+            candidates.emplace_back(tx_position, candidate_block_hash, key.pos.block_seq, in_active_chain);
         }
     }
 
@@ -198,7 +193,7 @@ std::optional<TxIndexResult> TxIndex::FindTx(const Txid& tx_hash) const
     for (const auto& candidate : candidates) {
         AutoFile file{m_chainstate->m_blockman.OpenBlockFile(candidate.tx_position, /*fReadOnly=*/true)};
         if (file.IsNull()) {
-            LogWarning("OpenBlockFile failed for txid %s", tx_hash.ToString());
+            LogWarning("OpenBlockFile failed for transaction %s", tx_hash.ToString());
             continue;
         }
         CTransactionRef tx;
@@ -208,9 +203,17 @@ std::optional<TxIndexResult> TxIndex::FindTx(const Txid& tx_hash) const
             LogWarning("Deserialize or I/O error - %s", e.what());
             continue;
         }
-        if (tx->GetHash() == tx_hash) {
+        if (GetHash(*tx) == tx_hash) {
             return TxIndexResult{candidate.block_hash, std::move(tx)};
         }
+    }
+    return std::nullopt;
+}
+
+std::optional<TxIndexResult> TxIndex::FindTx(const Txid& tx_hash) const
+{
+    if (const auto result{BaseTransactionIndex::FindTx(tx_hash.ToUint256(), /*active_only=*/false)}) {
+        return result;
     }
     // Fall back to legacy if no hashed entry matched. This makes misses pay an
     // extra lookup, but keeps existing full-txid entries readable after upgrade.
@@ -245,3 +248,16 @@ std::optional<TxIndexResult> TxIndex::FindLegacyTx(const Txid& tx_hash) const
     }
     return TxIndexResult{header.GetHash(), std::move(tx)};
 }
+
+TxIndex::TxIndex(std::unique_ptr<interfaces::Chain> chain, size_t n_cache_size, bool f_memory, bool f_wipe)
+    : BaseTransactionIndex(std::move(chain), n_cache_size, "txindex", "txidx", "txindex",
+                           /*has_legacy=*/!f_memory && !f_wipe && CDBWrapper::HasKeyStartingWith(TxIndexDBPath(), txindex::DB_TXINDEX), f_memory, f_wipe)
+{
+    if (m_db->m_has_legacy) {
+        LogInfo("txindex contains entries in the legacy format, which uses excessive disk space. "
+                "To reclaim disk space, stop the node, delete %s and restart to rebuild the index.",
+                fs::PathToString(TxIndexDBPath()));
+    }
+}
+
+TxIndex::~TxIndex() = default;

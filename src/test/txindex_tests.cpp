@@ -42,9 +42,9 @@ BOOST_AUTO_TEST_SUITE(txindex_tests)
 class TxIndexTest
 {
 public:
-    static CDBWrapper& GetDB(const TxIndex& txindex) { return txindex.GetDB(); }
-    static CBlockLocator ReadBestBlock(const TxIndex& txindex) { return txindex.GetDB().ReadBestBlock(); }
-    static void WriteBestBlock(const TxIndex& txindex, const CBlockLocator& locator)
+    static CDBWrapper& GetDB(const BaseTransactionIndex& txindex) { return txindex.GetDB(); }
+    static CBlockLocator ReadBestBlock(const BaseTransactionIndex& txindex) { return txindex.GetDB().ReadBestBlock(); }
+    static void WriteBestBlock(const BaseTransactionIndex& txindex, const CBlockLocator& locator)
     {
         auto& db{txindex.GetDB()};
         CDBBatch batch{db};
@@ -58,7 +58,7 @@ namespace {
 SipHasher13UJ ReadHasher(const CDBWrapper& db)
 {
     std::pair<uint64_t, uint64_t> salt;
-    BOOST_REQUIRE(db.Read(txindex::DB_TXID_HASH_SALT, salt));
+    BOOST_REQUIRE(db.Read(txindex::DB_HASH_SALT, salt));
     return SipHasher13UJ{salt.first, salt.second};
 }
 
