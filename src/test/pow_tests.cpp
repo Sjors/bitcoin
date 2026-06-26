@@ -153,7 +153,7 @@ BOOST_AUTO_TEST_CASE(GetBlockProofEquivalentTime_test)
         CBlockIndex *p3 = &blocks[m_rng.randrange(10000)];
 
         int64_t tdiff = GetBlockProofEquivalentTime(*p1, *p2, *p3, chainParams->GetConsensus());
-        BOOST_CHECK_EQUAL(tdiff, p1->GetBlockTime() - p2->GetBlockTime());
+        BOOST_CHECK_EQUAL(tdiff, static_cast<int64_t>(p1->GetBlockTime()) - static_cast<int64_t>(p2->GetBlockTime()));
     }
 }
 

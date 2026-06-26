@@ -73,7 +73,7 @@ protected:
         return (nTransactions+(1 << height)-1) >> height;
     }
 
-    /** calculate the hash of a node in the merkle tree (at leaf level: the txid's themselves) */
+    /** calculate the hash of a node in the merkle tree */
     uint256 CalcHash(int height, unsigned int pos, const std::vector<Txid> &vTxid);
 
     /** recursive function that traverses tree nodes, storing the data as bits and hashes */

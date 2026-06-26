@@ -10,6 +10,8 @@
 #include <primitives/block.h>
 #include <uint256.h>
 
+/** Calculate the hash of an internal transaction merkle tree node. */
+uint256 TxMerkleNodeHash(const uint256& left, const uint256& right);
 uint256 ComputeMerkleRoot(std::vector<uint256> hashes, bool* mutated = nullptr);
 
 /*

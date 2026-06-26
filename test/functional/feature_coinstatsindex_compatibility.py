@@ -9,7 +9,7 @@ This test may be removed some time after v29 has reached end of life.
 
 import shutil
 
-from test_framework.test_framework import BitcoinTestFramework
+from test_framework.test_framework import BitcoinTestFramework, SkipTest
 from test_framework.util import assert_equal
 
 
@@ -20,6 +20,7 @@ class CoinStatsIndexTest(BitcoinTestFramework):
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_previous_releases()
+        raise SkipTest("old block index databases are not supported by the 2106 timestamp draft")
 
     def setup_nodes(self):
         self.add_nodes(

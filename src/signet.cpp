@@ -7,11 +7,13 @@
 #include <consensus/merkle.h>
 #include <consensus/params.h>
 #include <consensus/validation.h>
+#include <hash.h>
 #include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <script/interpreter.h>
 #include <script/script.h>
 #include <script/verify_flags.h>
+#include <serialize.h>
 #include <streams.h>
 #include <uint256.h>
 #include <util/log.h>
@@ -22,6 +24,7 @@
 #include <exception>
 #include <memory>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -60,9 +63,16 @@ static uint256 ComputeModifiedMerkleRoot(const CMutableTransaction& cb, const CB
 {
     std::vector<uint256> leaves;
     leaves.reserve((block.vtx.size() + 1) & ~1ULL); // capacity rounded up to even
-    leaves.push_back(cb.GetHash().ToUint256());
+    auto add_leaf{[&](const CTransaction& tx, size_t position) {
+        if (block.m_extended) {
+            leaves.push_back((HashWriter{TaggedHash("TaggedWtxid")} << COMPACTSIZE(position) << TX_WITH_WITNESS(tx)).GetSHA256());
+        } else {
+            leaves.push_back(tx.GetHash().ToUint256());
+        }
+    }};
+    add_leaf(CTransaction{cb}, 0);
     for (size_t s = 1; s < block.vtx.size(); ++s) {
-        leaves.push_back(block.vtx[s]->GetHash().ToUint256());
+        add_leaf(*block.vtx[s], s);
     }
     return ComputeMerkleRoot(std::move(leaves));
 }
@@ -115,7 +125,10 @@ std::optional<SignetTxs> SignetTxs::Create(const CBlock& block, const CScript& c
     writer << block.nVersion;
     writer << block.hashPrevBlock;
     writer << signet_merkle;
-    writer << block.nTime;
+    writer << static_cast<uint32_t>(block.nTime);
+    if (block.m_extended) {
+        writer << static_cast<uint32_t>(block.nTime >> 32);
+    }
     tx_to_spend.vin[0].scriptSig << block_data;
     tx_spending.vin[0].prevout = COutPoint(tx_to_spend.GetHash(), 0);
 

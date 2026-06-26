@@ -120,7 +120,7 @@ private:
  * accounts for the BIP94 timewarp rule, so does not necessarily reflect the
  * consensus limit.
  */
-int64_t GetMinimumTime(const CBlockIndex* pindexPrev, int64_t difficulty_adjustment_interval);
+uint64_t GetMinimumTime(const CBlockIndex* pindexPrev, int64_t difficulty_adjustment_interval);
 
 int64_t UpdateTime(CBlockHeader* pblock, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev);
 
@@ -128,7 +128,7 @@ int64_t UpdateTime(CBlockHeader* pblock, const Consensus::Params& consensusParam
 void RegenerateCommitments(CBlock& block, ChainstateManager& chainman);
 
 /* Compute the block's merkle root, insert or replace the coinbase transaction and the merkle root into the block */
-void AddMerkleRootAndCoinbase(CBlock& block, CTransactionRef coinbase, uint32_t version, uint32_t timestamp, uint32_t nonce);
+void AddMerkleRootAndCoinbase(CBlock& block, CTransactionRef coinbase, uint32_t version, uint64_t timestamp, uint32_t nonce);
 
 //! Submit a block and capture the validation state via the BlockChecked callback.
 //! Returns whether ProcessNewBlock accepted the block.

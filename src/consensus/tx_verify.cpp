@@ -14,6 +14,15 @@
 #include <util/check.h>
 #include <util/moneystr.h>
 
+#include <algorithm>
+#include <cstdint>
+#include <limits>
+
+static int64_t SaturatingBlockTime(uint64_t nTime)
+{
+    return nTime > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ? std::numeric_limits<int64_t>::max() : static_cast<int64_t>(nTime);
+}
+
 bool IsFinalTx(const CTransaction &tx, int nBlockHeight, int64_t nBlockTime)
 {
     if (tx.nLockTime == 0)
@@ -71,7 +80,7 @@ std::pair<int, int64_t> CalculateSequenceLocks(const CTransaction &tx, int flags
         int nCoinHeight = prevHeights[txinIndex];
 
         if (txin.nSequence & CTxIn::SEQUENCE_LOCKTIME_TYPE_FLAG) {
-            const int64_t nCoinTime{Assert(block.GetAncestor(std::max(nCoinHeight - 1, 0)))->GetMedianTimePast()};
+            const int64_t nCoinTime{SaturatingBlockTime(Assert(block.GetAncestor(std::max(nCoinHeight - 1, 0)))->GetMedianTimePast())};
             // NOTE: Subtract 1 to maintain nLockTime semantics
             // BIP 68 relative lock times have the semantics of calculating
             // the first block or time at which the transaction would be
@@ -97,7 +106,7 @@ std::pair<int, int64_t> CalculateSequenceLocks(const CTransaction &tx, int flags
 bool EvaluateSequenceLocks(const CBlockIndex& block, std::pair<int, int64_t> lockPair)
 {
     assert(block.pprev);
-    int64_t nBlockTime = block.pprev->GetMedianTimePast();
+    int64_t nBlockTime = SaturatingBlockTime(block.pprev->GetMedianTimePast());
     if (lockPair.first >= block.nHeight || lockPair.second >= nBlockTime)
         return false;
 

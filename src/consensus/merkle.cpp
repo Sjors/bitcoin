@@ -4,6 +4,7 @@
 
 #include <consensus/merkle.h>
 #include <hash.h>
+#include <serialize.h>
 #include <util/check.h>
 
 /*     WARNING! If you're reading this because you're learning about crypto
@@ -42,6 +43,10 @@
        root.
 */
 
+uint256 TxMerkleNodeHash(const uint256& left, const uint256& right)
+{
+    return Hash(left, right);
+}
 
 uint256 ComputeMerkleRoot(std::vector<uint256> hashes, bool* mutated) {
     bool mutation = false;
@@ -68,7 +73,16 @@ uint256 BlockMerkleRoot(const CBlock& block, bool* mutated)
     std::vector<uint256> leaves;
     leaves.reserve((block.vtx.size() + 1) & ~1ULL); // capacity rounded up to even
     for (size_t s = 0; s < block.vtx.size(); s++) {
-        leaves.push_back(block.vtx[s]->GetHash().ToUint256());
+        if (block.m_extended) {
+            // Extended blocks commit to witness data directly in the transaction
+            // merkle tree, so they do not use the legacy separate witness
+            // merkle commitment. The transaction position prevents repeated
+            // transactions from recreating the duplicated-right-branch root
+            // exploited by CVE-2012-2459.
+            leaves.push_back((HashWriter{TaggedHash("TaggedWtxid")} << COMPACTSIZE(s) << TX_WITH_WITNESS(*block.vtx[s])).GetSHA256());
+        } else {
+            leaves.push_back(block.vtx[s]->GetHash().ToUint256());
+        }
     }
     return ComputeMerkleRoot(std::move(leaves), mutated);
 }
@@ -118,7 +132,7 @@ static void MerkleComputation(const std::vector<uint256>& leaves, uint32_t leaf_
                 path.push_back(h);
                 matchh = true;
             }
-            h = Hash(inner[level], h);
+            h = TxMerkleNodeHash(inner[level], h);
         }
         // Store the resulting hash at inner position level.
         inner[level] = h;
@@ -144,7 +158,7 @@ static void MerkleComputation(const std::vector<uint256>& leaves, uint32_t leaf_
         if (matchh) {
             path.push_back(h);
         }
-        h = Hash(h, h);
+        h = TxMerkleNodeHash(h, h);
         // Increment count to the value it would have if two entries at this
         // level had existed.
         count += ((uint32_t{1}) << level);
@@ -157,7 +171,7 @@ static void MerkleComputation(const std::vector<uint256>& leaves, uint32_t leaf_
                 path.push_back(h);
                 matchh = true;
             }
-            h = Hash(inner[level], h);
+            h = TxMerkleNodeHash(inner[level], h);
             level++;
         }
     }
@@ -174,7 +188,11 @@ std::vector<uint256> TransactionMerklePath(const CBlock& block, uint32_t positio
     std::vector<uint256> leaves;
     leaves.resize(block.vtx.size());
     for (size_t s = 0; s < block.vtx.size(); s++) {
-        leaves[s] = block.vtx[s]->GetHash().ToUint256();
+        if (block.m_extended) {
+            leaves[s] = (HashWriter{TaggedHash("TaggedWtxid")} << COMPACTSIZE(s) << TX_WITH_WITNESS(*block.vtx[s])).GetSHA256();
+        } else {
+            leaves[s] = block.vtx[s]->GetHash().ToUint256();
+        }
     }
     return ComputeMerklePath(leaves, position);
 }

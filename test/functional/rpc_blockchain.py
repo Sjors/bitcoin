@@ -290,11 +290,14 @@ class BlockchainTest(BitcoinTestFramework):
         self.log.info("Check that block timestamps work until year 2106")
         self.generate(self.nodes[0], 8)[-1]
         time_2106 = 2**32 - 1
-        assert_raises_rpc_error(-8, f"Mocktime must be in the range [0, {time_2106}], not -1.", self.nodes[0].setmocktime, -1)
-        assert_raises_rpc_error(-8, f"Mocktime must be in the range [0, {time_2106}], not {time_2106 + 1}.", self.nodes[0].setmocktime, time_2106 + 1)
+        max_mocktime = 2**63 - 1 - 2 * 60 * 60
+        assert_raises_rpc_error(-8, f"Mocktime must be in the range [0, {max_mocktime}], not -1.", self.nodes[0].setmocktime, -1)
         self.nodes[0].setmocktime(time_2106)
         last = self.generate(self.nodes[0], 6)[-1]
         assert_equal(self.nodes[0].getblockheader(last)["mediantime"], time_2106)
+        self.nodes[0].setmocktime(time_2106 + 1)
+        last = self.generate(self.nodes[0], 1)[-1]
+        assert_equal(self.nodes[0].getblockheader(last)["time"], time_2106 + 1)
 
     def _test_getchaintxstats(self):
         self.log.info("Test getchaintxstats")

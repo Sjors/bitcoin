@@ -9,7 +9,19 @@
 #include <versionbits.h>
 #include <versionbits_impl.h>
 
+#include <cstdint>
+
 using enum ThresholdState;
+
+static bool MedianTimePastBefore(uint64_t median_time_past, int64_t time)
+{
+    return time > 0 && median_time_past < static_cast<uint64_t>(time);
+}
+
+static bool MedianTimePastAtOrAfter(uint64_t median_time_past, int64_t time)
+{
+    return time <= 0 || median_time_past >= static_cast<uint64_t>(time);
+}
 
 std::string StateName(ThresholdState state)
 {
@@ -54,7 +66,7 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
             cache[pindexPrev] = ThresholdState::DEFINED;
             break;
         }
-        if (pindexPrev->GetMedianTimePast() < nTimeStart) {
+        if (MedianTimePastBefore(pindexPrev->GetMedianTimePast(), nTimeStart)) {
             // Optimization: don't recompute down further, as we know every earlier block will be before the start time
             cache[pindexPrev] = ThresholdState::DEFINED;
             break;
@@ -75,7 +87,7 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
 
         switch (state) {
             case ThresholdState::DEFINED: {
-                if (pindexPrev->GetMedianTimePast() >= nTimeStart) {
+                if (MedianTimePastAtOrAfter(pindexPrev->GetMedianTimePast(), nTimeStart)) {
                     stateNext = ThresholdState::STARTED;
                 }
                 break;
@@ -92,7 +104,7 @@ ThresholdState AbstractThresholdConditionChecker::GetStateFor(const CBlockIndex*
                 }
                 if (count >= nThreshold) {
                     stateNext = ThresholdState::LOCKED_IN;
-                } else if (pindexPrev->GetMedianTimePast() >= nTimeTimeout) {
+                } else if (MedianTimePastAtOrAfter(pindexPrev->GetMedianTimePast(), nTimeTimeout)) {
                     stateNext = ThresholdState::FAILED;
                 }
                 break;

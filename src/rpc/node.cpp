@@ -5,6 +5,7 @@
 
 #include <bitcoin-build-config.h> // IWYU pragma: keep
 
+#include <chain.h>
 #include <chainparams.h>
 #include <httpserver.h>
 #include <index/blockfilterindex.h>
@@ -62,9 +63,9 @@ static RPCMethod setmocktime()
     LOCK(cs_main);
 
     const int64_t time{request.params[0].getInt<int64_t>()};
-    // block timestamps are uint32_t, so mocking time beyond that is meaningless for anything
-    // consensus-related and can cause integer overflow/truncation issues in time arithmetic.
-    constexpr int64_t max_time{std::numeric_limits<uint32_t>::max()};
+    // Block timestamps can use the extended 64-bit encoding after the 32-bit
+    // timestamp range is exhausted.
+    constexpr int64_t max_time{std::numeric_limits<int64_t>::max() - MAX_FUTURE_BLOCK_TIME};
     if (time < 0 || time > max_time) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Mocktime must be in the range [0, %s], not %s.", max_time, time));
     }

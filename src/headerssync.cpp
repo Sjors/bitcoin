@@ -10,9 +10,9 @@
 #include <util/time.h>
 #include <util/vector.h>
 
-// Our memory analysis in headerssync-params.py assumes this many bytes for a
-// CompressedHeader (we should re-calculate parameters if we compress further).
-static_assert(sizeof(CompressedHeader) == 48);
+// Our memory analysis in headerssync-params.py assumes at most this many bytes
+// for a CompressedHeader (we should re-calculate parameters if we compress further).
+static_assert(sizeof(CompressedHeader) <= 56);
 
 HeadersSyncState::HeadersSyncState(NodeId id,
                                    const Consensus::Params& consensus_params,

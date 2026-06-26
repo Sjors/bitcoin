@@ -139,7 +139,7 @@ public:
     //! block header
     int32_t nVersion{0};
     uint256 hashMerkleRoot{};
-    uint32_t nTime{0};
+    uint64_t nTime{0};
     uint32_t nBits{0};
     uint32_t nNonce{0};
 
@@ -149,7 +149,7 @@ public:
     int32_t nSequenceId{SEQ_ID_INIT_FROM_DISK};
 
     //! (memory only) Maximum nTime in the chain up to and including this block.
-    unsigned int nTimeMax{0};
+    uint64_t nTimeMax{0};
 
     explicit CBlockIndex(const CBlockHeader& block)
         : nVersion{block.nVersion},
@@ -190,6 +190,9 @@ public:
             block.hashPrevBlock = pprev->GetBlockHash();
         block.hashMerkleRoot = hashMerkleRoot;
         block.nTime = nTime;
+        if (block.nTime >= CBlockHeader::EXTENDED_TIME_THRESHOLD) {
+            block.SetExtendedTimeEncoding();
+        }
         block.nBits = nBits;
         block.nNonce = nNonce;
         return block;
@@ -215,26 +218,26 @@ public:
 
     NodeSeconds Time() const
     {
-        return NodeSeconds{std::chrono::seconds{nTime}};
+        return NodeSeconds{std::chrono::seconds{GetBlockTime()}};
     }
 
-    int64_t GetBlockTime() const
+    uint64_t GetBlockTime() const
     {
-        return (int64_t)nTime;
+        return CBlockHeader::MaskedBlockTime(nTime, nVersion < 0);
     }
 
-    int64_t GetBlockTimeMax() const
+    uint64_t GetBlockTimeMax() const
     {
-        return (int64_t)nTimeMax;
+        return nTimeMax;
     }
 
     static constexpr int nMedianTimeSpan = 11;
 
-    int64_t GetMedianTimePast() const
+    uint64_t GetMedianTimePast() const
     {
-        int64_t pmedian[nMedianTimeSpan];
-        int64_t* pbegin = &pmedian[nMedianTimeSpan];
-        int64_t* pend = &pmedian[nMedianTimeSpan];
+        uint64_t pmedian[nMedianTimeSpan];
+        uint64_t* pbegin = &pmedian[nMedianTimeSpan];
+        uint64_t* pend = &pmedian[nMedianTimeSpan];
 
         const CBlockIndex* pindex = this;
         for (int i = 0; i < nMedianTimeSpan && pindex; i++, pindex = pindex->pprev)
@@ -366,6 +369,9 @@ public:
         block.hashPrevBlock = hashPrev;
         block.hashMerkleRoot = hashMerkleRoot;
         block.nTime = nTime;
+        if (block.nTime >= CBlockHeader::EXTENDED_TIME_THRESHOLD) {
+            block.SetExtendedTimeEncoding();
+        }
         block.nBits = nBits;
         block.nNonce = nNonce;
         return block.GetHash();

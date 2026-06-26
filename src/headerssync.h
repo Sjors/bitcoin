@@ -22,7 +22,7 @@ struct CompressedHeader {
     // header
     int32_t nVersion{0};
     uint256 hashMerkleRoot;
-    uint32_t nTime{0};
+    uint64_t nTime{0};
     uint32_t nBits{0};
     uint32_t nNonce{0};
 
@@ -47,6 +47,9 @@ struct CompressedHeader {
         ret.hashPrevBlock = hash_prev_block;
         ret.hashMerkleRoot = hashMerkleRoot;
         ret.nTime = nTime;
+        if (ret.nTime >= CBlockHeader::EXTENDED_TIME_THRESHOLD) {
+            ret.SetExtendedTimeEncoding();
+        }
         ret.nBits = nBits;
         ret.nNonce = nNonce;
         return ret;
@@ -123,7 +126,7 @@ public:
     int64_t GetPresyncHeight() const { return m_current_height; }
 
     /** Return the block timestamp of the last header received during the PRESYNC phase. */
-    uint32_t GetPresyncTime() const { return m_last_header_received.nTime; }
+    uint64_t GetPresyncTime() const { return m_last_header_received.nTime; }
 
     /** Return the amount of work in the chain received during the PRESYNC phase. */
     arith_uint256 GetPresyncWork() const { return m_current_chain_work; }

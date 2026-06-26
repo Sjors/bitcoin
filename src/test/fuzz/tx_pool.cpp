@@ -167,9 +167,12 @@ void Finish(FuzzedDataProvider& fuzzed_data_provider, MockedTxPool& tx_pool, Cha
 
 void MockTime(FuzzedDataProvider& fuzzed_data_provider, const Chainstate& chainstate)
 {
-    const auto time = ConsumeTime(fuzzed_data_provider,
-                                  chainstate.m_chain.Tip()->GetMedianTimePast() + 1,
-                                  std::numeric_limits<decltype(chainstate.m_chain.Tip()->nTime)>::max());
+    static constexpr int64_t MAX_FUZZ_MOCK_TIME{std::numeric_limits<uint32_t>::max()};
+    const uint64_t tip_mtp{chainstate.m_chain.Tip()->GetMedianTimePast()};
+    const int64_t min_time{tip_mtp >= static_cast<uint64_t>(MAX_FUZZ_MOCK_TIME) ?
+                               MAX_FUZZ_MOCK_TIME :
+                               static_cast<int64_t>(tip_mtp + 1)};
+    const auto time = ConsumeTime(fuzzed_data_provider, min_time, MAX_FUZZ_MOCK_TIME);
     SetMockTime(time);
 }
 

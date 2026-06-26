@@ -7,6 +7,7 @@
 
 #include <attributes.h>
 
+#include <cstdint>
 #include <iostream>
 
 class CBlock;
@@ -26,7 +27,7 @@ struct BlockInfo {
     const CBlockUndo* undo_data = nullptr;
     // The maximum time in the chain up to and including this block.
     // A timestamp that can only move forward.
-    unsigned int chain_time_max{0};
+    int64_t chain_time_max{0};
 
     BlockInfo(const uint256& hash LIFETIMEBOUND) : hash(hash) {}
 };

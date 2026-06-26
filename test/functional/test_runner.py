@@ -357,6 +357,7 @@ BASE_SCRIPTS = [
     'rpc_scantxoutset.py',
     'feature_torcontrol.py',
     'feature_unsupported_utxo_db.py',
+    'feature_y2106_extended_time.py',
     'mempool_cluster.py',
     'feature_logging.py',
     'interface_ipc.py',

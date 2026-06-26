@@ -9,7 +9,7 @@ Previous releases are required by this test, see test/README.md.
 
 import shutil
 
-from test_framework.test_framework import BitcoinTestFramework
+from test_framework.test_framework import BitcoinTestFramework, SkipTest
 from test_framework.util import assert_equal
 
 
@@ -20,6 +20,7 @@ class UnsupportedUtxoDbTest(BitcoinTestFramework):
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_previous_releases()
+        raise SkipTest("old block index databases are not supported by the 2106 timestamp draft")
 
     def setup_network(self):
         self.add_nodes(

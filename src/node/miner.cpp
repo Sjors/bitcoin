@@ -46,6 +46,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <numeric>
 #include <span>
 #include <stdexcept>
@@ -54,27 +55,38 @@
 
 namespace node {
 
-int64_t GetMinimumTime(const CBlockIndex* pindexPrev, const int64_t difficulty_adjustment_interval)
+static int64_t SaturatingBlockTime(uint64_t nTime)
 {
-    int64_t min_time{pindexPrev->GetMedianTimePast() + 1};
+    return nTime > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ? std::numeric_limits<int64_t>::max() : static_cast<int64_t>(nTime);
+}
+
+uint64_t GetMinimumTime(const CBlockIndex* pindexPrev, const int64_t difficulty_adjustment_interval)
+{
+    uint64_t min_time{pindexPrev->GetMedianTimePast() + 1};
     // Height of block to be mined.
     const int height{pindexPrev->nHeight + 1};
     // Account for BIP94 timewarp rule on all networks. This makes future
     // activation safer.
     if (height % difficulty_adjustment_interval == 0) {
-        min_time = std::max<int64_t>(min_time, pindexPrev->GetBlockTime() - MAX_TIMEWARP);
+        const uint64_t prev_time{pindexPrev->GetBlockTime()};
+        min_time = std::max<uint64_t>(min_time, prev_time > MAX_TIMEWARP ? prev_time - MAX_TIMEWARP : 0);
     }
     return min_time;
 }
 
 int64_t UpdateTime(CBlockHeader* pblock, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev)
 {
-    int64_t nOldTime = pblock->nTime;
-    int64_t nNewTime{std::max<int64_t>(GetMinimumTime(pindexPrev, consensusParams.DifficultyAdjustmentInterval()),
-                                       TicksSinceEpoch<std::chrono::seconds>(NodeClock::now()))};
+    const uint64_t nOldTime{pblock->nTime};
+    const int64_t now{TicksSinceEpoch<std::chrono::seconds>(NodeClock::now())};
+    uint64_t nNewTime{std::max<uint64_t>(GetMinimumTime(pindexPrev, consensusParams.DifficultyAdjustmentInterval()),
+                                         static_cast<uint64_t>(std::max<int64_t>(now, 0)))};
+    nNewTime = CBlockHeader::MinRawTimeForMaskedTime(nNewTime);
 
     if (nOldTime < nNewTime) {
         pblock->nTime = nNewTime;
+    }
+    if (pblock->nTime >= CBlockHeader::EXTENDED_TIME_THRESHOLD) {
+        pblock->SetExtendedTimeEncoding();
     }
 
     // Updating time can change work required on testnet:
@@ -82,7 +94,7 @@ int64_t UpdateTime(CBlockHeader* pblock, const Consensus::Params& consensusParam
         pblock->nBits = GetNextWorkRequired(pindexPrev, pblock, consensusParams);
     }
 
-    return nNewTime - nOldTime;
+    return SaturatingBlockTime(pblock->nTime - nOldTime);
 }
 
 void RegenerateCommitments(CBlock& block, ChainstateManager& chainman)
@@ -148,8 +160,11 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock()
         pblock->nVersion = gArgs.GetIntArg("-blockversion", pblock->nVersion);
     }
 
-    pblock->nTime = TicksSinceEpoch<std::chrono::seconds>(NodeClock::now());
-    m_lock_time_cutoff = pindexPrev->GetMedianTimePast();
+    pblock->nTime = CBlockHeader::MinRawTimeForMaskedTime(TicksSinceEpoch<std::chrono::seconds>(NodeClock::now()));
+    if (pblock->nTime >= CBlockHeader::EXTENDED_TIME_THRESHOLD) {
+        pblock->SetExtendedTimeEncoding();
+    }
+    m_lock_time_cutoff = SaturatingBlockTime(pindexPrev->GetMedianTimePast());
 
     if (m_mempool) {
         LOCK(m_mempool->cs);
@@ -344,7 +359,7 @@ void BlockAssembler::addChunks()
     }
 }
 
-void AddMerkleRootAndCoinbase(CBlock& block, CTransactionRef coinbase, uint32_t version, uint32_t timestamp, uint32_t nonce)
+void AddMerkleRootAndCoinbase(CBlock& block, CTransactionRef coinbase, uint32_t version, uint64_t timestamp, uint32_t nonce)
 {
     if (block.vtx.size() == 0) {
         block.vtx.emplace_back(coinbase);
@@ -353,6 +368,10 @@ void AddMerkleRootAndCoinbase(CBlock& block, CTransactionRef coinbase, uint32_t 
     }
     block.nVersion = version;
     block.nTime = timestamp;
+    block.SetLegacyTimeEncoding();
+    if (block.nTime >= CBlockHeader::EXTENDED_TIME_THRESHOLD) {
+        block.SetExtendedTimeEncoding();
+    }
     block.nNonce = nonce;
     block.hashMerkleRoot = BlockMerkleRoot(block);
 
@@ -473,8 +492,10 @@ std::unique_ptr<CBlockTemplate> WaitAndCreateNewBlock(ChainstateManager& chainma
 
         // On test networks return a minimum difficulty block after 20 minutes
         if (!tip_changed && allow_min_difficulty) {
-            const NodeClock::time_point tip_time{std::chrono::seconds{chainman.ActiveChain().Tip()->GetBlockTime()}};
-            if (now > tip_time + 20min) {
+            const CBlockIndex* tip{chainman.ActiveChain().Tip()};
+            const uint64_t tip_time{tip->GetBlockTime()};
+            if (tip_time <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) &&
+                now > NodeClock::time_point{std::chrono::seconds{static_cast<int64_t>(tip_time)}} + 20min) {
                 tip_changed = true;
             }
         }

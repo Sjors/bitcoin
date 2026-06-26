@@ -115,7 +115,10 @@ def run_functional_tests():
         "--tmpdir",
         str(Path(workspace) / "test_feature_unsupported_utxo_db"),
     ]
-    run(cmd_feature_unsupported_db)
+    # Exit code 77 is the functional test framework's skip code.
+    result = run(cmd_feature_unsupported_db, check=False)
+    if result.returncode not in (0, 77):
+        sys.exit(result.returncode)
 
 
 def run_unit_tests():

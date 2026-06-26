@@ -69,6 +69,7 @@
 #include <cassert>
 #include <chrono>
 #include <deque>
+#include <limits>
 #include <numeric>
 #include <optional>
 #include <ranges>
@@ -112,6 +113,8 @@ const std::vector<std::string> CHECKLEVEL_DOC {
  *  noticeably interfere with the pruning mechanism.
  * */
 static constexpr int PRUNE_LOCK_BUFFER{10};
+
+static int64_t SaturatingBlockTime(uint64_t nTime);
 
 // Return whether the completed full flush should compact chainstate
 static bool ShouldCompactChainstate(bool in_ibd)
@@ -169,7 +172,7 @@ bool CheckFinalTxAtTip(const CBlockIndex& active_chain_tip, const CTransaction& 
     // When the next block is created its previous block will be the current
     // chain tip, so we use that to calculate the median time passed to
     // IsFinalTx().
-    const int64_t nBlockTime{active_chain_tip.GetMedianTimePast()};
+    const int64_t nBlockTime{SaturatingBlockTime(active_chain_tip.GetMedianTimePast())};
 
     return IsFinalTx(tx, nBlockHeight, nBlockTime);
 }
@@ -291,7 +294,7 @@ static bool IsCurrentForFeeEstimation(Chainstate& active_chainstate) EXCLUSIVE_L
     if (active_chainstate.m_chainman.IsInitialBlockDownload()) {
         return false;
     }
-    if (active_chainstate.m_chain.Tip()->GetBlockTime() < count_seconds(GetTime<std::chrono::seconds>() - MAX_FEE_ESTIMATION_TIP_AGE))
+    if (active_chainstate.m_chain.Tip()->GetBlockTime() < static_cast<uint64_t>(std::max<int64_t>(count_seconds(GetTime<std::chrono::seconds>() - MAX_FEE_ESTIMATION_TIP_AGE), 0)))
         return false;
     if (active_chainstate.m_chain.Height() < active_chainstate.m_chainman.m_best_header->nHeight - 1) {
         return false;
@@ -1980,12 +1983,12 @@ void Chainstate::InvalidChainFound(CBlockIndex* pindexNew)
 
     LogInfo("%s: invalid block=%s height=%d log2_work=%f date=%s", __func__,
       pindexNew->GetBlockHash().ToString(), pindexNew->nHeight,
-      log(pindexNew->nChainWork.getdouble())/log(2.0), FormatISO8601DateTime(pindexNew->GetBlockTime()));
+      log(pindexNew->nChainWork.getdouble())/log(2.0), FormatISO8601DateTime(SaturatingBlockTime(pindexNew->GetBlockTime())));
     CBlockIndex *tip = m_chain.Tip();
     assert (tip);
     LogInfo("%s: current best=%s height=%d log2_work=%f date=%s", __func__,
       tip->GetBlockHash().ToString(), m_chain.Height(), log(tip->nChainWork.getdouble())/log(2.0),
-      FormatISO8601DateTime(tip->GetBlockTime()));
+      FormatISO8601DateTime(SaturatingBlockTime(tip->GetBlockTime())));
     CheckForkWarningConditions();
 }
 
@@ -2886,7 +2889,7 @@ static void UpdateTipLog(
                    prefix, func_name,
                    tip->GetBlockHash().ToString(), tip->nHeight, tip->nVersion,
                    log(tip->nChainWork.getdouble()) / log(2.0), tip->m_chain_tx_count,
-                   FormatISO8601DateTime(tip->GetBlockTime()),
+                   FormatISO8601DateTime(SaturatingBlockTime(tip->GetBlockTime())),
                    background_validation ? chainman.GetBackgroundVerificationProgress(*tip) : chainman.GuessVerificationProgress(tip),
                    coins_tip.DynamicMemoryUsage() / double(1_MiB),
                    coins_tip.GetCacheSize(),
@@ -3837,11 +3840,27 @@ void ChainstateManager::ReceivedBlockTransactions(const CBlock& block, CBlockInd
 
 static bool CheckBlockHeader(const CBlockHeader& block, BlockValidationState& state, const Consensus::Params& consensusParams, bool fCheckPOW = true)
 {
+    if (block.m_extended != (block.nVersion < 0) ||
+        block.m_extended != (block.nTime >= CBlockHeader::EXTENDED_TIME_THRESHOLD)) {
+        return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "bad-time-encoding", "block timestamp encoding does not match timestamp range");
+    }
     // Check proof of work matches claimed amount
     if (fCheckPOW && !CheckProofOfWork(block.GetHash(), block.nBits, consensusParams))
         return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "high-hash", "proof of work failed");
 
     return true;
+}
+
+static int64_t SaturatingBlockTime(uint64_t nTime)
+{
+    return nTime > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ? std::numeric_limits<int64_t>::max() : static_cast<int64_t>(nTime);
+}
+
+static bool BlockTimeTooNew(uint64_t nTime)
+{
+    const int64_t now{TicksSinceEpoch<std::chrono::seconds>(NodeClock::now())};
+    const uint64_t max_block_time{static_cast<uint64_t>(std::max<int64_t>(now, 0)) + MAX_FUTURE_BLOCK_TIME};
+    return nTime > max_block_time;
 }
 
 static bool CheckMerkleRoot(const CBlock& block, BlockValidationState& state)
@@ -3879,6 +3898,20 @@ static bool CheckMerkleRoot(const CBlock& block, BlockValidationState& state)
  * first transaction needs to have at least one input. */
 static bool CheckWitnessMalleation(const CBlock& block, bool expect_witness_commitment, BlockValidationState& state)
 {
+    if (block.m_extended) {
+        if (GetWitnessCommitmentIndex(block) != NO_WITNESS_COMMITMENT) {
+            return state.Invalid(
+                /*result=*/BlockValidationResult::BLOCK_MUTATED,
+                /*reject_reason=*/"unexpected-witness-commitment",
+                /*debug_message=*/strprintf("%s : unexpected witness commitment found", __func__));
+        }
+
+        // Extended blocks commit to witness data in hashMerkleRoot, so the
+        // legacy witness merkle tree and coinbase commitment are not used.
+        block.m_checked_witness_commitment = true;
+        return true;
+    }
+
     if (expect_witness_commitment) {
         if (block.m_checked_witness_commitment) return true;
 
@@ -3994,6 +4027,8 @@ bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensu
 
 void ChainstateManager::UpdateUncommittedBlockStructures(CBlock& block, const CBlockIndex* pindexPrev) const
 {
+    if (block.m_extended) return;
+
     int commitpos = GetWitnessCommitmentIndex(block);
     static const std::vector<unsigned char> nonce(32, 0x00);
     if (commitpos != NO_WITNESS_COMMITMENT && DeploymentActiveAfter(pindexPrev, *this, Consensus::DEPLOYMENT_SEGWIT) && !block.vtx[0]->HasWitness()) {
@@ -4006,6 +4041,8 @@ void ChainstateManager::UpdateUncommittedBlockStructures(CBlock& block, const CB
 
 void ChainstateManager::GenerateCoinbaseCommitment(CBlock& block, const CBlockIndex* pindexPrev) const
 {
+    if (block.m_extended) return;
+
     int commitpos = GetWitnessCommitmentIndex(block);
     std::vector<unsigned char> ret(32, 0x00);
     if (commitpos == NO_WITNESS_COMMITMENT) {
@@ -4098,8 +4135,17 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, BlockValidatio
     if (block.nBits != GetNextWorkRequired(pindexPrev, &block, consensusParams))
         return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "bad-diffbits", "incorrect proof of work");
 
+    const uint64_t block_time{block.GetBlockTime()};
+    const uint64_t prev_block_time{pindexPrev->GetBlockTime()};
+
+    if (prev_block_time >= CBlockHeader::EXTENDED_TIME_THRESHOLD) {
+        if (!block.m_extended || block_time < CBlockHeader::EXTENDED_TIME_THRESHOLD) {
+            return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "bad-time-encoding", "post-threshold block must use extended timestamp encoding");
+        }
+    }
+
     // Check timestamp against prev
-    if (block.GetBlockTime() <= pindexPrev->GetMedianTimePast())
+    if (block_time <= pindexPrev->GetMedianTimePast())
         return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "time-too-old", "block's timestamp is too early");
 
     // Testnet4 and regtest only: Check timestamp against prev for difficulty-adjustment
@@ -4108,23 +4154,24 @@ static bool ContextualCheckBlockHeader(const CBlockHeader& block, BlockValidatio
         // Check timestamp for the first block of each difficulty adjustment
         // interval, except the genesis block.
         if (nHeight % consensusParams.DifficultyAdjustmentInterval() == 0) {
-            if (block.GetBlockTime() < pindexPrev->GetBlockTime() - MAX_TIMEWARP) {
+            if (block_time < prev_block_time && prev_block_time - block_time > MAX_TIMEWARP) {
                 return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, "time-timewarp-attack", "block's timestamp is too early on diff adjustment block");
             }
         }
     }
 
     // Check timestamp
-    if (block.Time() > NodeClock::now() + std::chrono::seconds{MAX_FUTURE_BLOCK_TIME}) {
+    if (BlockTimeTooNew(block_time)) {
         return state.Invalid(BlockValidationResult::BLOCK_TIME_FUTURE, "time-too-new", "block timestamp too far in the future");
     }
 
     // Reject blocks with outdated version
-    if ((block.nVersion < 2 && DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_HEIGHTINCB)) ||
-        (block.nVersion < 3 && DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_DERSIG)) ||
-        (block.nVersion < 4 && DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_CLTV))) {
-            return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, strprintf("bad-version(0x%08x)", block.nVersion),
-                                 strprintf("rejected nVersion=0x%08x block", block.nVersion));
+    if (block.nVersion >= 0 &&
+        ((block.nVersion < 2 && DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_HEIGHTINCB)) ||
+         (block.nVersion < 3 && DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_DERSIG)) ||
+         (block.nVersion < 4 && DeploymentActiveAfter(pindexPrev, chainman, Consensus::DEPLOYMENT_CLTV)))) {
+        return state.Invalid(BlockValidationResult::BLOCK_INVALID_HEADER, strprintf("bad-version(0x%08x)", block.nVersion),
+                             strprintf("rejected nVersion=0x%08x block", block.nVersion));
     }
 
     return true;
@@ -4147,9 +4194,9 @@ static bool ContextualCheckBlock(const CBlock& block, BlockValidationState& stat
         enforce_locktime_median_time_past = true;
     }
 
-    const int64_t nLockTimeCutoff{enforce_locktime_median_time_past ?
-                                      pindexPrev->GetMedianTimePast() :
-                                      block.GetBlockTime()};
+    const int64_t nLockTimeCutoff{SaturatingBlockTime(enforce_locktime_median_time_past ?
+                                                          pindexPrev->GetMedianTimePast() :
+                                                          block.GetBlockTime())};
 
     // Check that all transactions are finalized
     for (const auto& tx : block.vtx) {
@@ -4590,7 +4637,7 @@ bool Chainstate::LoadChainTip()
     LogInfo("Loaded best chain: hashBestChain=%s height=%d date=%s progress=%f",
               tip->GetBlockHash().ToString(),
               m_chain.Height(),
-              FormatISO8601DateTime(tip->GetBlockTime()),
+              FormatISO8601DateTime(SaturatingBlockTime(tip->GetBlockTime())),
               m_chainman.GuessVerificationProgress(tip));
 
     // Ensure KernelNotifications m_tip_block is set even if no new block arrives.
@@ -5513,8 +5560,9 @@ double ChainstateManager::GuessVerificationProgress(const CBlockIndex* pindex) c
     }
 
     const int64_t nNow{TicksSinceEpoch<std::chrono::seconds>(NodeClock::now())};
+    const int64_t pindex_time{SaturatingBlockTime(pindex->GetBlockTime())};
     const auto block_time{
-        (Assume(m_best_header) && std::abs(nNow - pindex->GetBlockTime()) <= Ticks<std::chrono::seconds>(2h) &&
+        (Assume(m_best_header) && std::abs(nNow - pindex_time) <= Ticks<std::chrono::seconds>(2h) &&
          Assume(m_best_header->nHeight >= pindex->nHeight)) ?
             // When the header is known to be recent, switch to a height-based
             // approach. This ensures the returned value is quantized when
@@ -5522,7 +5570,7 @@ double ChainstateManager::GuessVerificationProgress(const CBlockIndex* pindex) c
             // avoids relying too much on the exact miner-set timestamp, which
             // may be off.
             nNow - (m_best_header->nHeight - pindex->nHeight) * GetConsensus().nPowTargetSpacing :
-            pindex->GetBlockTime(),
+            pindex_time,
     };
 
     double fTxTotal;

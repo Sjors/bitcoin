@@ -123,7 +123,7 @@ BOOST_AUTO_TEST_CASE(findearliestatleast_test)
         }
     }
     // Check that we set nTimeMax up correctly.
-    unsigned int curTimeMax = 0;
+    uint64_t curTimeMax = 0;
     for (unsigned int i=0; i<vBlocksMain.size(); ++i) {
         curTimeMax = std::max(curTimeMax, vBlocksMain[i].nTime);
         BOOST_CHECK(curTimeMax == vBlocksMain[i].nTimeMax);
@@ -137,7 +137,7 @@ BOOST_AUTO_TEST_CASE(findearliestatleast_test)
     for (unsigned int i=0; i<10000; ++i) {
         // Pick a random element in vBlocksMain.
         int r = m_rng.randrange(vBlocksMain.size());
-        int64_t test_time = vBlocksMain[r].nTime;
+        uint64_t test_time = vBlocksMain[r].nTime;
         CBlockIndex* ret = chain.FindEarliestAtLeast(test_time, 0);
         BOOST_CHECK(ret->nTimeMax >= test_time);
         BOOST_CHECK((ret->pprev==nullptr) || ret->pprev->nTimeMax < test_time);
