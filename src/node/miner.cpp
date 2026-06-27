@@ -19,6 +19,7 @@
 #include <node/kernel_notifications.h>
 #include <node/mining_args.h>
 #include <node/mining_types.h>
+#include <node/quantum.h>
 #include <policy/feerate.h>
 #include <policy/policy.h>
 #include <pow.h>
@@ -182,6 +183,26 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock()
     const CAmount block_reward{nFees + GetBlockSubsidy(nHeight, chainparams.GetConsensus())};
     coinbaseTx.vout[0].nValue = block_reward;
     coinbase_tx.block_reward_remaining = block_reward;
+
+    // Quantum tripwire: publish the single stored "aRsm" ECDL-break proof as a
+    // required OP_RETURN output in the coinbase. The proof is QUANTUM_PROOF_SIZE
+    // bytes, carried in a standard null-data output with zero value (so
+    // block_reward_remaining is unaffected), and added as a required_output that
+    // IPC mining clients must include, alongside the witness commitment appended
+    // below.
+    //
+    // The proof cannot fit in the 80-byte block header, so the coinbase is the
+    // only place to carry it. Using a coinbase OP_RETURN as a signalling channel
+    // mirrors a draft for coinbase-based version-bit signalling:
+    //   https://gnusha.org/pi/bitcoindev/D52CEDCC-C7EF-429E-802F-F28DC9241FF0@sprovoost.nl/
+    // In that thread Antoine Poinsot argued against using the coinbase for
+    // signalling; here there is no alternative, since the proof itself cannot fit
+    // in the header.
+    if (const auto proof{GetQuantumProofStore().GetProof()}) {
+        CTxOut proof_out{0, CScript() << OP_RETURN << *proof};
+        coinbaseTx.vout.push_back(proof_out);
+        coinbase_tx.required_outputs.push_back(proof_out);
+    }
 
     // Start the coinbase scriptSig with the block height as required by BIP34.
     // Mining clients are expected to append extra data to this prefix, so

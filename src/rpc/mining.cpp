@@ -63,6 +63,7 @@
 #include <versionbits.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -729,6 +730,7 @@ static RPCMethod getblocktemplate()
                 {RPCResult::Type::NUM, "height", "The height of the next block"},
                 {RPCResult::Type::STR_HEX, "signet_challenge", /*optional=*/true, "Only on signet"},
                 {RPCResult::Type::STR_HEX, "default_witness_commitment", /*optional=*/true, "a valid witness commitment for the unmodified block template"},
+                {RPCResult::Type::STR_HEX, "quantum_proof", /*optional=*/true, "the 128-byte ECDL-break (quantum tripwire) proof to include as a coinbase OP_RETURN, if one is held"},
             }},
         },
         RPCExamples{
@@ -1057,8 +1059,19 @@ static RPCMethod getblocktemplate()
     }
 
     if (auto coinbase{block_template->getCoinbaseTx()}; coinbase.required_outputs.size() > 0) {
-        CHECK_NONFATAL(coinbase.required_outputs.size() == 1); // Only one output is currently expected
-        result.pushKV("default_witness_commitment", HexStr(coinbase.required_outputs[0].scriptPubKey));
+        // required_outputs holds the witness commitment plus the single
+        // quantum-tripwire proof OP_RETURN, if one is held. Surface the witness
+        // commitment in the historical field and the proof separately.
+        static constexpr std::array<unsigned char, 6> WITNESS_COMMITMENT_HEADER{0x6a, 0x24, 0xaa, 0x21, 0xa9, 0xed};
+        for (const CTxOut& out : coinbase.required_outputs) {
+            const CScript& spk{out.scriptPubKey};
+            if (spk.size() >= WITNESS_COMMITMENT_HEADER.size() &&
+                std::equal(WITNESS_COMMITMENT_HEADER.begin(), WITNESS_COMMITMENT_HEADER.end(), spk.begin())) {
+                result.pushKV("default_witness_commitment", HexStr(spk));
+            } else if (const auto proof{node::ProofFromScript(std::span<const unsigned char>(spk.data(), spk.size()))}) {
+                result.pushKV("quantum_proof", HexStr(*proof));
+            }
+        }
     }
 
     return result;

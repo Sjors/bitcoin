@@ -43,6 +43,7 @@ from test_framework.quantum import (
 from test_framework.script import (
     CScript,
     OP_CHECKSIG,
+    OP_RETURN,
     taproot_construct,
     TaprootSignatureHash,
 )
@@ -102,6 +103,11 @@ class QuantumProofTest(BitcoinTestFramework):
         # it); (R, s) is read off the thief's witness; m is the sighash.
         return make_proof(tweak, sig, msg)
 
+    def coinbase_outputs(self, blockhash):
+        """Return the list of coinbase scriptPubKey hexes for a block."""
+        block = self.nodes[0].getblock(blockhash, 2)
+        return [out["scriptPubKey"]["hex"] for out in block["tx"][0]["vout"]]
+
     def check_proof_crypto(self, proof):
         self.log.info("Assemble the aRsm proof from public data and verify it (in Python)")
         assert_equal(len(proof), 128)
@@ -123,9 +129,12 @@ class QuantumProofTest(BitcoinTestFramework):
 
         proof = self.simulate_theft()
         self.check_proof_crypto(proof)
+        expected_spk = CScript([OP_RETURN, proof]).hex()
 
-        self.log.info("Before any proof is submitted, the node holds none")
+        self.log.info("Before any proof is submitted, the node holds none and mines no proof OP_RETURN")
         assert_equal(node.getquantumproof(), {})
+        pre_hash = self.generate(self.wallet, 1)[0]
+        assert expected_spk not in self.coinbase_outputs(pre_hash)
 
         self.log.info("A bogus proof is rejected by submitquantumproof and not stored")
         bogus = (b"\x00" * 96) + proof[96:]  # invalid signature, real message
@@ -138,7 +147,11 @@ class QuantumProofTest(BitcoinTestFramework):
         assert_equal(node.submitquantumproof(proof.hex()), {"valid": True, "stored": False})
         assert_equal(node.getquantumproof(), {"proof": proof.hex()})
 
-        self.log.info("Quantum theft simulated; aRsm proof verified, submitted, and held")
+        self.log.info("The next mined block carries the proof as a coinbase OP_RETURN")
+        post_hash = self.generate(self.wallet, 1)[0]
+        assert expected_spk in self.coinbase_outputs(post_hash)
+
+        self.log.info("Quantum theft simulated; aRsm proof verified, submitted, and published in the coinbase")
 
 
 if __name__ == '__main__':
