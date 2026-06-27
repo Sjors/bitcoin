@@ -730,7 +730,7 @@ static RPCMethod getblocktemplate()
                 {RPCResult::Type::NUM, "height", "The height of the next block"},
                 {RPCResult::Type::STR_HEX, "signet_challenge", /*optional=*/true, "Only on signet"},
                 {RPCResult::Type::STR_HEX, "default_witness_commitment", /*optional=*/true, "a valid witness commitment for the unmodified block template"},
-                {RPCResult::Type::STR_HEX, "quantum_proof", /*optional=*/true, "the 128-byte ECDL-break (quantum tripwire) proof to include as a coinbase OP_RETURN, if one is held"},
+                {RPCResult::Type::STR_HEX, "quantum_proof", /*optional=*/true, "the 128-byte ECDL-break (quantum tripwire) proof to include as a coinbase OP_RETURN, if one is held and not yet activated"},
             }},
         },
         RPCExamples{
@@ -1059,9 +1059,9 @@ static RPCMethod getblocktemplate()
     }
 
     if (auto coinbase{block_template->getCoinbaseTx()}; coinbase.required_outputs.size() > 0) {
-        // required_outputs holds the witness commitment plus the single
-        // quantum-tripwire proof OP_RETURN, if one is held. Surface the witness
-        // commitment in the historical field and the proof separately.
+        // required_outputs holds the witness commitment plus, before activation,
+        // the single quantum-tripwire proof OP_RETURN. Surface the witness
+        // commitment in the historical field and the proof (if any) separately.
         static constexpr std::array<unsigned char, 6> WITNESS_COMMITMENT_HEADER{0x6a, 0x24, 0xaa, 0x21, 0xa9, 0xed};
         for (const CTxOut& out : coinbase.required_outputs) {
             const CScript& spk{out.scriptPubKey};
@@ -1197,7 +1197,9 @@ static RPCMethod submitquantumproof()
         "The 128-byte proof is the concatenation a || R || s || m. It verifies\n"
         "against the node's configured NUMS point N: it is valid if (R, s) is a\n"
         "valid BIP-340 signature of m under P = N + a*G. The node holds at most one\n"
-        "proof (in memory, not persisted). Further proofs are ignored.",
+        "proof (in memory, not persisted); it is published as a single OP_RETURN\n"
+        "output in the coinbase of the next block, which instantly activates the\n"
+        "\"quantum\" deployment (see getdeploymentinfo). Further proofs are ignored.",
         {
             {"proof", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The 128-byte proof, hex-encoded."},
         },
@@ -1205,7 +1207,7 @@ static RPCMethod submitquantumproof()
             RPCResult::Type::OBJ, "", "",
             {
                 {RPCResult::Type::BOOL, "valid", "Whether the proof verified against the NUMS point."},
-                {RPCResult::Type::BOOL, "stored", "Whether the proof was newly stored (false if invalid or a proof is already held)."},
+                {RPCResult::Type::BOOL, "stored", "Whether the proof was newly stored (false if invalid, a proof is already held, or the tripwire already activated)."},
             }
         },
         RPCExamples{
@@ -1239,12 +1241,14 @@ static RPCMethod getquantumproof()
 {
     return RPCMethod{
         "getquantumproof",
-        "Return the \"aRsm\" ECDL-break (quantum tripwire) proof currently held, if any.",
+        "Return the \"aRsm\" ECDL-break (quantum tripwire) proof currently held, and the activation state.",
         {},
         RPCResult{
             RPCResult::Type::OBJ, "", "",
             {
                 {RPCResult::Type::STR_HEX, "proof", /*optional=*/true, "the stored 128-byte proof (a || R || s || m), hex-encoded; absent if none is held"},
+                {RPCResult::Type::BOOL, "active", "whether the \"quantum\" tripwire has activated"},
+                {RPCResult::Type::NUM, "activation_height", /*optional=*/true, "the first block height at which the tripwire is active; absent if not activated"},
             }
         },
         RPCExamples{
@@ -1253,9 +1257,15 @@ static RPCMethod getquantumproof()
         },
         [](const RPCMethod& self, const JSONRPCRequest& request) -> UniValue
 {
+    auto& store{node::GetQuantumProofStore()};
     UniValue result(UniValue::VOBJ);
-    if (const auto proof{node::GetQuantumProofStore().GetProof()}) {
+    if (const auto proof{store.GetProof()}) {
         result.pushKV("proof", HexStr(*proof));
+    }
+    const auto activation{store.ActivationHeight()};
+    result.pushKV("active", activation.has_value());
+    if (activation.has_value()) {
+        result.pushKV("activation_height", *activation);
     }
     return result;
 },
