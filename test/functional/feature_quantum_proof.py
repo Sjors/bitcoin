@@ -157,6 +157,9 @@ class QuantumProofTest(BitcoinTestFramework):
         block = self.nodes[0].getblock(blockhash, 2)
         return [out["scriptPubKey"]["hex"] for out in block["tx"][0]["vout"]]
 
+    def quantum_deployment(self):
+        return self.nodes[0].getdeploymentinfo()["deployments"]["quantum"]
+
     def check_ipc_coinbase(self, expected_spk):
         """A mining client driving the node over IPC must include the proof OP_RETURN."""
         if not self.ipc:
@@ -213,6 +216,8 @@ class QuantumProofTest(BitcoinTestFramework):
         assert expected_spk.hex() in self.coinbase_outputs(activating_hash)
         activation_height = node.getblock(activating_hash)["height"] + 1
         assert_equal(node.getquantumproof(), {"proof": proof.hex(), "active": True, "activation_height": activation_height})
+        # The tripwire is reported as an active "quantum" deployment.
+        assert_equal(self.quantum_deployment(), {"type": "tripwire", "height": activation_height, "active": True})
 
         self.log.info("After activation, later blocks no longer carry the proof OP_RETURN")
         post_hash = self.generate(self.wallet, 1)[0]
@@ -224,6 +229,7 @@ class QuantumProofTest(BitcoinTestFramework):
         self.log.info("Activation persists across a restart (restored from the activation file)")
         self.restart_node(0, extra_args=["-test=fakenums"])
         assert_equal(node.getquantumproof(), {"proof": proof.hex(), "active": True, "activation_height": activation_height})
+        assert_equal(self.quantum_deployment()["active"], True)
 
         self.log.info("Reorging a block mined *after* activation does not deactivate the tripwire")
         _, later_hash = self.generate(self.wallet, 2)
