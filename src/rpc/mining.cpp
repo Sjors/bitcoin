@@ -22,6 +22,7 @@
 #include <interfaces/types.h>
 #include <key_io.h>
 #include <net.h>
+#include <net_processing.h>
 #include <netbase.h>
 #include <node/blockstorage.h>
 #include <node/context.h>
@@ -1199,7 +1200,9 @@ static RPCMethod submitquantumproof()
         "valid BIP-340 signature of m under P = N + a*G. The node holds at most one\n"
         "proof (in memory, not persisted); it is published as a single OP_RETURN\n"
         "output in the coinbase of the next block, which instantly activates the\n"
-        "\"quantum\" deployment (see getdeploymentinfo). Further proofs are ignored.",
+        "\"quantum\" deployment (see getdeploymentinfo).\n"
+        "Any valid proof submitted this way is relayed to all peers, even if one is\n"
+        "already held (unlike proofs received over p2p, which stop at the first).",
         {
             {"proof", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The 128-byte proof, hex-encoded."},
         },
@@ -1227,6 +1230,13 @@ static RPCMethod submitquantumproof()
 
     auto& store{node::GetQuantumProofStore()};
     const bool valid{store.Verify(proof)};
+    // Relay any valid proof to peers -- even if we already hold one -- so an
+    // operator can inject a proof into the network. Only the p2p path stops
+    // forwarding once a proof is known.
+    if (valid) {
+        NodeContext& node{EnsureAnyNodeContext(request.context)};
+        EnsurePeerman(node).RelayQuantumProof(proof);
+    }
     const bool stored{store.Add(std::move(proof))};
 
     UniValue result(UniValue::VOBJ);
