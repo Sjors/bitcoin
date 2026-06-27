@@ -1950,6 +1950,24 @@ class msg_feature:
         return f"msg_feature(feature_id={self.feature_id}, data={self.feature_data.hex()})"
 
 
+class msg_qproof:
+    """QPROOF message relaying a 128-byte aRsm ECDL-break (quantum tripwire) proof."""
+    __slots__ = ("proof",)
+    msgtype = b"qproof"
+
+    def __init__(self, proof=b""):
+        self.proof = proof
+
+    def deserialize(self, f):
+        self.proof = deser_string(f)
+
+    def serialize(self):
+        return ser_string(self.proof)
+
+    def __repr__(self):
+        return f"msg_qproof(proof={self.proof.hex()})"
+
+
 class TestFrameworkScript(unittest.TestCase):
     def test_addrv2_encode_decode(self):
         def check_addrv2(ip, net):

@@ -268,6 +268,11 @@ inline constexpr const char* SENDTXRCNCL{"sendtxrcncl"};
  * BIP 434 Peer feature negotiation
  */
 inline constexpr const char* FEATURE{"feature"};
+/**
+ * Relays a 128-byte "aRsm" ECDL-break (quantum tripwire) proof
+ * (a || R || s || m). Experimental.
+ */
+inline constexpr const char* QPROOF{"qproof"};
 }; // namespace NetMsgType
 
 /** All known message types (see above). Keep this in the same order as the list of messages above. */
@@ -308,6 +313,7 @@ inline const std::array ALL_NET_MESSAGE_TYPES{std::to_array<std::string>({
     NetMsgType::WTXIDRELAY,
     NetMsgType::SENDTXRCNCL,
     NetMsgType::FEATURE,
+    NetMsgType::QPROOF,
 })};
 
 static constexpr size_t MAX_FEATUREID_LENGTH{80};

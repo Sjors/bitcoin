@@ -33,6 +33,7 @@
 #include <node/blockstorage.h>
 #include <node/connection_types.h>
 #include <node/protocol_version.h>
+#include <node/quantum.h>
 #include <node/timeoffsets.h>
 #include <node/txdownloadman.h>
 #include <node/txorphanage.h>
@@ -539,6 +540,7 @@ public:
     std::vector<PrivateBroadcast::TxBroadcastInfo> GetPrivateBroadcastInfo() const override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     std::vector<CTransactionRef> AbortPrivateBroadcast(const uint256& id) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void SendPings() override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
+    void RelayQuantumProof(std::span<const unsigned char> proof) override { FloodQuantumProof(proof, /*exclude_peer=*/std::nullopt); }
     void InitiateTxBroadcastToAll(const Txid& txid, const Wtxid& wtxid) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void InitiateTxBroadcastPrivate(const CTransactionRef& tx) override EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
     void SetBestBlock(int height, std::chrono::seconds time) override
@@ -720,6 +722,16 @@ private:
 
     /** Send a message to a peer */
     void PushMessage(CNode& node, CSerializedNetMsg&& msg) const { m_connman.PushMessage(&node, std::move(msg)); }
+    //! Send a quantum-tripwire proof to every connected peer except `exclude_peer`.
+    void FloodQuantumProof(std::span<const unsigned char> proof, std::optional<NodeId> exclude_peer)
+    {
+        const std::vector<unsigned char> data(proof.begin(), proof.end());
+        m_connman.ForEachNode([&](CNode* pnode) {
+            if (!exclude_peer || pnode->GetId() != *exclude_peer) {
+                MakeAndPushMessage(*pnode, NetMsgType::QPROOF, data);
+            }
+        });
+    }
     template <typename... Args>
     void MakeAndPushMessage(CNode& node, std::string msg_type, Args&&... args) const
     {
@@ -5098,6 +5110,26 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         }
         LOCK(m_tx_download_mutex);
         m_txdownloadman.ReceivedNotFound(pfrom.GetId(), tx_invs);
+        return;
+    }
+
+    if (msg_type == NetMsgType::QPROOF) {
+        // Relayed "aRsm" ECDL-break (quantum tripwire) proof.
+        std::vector<unsigned char> proof;
+        vRecv >> proof;
+        if (proof.size() != node::QUANTUM_PROOF_SIZE) {
+            LogDebug(BCLog::NET, "qproof of invalid size %u from peer=%d\n", proof.size(), pfrom.GetId());
+            return;
+        }
+        // Verify and store. Add() returns false for an invalid (fake) or already
+        // known proof, in which case we neither store nor relay it: over p2p we
+        // only ever accept and forward the first valid proof.
+        if (!node::GetQuantumProofStore().Add(proof)) {
+            LogDebug(BCLog::NET, "ignored invalid or duplicate qproof from peer=%d\n", pfrom.GetId());
+            return;
+        }
+        LogDebug(BCLog::NET, "stored and relaying new qproof from peer=%d\n", pfrom.GetId());
+        FloodQuantumProof(proof, /*exclude_peer=*/pfrom.GetId());
         return;
     }
 
