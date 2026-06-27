@@ -65,6 +65,7 @@
 #include <node/mining_args.h>
 #include <node/mining_types.h>
 #include <node/peerman_args.h>
+#include <node/quantum.h>
 #include <policy/feerate.h>
 #include <policy/fees/block_policy_estimator.h>
 #include <policy/fees/block_policy_estimator_args.h>
@@ -1461,6 +1462,17 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     LogInfo("Using at most %i automatic connections (%i file descriptors available)", nMaxConnections, available_fds);
 
+    // The quantum tripwire normally verifies proofs against the real BIP-341
+    // NUMS point (unknown discrete log). On regtest, -test=fakenums switches to a
+    // NUMS point whose discrete log is known, so a theft -- and a verifying proof
+    // -- can be simulated end to end.
+    if (HasTestOption(args, "fakenums")) {
+        node::GetQuantumProofStore().UseFakeNumsPoint();
+        LogInfo("Quantum tripwire using fake NUMS point (known discrete log) for testing");
+    }
+    // Persist the tripwire's activation point here, so it survives a restart.
+    node::GetQuantumProofStore().SetActivationFilePath(args.GetDataDirNet() / "quantum_tripwire.dat");
+
     // Warn about relative -datadir path.
     if (args.IsArgSet("-datadir") && !args.GetPathArg("-datadir").is_absolute()) {
         LogWarning("Relative datadir option '%s' specified, which will be interpreted relative to the "
@@ -1683,6 +1695,11 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         scheduler.scheduleEvery([fee_estimator] { fee_estimator->FlushFeeEstimates(); }, FEE_FLUSH_INTERVAL);
         validation_signals.RegisterValidationInterface(fee_estimator);
     }
+
+    // Watch connected blocks for a published quantum-tripwire proof, so the
+    // "quantum" deployment can activate instantly. Unregistered by
+    // UnregisterAllValidationInterfaces() at shutdown.
+    validation_signals.RegisterValidationInterface(&node::GetQuantumProofStore());
 
     for (const std::string& socket_addr : args.GetArgs("-bind")) {
         std::string host_out;
@@ -1912,6 +1929,14 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     ChainstateManager& chainman = *Assert(node.chainman);
     auto& kernel_notifications{*Assert(node.notifications)};
+
+    // Restore the quantum tripwire's activation from its persisted file (if any).
+    // This must run after the headers are loaded from disk (done above, so the
+    // activation block can be looked up) but before the network is started and
+    // new headers are accepted (which could reorg the chain mid-check), to avoid
+    // a race. Blocks connected later, e.g. during reindex/IBD, are handled
+    // incrementally by the registered validation interface.
+    node::GetQuantumProofStore().LoadActivationFromFile(chainman);
 
     assert(!node.peerman);
     node.peerman = PeerManager::make(*node.connman, *node.addrman,

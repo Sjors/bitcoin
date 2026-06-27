@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -152,6 +153,9 @@ public:
 
     /** Send ping message to all peers */
     virtual void SendPings() = 0;
+
+    /** Relay a verified "aRsm" ECDL-break (quantum tripwire) proof to all peers. */
+    virtual void RelayQuantumProof(std::span<const unsigned char> proof) = 0;
 
     /** Set the height of the best block and its time (seconds since epoch). */
     virtual void SetBestBlock(int height, std::chrono::seconds time) = 0;

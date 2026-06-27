@@ -29,6 +29,7 @@
 #include <net_processing.h>
 #include <node/blockstorage.h>
 #include <node/context.h>
+#include <node/quantum.h>
 #include <node/transaction.h>
 #include <node/utxo_snapshot.h>
 #include <node/warnings.h>
@@ -1480,7 +1481,7 @@ RPCMethod getblockchaininfo()
 
 namespace {
 const std::vector<RPCResult> RPCHelpForDeployment{
-    {RPCResult::Type::STR, "type", "one of \"buried\", \"bip9\""},
+    {RPCResult::Type::STR, "type", "one of \"buried\", \"bip9\", \"tripwire\""},
     {RPCResult::Type::NUM, "height", /*optional=*/true, "height of the first block which the rules are or will be enforced (only for \"buried\" type, or \"bip9\" type with \"active\" status)"},
     {RPCResult::Type::BOOL, "active", "true if the rules are enforced for the mempool and the next block"},
     {RPCResult::Type::OBJ, "bip9", /*optional=*/true, "status of bip9 softforks (only for \"bip9\" type)",
@@ -1504,6 +1505,24 @@ const std::vector<RPCResult> RPCHelpForDeployment{
     }},
 };
 
+static void QuantumSoftForkDescPushBack(const CBlockIndex* blockindex, UniValue& softforks)
+{
+    // The "quantum" tripwire: not a consensus rule change, but a signal that an
+    // ECDL-break proof has been published in a coinbase OP_RETURN. It activates
+    // instantly, one block after the proof-bearing block.
+    UniValue rv(UniValue::VOBJ);
+    rv.pushKV("type", "tripwire");
+    const auto activation{node::GetQuantumProofStore().ActivationHeight()};
+    bool active{false};
+    if (activation.has_value()) {
+        rv.pushKV("height", *activation);
+        // Active if the rules apply to the block after blockindex (the next block).
+        active = blockindex != nullptr && (*activation <= blockindex->nHeight + 1);
+    }
+    rv.pushKV("active", active);
+    softforks.pushKV("quantum", std::move(rv));
+}
+
 UniValue DeploymentInfo(const CBlockIndex* blockindex, const ChainstateManager& chainman)
 {
     UniValue softforks(UniValue::VOBJ);
@@ -1513,6 +1532,7 @@ UniValue DeploymentInfo(const CBlockIndex* blockindex, const ChainstateManager& 
     SoftForkDescPushBack(blockindex, softforks, chainman, Consensus::DEPLOYMENT_CSV);
     SoftForkDescPushBack(blockindex, softforks, chainman, Consensus::DEPLOYMENT_SEGWIT);
     SoftForkDescPushBack(blockindex, softforks, chainman, Consensus::DEPLOYMENT_TESTDUMMY);
+    QuantumSoftForkDescPushBack(blockindex, softforks);
     return softforks;
 }
 } // anon namespace
