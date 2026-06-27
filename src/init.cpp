@@ -65,6 +65,7 @@
 #include <node/mining_args.h>
 #include <node/mining_types.h>
 #include <node/peerman_args.h>
+#include <node/quantum.h>
 #include <policy/feerate.h>
 #include <policy/fees/block_policy_estimator.h>
 #include <policy/fees/block_policy_estimator_args.h>
@@ -1460,6 +1461,15 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     }
 
     LogInfo("Using at most %i automatic connections (%i file descriptors available)", nMaxConnections, available_fds);
+
+    // The quantum tripwire normally verifies proofs against the real BIP-341
+    // NUMS point (unknown discrete log). On regtest, -test=fakenums switches to a
+    // NUMS point whose discrete log is known, so a theft -- and a verifying proof
+    // -- can be simulated end to end.
+    if (HasTestOption(args, "fakenums")) {
+        node::GetQuantumProofStore().UseFakeNumsPoint();
+        LogInfo("Quantum tripwire using fake NUMS point (known discrete log) for testing");
+    }
 
     // Warn about relative -datadir path.
     if (args.IsArgSet("-datadir") && !args.GetPathArg("-datadir").is_absolute()) {

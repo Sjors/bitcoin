@@ -55,6 +55,8 @@ class QuantumProofTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 1
         self.setup_clean_chain = True
+        # Verify proofs against a NUMS point whose discrete log we know.
+        self.extra_args = [["-test=fakenums"]]
 
     def simulate_theft(self):
         """Carry out the theft on-chain and return the assembled proof."""
@@ -122,7 +124,21 @@ class QuantumProofTest(BitcoinTestFramework):
         proof = self.simulate_theft()
         self.check_proof_crypto(proof)
 
-        self.log.info("Quantum theft simulated and aRsm proof verified")
+        self.log.info("Before any proof is submitted, the node holds none")
+        assert_equal(node.getquantumproof(), {})
+
+        self.log.info("A bogus proof is rejected by submitquantumproof and not stored")
+        bogus = (b"\x00" * 96) + proof[96:]  # invalid signature, real message
+        assert_equal(node.submitquantumproof(bogus.hex()), {"valid": False, "stored": False})
+        assert_equal(node.getquantumproof(), {})
+
+        self.log.info("The real proof is accepted and stored; a second proof is ignored")
+        assert_equal(node.submitquantumproof(proof.hex()), {"valid": True, "stored": True})
+        # Re-submitting verifies but is not stored again (we already hold one).
+        assert_equal(node.submitquantumproof(proof.hex()), {"valid": True, "stored": False})
+        assert_equal(node.getquantumproof(), {"proof": proof.hex()})
+
+        self.log.info("Quantum theft simulated; aRsm proof verified, submitted, and held")
 
 
 if __name__ == '__main__':

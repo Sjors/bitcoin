@@ -28,6 +28,7 @@
 #include <node/miner.h>
 #include <node/mining_args.h>
 #include <node/mining_types.h>
+#include <node/quantum.h>
 #include <node/warnings.h>
 #include <policy/feerate.h>
 #include <policy/policy.h>
@@ -1175,6 +1176,79 @@ static RPCMethod submitheader()
     };
 }
 
+static RPCMethod submitquantumproof()
+{
+    return RPCMethod{
+        "submitquantumproof",
+        "Submit an \"aRsm\" ECDL-break (quantum tripwire) proof.\n"
+        "The 128-byte proof is the concatenation a || R || s || m. It verifies\n"
+        "against the node's configured NUMS point N: it is valid if (R, s) is a\n"
+        "valid BIP-340 signature of m under P = N + a*G. The node holds at most one\n"
+        "proof (in memory, not persisted). Further proofs are ignored.",
+        {
+            {"proof", RPCArg::Type::STR_HEX, RPCArg::Optional::NO, "The 128-byte proof, hex-encoded."},
+        },
+        RPCResult{
+            RPCResult::Type::OBJ, "", "",
+            {
+                {RPCResult::Type::BOOL, "valid", "Whether the proof verified against the NUMS point."},
+                {RPCResult::Type::BOOL, "stored", "Whether the proof was newly stored (false if invalid or a proof is already held)."},
+            }
+        },
+        RPCExamples{
+            HelpExampleCli("submitquantumproof", "\"<128-byte-hex>\"")
+            + HelpExampleRpc("submitquantumproof", "\"<128-byte-hex>\"")
+        },
+        [](const RPCMethod& self, const JSONRPCRequest& request) -> UniValue
+{
+    const std::string proof_hex{request.params[0].get_str()};
+    if (!IsHex(proof_hex)) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "proof must be hexadecimal");
+    }
+    std::vector<unsigned char> proof{ParseHex(proof_hex)};
+    if (proof.size() != node::QUANTUM_PROOF_SIZE) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("proof must be %u bytes", node::QUANTUM_PROOF_SIZE));
+    }
+
+    auto& store{node::GetQuantumProofStore()};
+    const bool valid{store.Verify(proof)};
+    const bool stored{store.Add(std::move(proof))};
+
+    UniValue result(UniValue::VOBJ);
+    result.pushKV("valid", valid);
+    result.pushKV("stored", stored);
+    return result;
+},
+    };
+}
+
+static RPCMethod getquantumproof()
+{
+    return RPCMethod{
+        "getquantumproof",
+        "Return the \"aRsm\" ECDL-break (quantum tripwire) proof currently held, if any.",
+        {},
+        RPCResult{
+            RPCResult::Type::OBJ, "", "",
+            {
+                {RPCResult::Type::STR_HEX, "proof", /*optional=*/true, "the stored 128-byte proof (a || R || s || m), hex-encoded; absent if none is held"},
+            }
+        },
+        RPCExamples{
+            HelpExampleCli("getquantumproof", "")
+            + HelpExampleRpc("getquantumproof", "")
+        },
+        [](const RPCMethod& self, const JSONRPCRequest& request) -> UniValue
+{
+    UniValue result(UniValue::VOBJ);
+    if (const auto proof{node::GetQuantumProofStore().GetProof()}) {
+        result.pushKV("proof", HexStr(*proof));
+    }
+    return result;
+},
+    };
+}
+
 void RegisterMiningRPCCommands(CRPCTable& t)
 {
     static const CRPCCommand commands[]{
@@ -1185,6 +1259,8 @@ void RegisterMiningRPCCommands(CRPCTable& t)
         {"mining", &getblocktemplate},
         {"mining", &submitblock},
         {"mining", &submitheader},
+        {"mining", &submitquantumproof},
+        {"mining", &getquantumproof},
 
         {"hidden", &generatetoaddress},
         {"hidden", &generatetodescriptor},
