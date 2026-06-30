@@ -603,6 +603,10 @@ static std::optional<std::vector<std::vector<uint8_t>>> FindPlaintextsForContent
     size_t pos{0};
 
     while (pos < payload.size()) {
+        // A 0x00 TYPE byte marks the end of the content-item sequence; the
+        // remaining bytes are padding and are ignored.
+        if (payload[pos] == 0x00) break;
+
         auto content_result = DecodeContentType(payload.subspan(pos));
         if (!content_result) return std::nullopt;
 
