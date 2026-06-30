@@ -391,6 +391,7 @@ void Shutdown(NodeContext& node)
     // Stop and delete all indexes only after flushing background callbacks.
     for (auto* index : node.indexes) index->Stop();
     if (g_txindex) g_txindex.reset();
+    if (g_wtxindex) g_wtxindex.reset();
     if (g_txospenderindex) g_txospenderindex.reset();
     if (g_coin_stats_index) g_coin_stats_index.reset();
     DestroyAllBlockFilterIndexes();
@@ -545,7 +546,7 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
                              DEFAULT_PERSIST_V1_DAT),
                    ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-pid=<file>", strprintf("Specify pid file. Relative paths will be prefixed by a net-specific datadir location. (default: %s)", BITCOIN_PID_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-prune=<n>", strprintf("Reduce storage requirements by enabling pruning (deleting) of old blocks. This allows the pruneblockchain RPC to be called to delete specific blocks and enables automatic pruning of old blocks if a target size in MiB is provided. This mode is incompatible with -txindex. "
+    argsman.AddArg("-prune=<n>", strprintf("Reduce storage requirements by enabling pruning (deleting) of old blocks. This allows the pruneblockchain RPC to be called to delete specific blocks and enables automatic pruning of old blocks if a target size in MiB is provided. This mode is incompatible with -txindex and -wtxindex. "
             "Warning: Reverting this setting requires re-downloading the entire blockchain. "
             "(default: 0 = disable pruning blocks, 1 = allow manual pruning via RPC, >=%u = automatically prune block files to stay under the specified target size in MiB)", MIN_DISK_SPACE_FOR_BLOCK_FILES / 1_MiB), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-reindex", "If enabled, wipe chain state and block index, and rebuild them from blk*.dat files on disk. Also wipe and rebuild other optional indexes that are active. If an assumeutxo snapshot was loaded, its chainstate will be wiped as well. The snapshot can then be reloaded via RPC.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -556,6 +557,7 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-shutdownnotify=<cmd>", "Execute command immediately before beginning shutdown. The need for shutdown may be urgent, so be careful not to delay it long (if the command doesn't require interaction with the server, consider having it fork into the background).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
 #endif
     argsman.AddArg("-txindex", strprintf("Maintain a full transaction index, used by the getrawtransaction rpc call (default: %u)", DEFAULT_TXINDEX), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-wtxindex", strprintf("Maintain a full witness transaction index by wtxid (default: %u)", DEFAULT_WTXINDEX), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-txospenderindex", strprintf("Maintain a transaction output spender index, used by the gettxspendingprevout rpc call (default: %u)", DEFAULT_TXOSPENDERINDEX), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-blockfilterindex=<type>",
                  strprintf("Maintain an index of compact filters by block (default: %s, values: %s).", DEFAULT_BLOCKFILTERINDEX, ListBlockFilterTypes()) +
@@ -1027,6 +1029,8 @@ bool AppInitParameterInteraction(const ArgsManager& args)
     if (args.GetIntArg("-prune", 0)) {
         if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX))
             return InitError(_("Prune mode is incompatible with -txindex."));
+        if (args.GetBoolArg("-wtxindex", DEFAULT_WTXINDEX))
+            return InitError(_("Prune mode is incompatible with -wtxindex."));
         if (args.GetBoolArg("-txospenderindex", DEFAULT_TXOSPENDERINDEX))
             return InitError(_("Prune mode is incompatible with -txospenderindex."));
         if (args.GetBoolArg("-reindex-chainstate", false)) {
@@ -1856,6 +1860,9 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
         LogInfo("* Using %.1f MiB for transaction index database", index_cache_sizes.tx_index / double(1_MiB));
     }
+    if (args.GetBoolArg("-wtxindex", DEFAULT_WTXINDEX)) {
+        LogInfo("* Using %.1f MiB for witness transaction index database", index_cache_sizes.wtx_index / double(1_MiB));
+    }
     if (args.GetBoolArg("-txospenderindex", DEFAULT_TXOSPENDERINDEX)) {
         LogInfo("* Using %.1f MiB for transaction output spender index database", index_cache_sizes.txospender_index / double(1_MiB));
     }
@@ -1925,6 +1932,11 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
         g_txindex = std::make_unique<TxIndex>(interfaces::MakeChain(node), index_cache_sizes.tx_index, false, do_reindex);
         node.indexes.emplace_back(g_txindex.get());
+    }
+
+    if (args.GetBoolArg("-wtxindex", DEFAULT_WTXINDEX)) {
+        g_wtxindex = std::make_unique<WtxIndex>(interfaces::MakeChain(node), index_cache_sizes.wtx_index, false, do_reindex);
+        node.indexes.emplace_back(g_wtxindex.get());
     }
 
     if (args.GetBoolArg("-txospenderindex", DEFAULT_TXOSPENDERINDEX)) {
