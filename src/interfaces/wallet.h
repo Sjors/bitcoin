@@ -18,10 +18,12 @@
 #include <util/result.h>
 #include <util/ui_change_type.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -92,6 +94,9 @@ public:
 
     //! Back up wallet.
     virtual bool backupWallet(const std::string& filename) = 0;
+
+    //! Create an encrypted backup of public wallet descriptors.
+    virtual util::Result<std::string> createEncryptedDescriptorBackup(const std::optional<std::string>& target_xpub, bool compact) = 0;
 
     //! Get wallet name.
     virtual std::string getWalletName() = 0;
@@ -308,6 +313,28 @@ public:
     virtual wallet::CWallet* wallet() { return nullptr; }
 };
 
+//! Metadata for an encrypted descriptor backup.
+struct EncryptedDescriptorBackupMetadata
+{
+    int version{0};
+    size_t recipient_count{0};
+    std::string encryption;
+    std::vector<std::string> derivation_paths;
+};
+
+//! Interface for encrypted wallet backup utility operations.
+class WalletBackup
+{
+public:
+    virtual ~WalletBackup() = default;
+
+    //! Decrypt an encrypted descriptor backup with an extended public key.
+    virtual util::Result<std::vector<uint8_t>> decryptEncryptedDescriptorBackup(const std::string& base64_str, const std::string& pubkey_str) = 0;
+
+    //! Get metadata from an encrypted descriptor backup.
+    virtual util::Result<EncryptedDescriptorBackupMetadata> getEncryptedDescriptorBackupMetadata(const std::string& base64_str) = 0;
+};
+
 //! Wallet chain client that in addition to having chain client methods for
 //! starting up, shutting down, and registering RPCs, also has additional
 //! methods (called by the GUI) to load and create wallets.
@@ -433,6 +460,10 @@ struct WalletMigrationResult
 //! Return implementation of Wallet interface. This function is defined in
 //! dummywallet.cpp and throws if the wallet component is not compiled.
 std::unique_ptr<Wallet> MakeWallet(wallet::WalletContext& context, const std::shared_ptr<wallet::CWallet>& wallet);
+
+//! Return implementation of WalletBackup interface. This function is defined in
+//! dummywallet.cpp and throws if the wallet component is not compiled.
+std::unique_ptr<WalletBackup> MakeWalletBackup();
 
 //! Return implementation of ChainClient interface for a wallet loader. This
 //! function will be undefined in builds where ENABLE_WALLET is false.

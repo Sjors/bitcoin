@@ -6,12 +6,16 @@
 #include <util/log.h>
 #include <walletinitinterface.h>
 
+#include <memory>
+#include <stdexcept>
+
 class ArgsManager;
 
 namespace interfaces {
 class Chain;
 class Handler;
 class Wallet;
+class WalletBackup;
 class WalletLoader;
 }
 
@@ -57,6 +61,11 @@ const WalletInitInterface& g_wallet_init_interface = DummyWalletInit();
 namespace interfaces {
 
 std::unique_ptr<WalletLoader> MakeWalletLoader(Chain& chain, ArgsManager& args)
+{
+    throw std::logic_error("Wallet function called in non-wallet build.");
+}
+
+std::unique_ptr<WalletBackup> MakeWalletBackup()
 {
     throw std::logic_error("Wallet function called in non-wallet build.");
 }

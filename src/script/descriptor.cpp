@@ -238,6 +238,21 @@ public:
     virtual std::optional<CPubKey> GetRootPubKey() const = 0;
     /** Return the extended public key for this PubkeyProvider, if it has one. */
     virtual std::optional<CExtPubKey> GetRootExtPubKey() const = 0;
+    /** Whether this PubkeyProvider is a bare xpub with no derivation. */
+    virtual bool IsBareExtPubKey() const { return false; }
+    /** Add the extended public key represented by this provider, if any.
+     *
+     * @param[out] ext_pubs Any extended public keys
+     * @param[in] exclude_observable Whether to exclude xpubs that may be observable from spends
+     */
+    virtual void GetExtPubKeys(std::set<CExtPubKey>& ext_pubs, bool exclude_observable) const
+    {
+        // A bare xpub has no derivation boundary separating the descriptor key from the
+        // pubkey revealed by a spend, unlike xpub/path or xpub/* entries.
+        if (exclude_observable && IsBareExtPubKey()) return;
+        std::optional<CExtPubKey> ext_pub = GetRootExtPubKey();
+        if (ext_pub) ext_pubs.insert(*ext_pub);
+    }
 
     /** Make a deep copy of this PubkeyProvider */
     virtual std::unique_ptr<PubkeyProvider> Clone() const = 0;
@@ -312,6 +327,10 @@ public:
     std::optional<CExtPubKey> GetRootExtPubKey() const override
     {
         return m_provider->GetRootExtPubKey();
+    }
+    bool IsBareExtPubKey() const override
+    {
+        return m_provider->IsBareExtPubKey();
     }
     std::unique_ptr<PubkeyProvider> Clone() const override
     {
@@ -603,6 +622,7 @@ public:
     {
         return m_root_extkey;
     }
+    bool IsBareExtPubKey() const override { return m_path.empty() && !IsRange(); }
     std::unique_ptr<PubkeyProvider> Clone() const override
     {
         return std::make_unique<BIP32PubkeyProvider>(m_expr_index, m_root_extkey, m_path, m_derive, m_apostrophe);
@@ -790,6 +810,19 @@ public:
     std::optional<CExtPubKey> GetRootExtPubKey() const override
     {
         return std::nullopt;
+    }
+    void GetExtPubKeys(std::set<CExtPubKey>& ext_pubs, bool exclude_observable) const override
+    {
+        if (!exclude_observable) {
+            PubkeyProvider::GetExtPubKeys(ext_pubs, exclude_observable);
+            return;
+        }
+        // MuSig's participant xpubs are not descriptor root keys, so GetPubKeys() intentionally
+        // omits them. Recurse into participants for backup key discovery, where the aggregate key
+        // revealed by a spend does not reveal the participant xpubs.
+        for (const auto& prov : m_participants) {
+            prov->GetExtPubKeys(ext_pubs, /*exclude_observable=*/false);
+        }
     }
 
     std::unique_ptr<PubkeyProvider> Clone() const override
@@ -1049,6 +1082,17 @@ public:
         }
         for (const auto& arg : m_subdescriptor_args) {
             arg->GetPubKeys(pubkeys, ext_pubs);
+        }
+    }
+
+    // NOLINTNEXTLINE(misc-no-recursion)
+    void GetExtPubKeys(std::set<CExtPubKey>& ext_pubs, bool exclude_observable) const override
+    {
+        for (const auto& p : m_pubkey_args) {
+            p->GetExtPubKeys(ext_pubs, exclude_observable);
+        }
+        for (const auto& arg : m_subdescriptor_args) {
+            arg->GetExtPubKeys(ext_pubs, exclude_observable);
         }
     }
 
