@@ -585,6 +585,12 @@ static std::optional<std::vector<std::vector<uint8_t>>> FindPlaintextsForContent
     size_t pos{0};
 
     while (pos < payload.size()) {
+        // A 0x00 TYPE byte marks the end of the content-item sequence; the
+        // remaining bytes are padding and are ignored. The BIP138 text is not
+        // yet unambiguous here (the content-type table still lists 0x00 as
+        // "reject"), pending https://github.com/bitcoin/bips/pull/1951
+        if (payload[pos] == 0x00) break;
+
         auto content_result = DecodeContent(payload.subspan(pos));
         if (!content_result) return std::nullopt;
 

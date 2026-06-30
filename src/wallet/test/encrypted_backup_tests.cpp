@@ -550,6 +550,62 @@ BOOST_AUTO_TEST_CASE(reject_all_zero_nonce_test)
     BOOST_CHECK_MESSAGE(!rejected, "All-zero nonce should be rejected");
 }
 
+BOOST_AUTO_TEST_CASE(content_items_padding_roundtrip_test)
+{
+    // A payload with multiple content items followed by zero padding: the 0x00
+    // byte after the last item marks the start of padding, so decryption returns
+    // exactly the two items and ignores the trailing zeros.
+    const std::string receive_descriptor_1{"wpkh([d34db33f/84h/1h/0h]tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba/0/*)"};
+    const std::string change_descriptor_1{"wpkh([d34db33f/84h/1h/0h]tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba/1/*)"};
+
+    const EncryptedBackupContent content{
+        .type = ContentType::BIP_NUMBER,
+        .bip_number = BIP_DESCRIPTORS,
+        .payload = {},
+    };
+
+    std::vector<uint8_t> payload;
+    auto append_plaintext_item = [&](std::string_view plaintext) {
+        auto encoded_content{EncodeContent(content)};
+        BOOST_REQUIRE_MESSAGE(encoded_content, util::ErrorString(encoded_content).original);
+        payload.insert(payload.end(), encoded_content->begin(), encoded_content->end());
+
+        DataStream plaintext_size;
+        WriteCompactSize(plaintext_size, plaintext.size());
+        payload.insert(payload.end(), UCharCast(plaintext_size.data()), UCharCast(plaintext_size.data()) + plaintext_size.size());
+        payload.insert(payload.end(), plaintext.begin(), plaintext.end());
+    };
+    append_plaintext_item(receive_descriptor_1);
+    append_plaintext_item(change_descriptor_1);
+    payload.resize(payload.size() + 32, 0);
+
+    auto backup_result = CreateEncryptedBackup(receive_descriptor_1, {UCharCast(receive_descriptor_1.data()), receive_descriptor_1.size()}, content, {});
+    BOOST_REQUIRE_MESSAGE(backup_result, util::ErrorString(backup_result).original);
+
+    auto keys_result = ExtractKeysFromDescriptor(receive_descriptor_1);
+    BOOST_REQUIRE_MESSAGE(keys_result, util::ErrorString(keys_result).original);
+    uint256 decryption_secret = ComputeDecryptionSecret(*keys_result);
+
+    AEADChaCha20Poly1305 aead{MakeByteSpan(decryption_secret)};
+    backup_result->ciphertext.resize(payload.size() + AEADChaCha20Poly1305::EXPANSION);
+    aead.Encrypt(MakeByteSpan(payload), {}, ReadAEADNonce(backup_result->nonce), MakeWritableByteSpan(backup_result->ciphertext));
+
+    auto decoded_result = DecodeEncryptedBackup(EncodeEncryptedBackup(*backup_result));
+    BOOST_REQUIRE_MESSAGE(decoded_result, util::ErrorString(decoded_result).original);
+
+    auto plaintext_items = DecryptBackupContentsWithKey(*decoded_result, keys_result->front());
+    BOOST_REQUIRE(plaintext_items.has_value());
+    BOOST_REQUIRE_EQUAL(plaintext_items->size(), 2);
+    BOOST_CHECK_EQUAL(std::string(plaintext_items->at(0).begin(), plaintext_items->at(0).end()), receive_descriptor_1);
+    BOOST_CHECK_EQUAL(std::string(plaintext_items->at(1).begin(), plaintext_items->at(1).end()), change_descriptor_1);
+
+    auto decrypted = DecryptBackupWithDescriptor(*decoded_result, receive_descriptor_1);
+    BOOST_REQUIRE_MESSAGE(decrypted, util::ErrorString(decrypted).original);
+
+    const std::string decrypted_str{decrypted->begin(), decrypted->end()};
+    BOOST_CHECK_EQUAL(decrypted_str, receive_descriptor_1);
+}
+
 BOOST_AUTO_TEST_CASE(full_backup_roundtrip_test)
 {
     // Test full backup creation and decryption with a real descriptor
