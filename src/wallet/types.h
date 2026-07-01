@@ -51,6 +51,11 @@ enum class WalletErrorCode {
     //! The wallet is locked and the operation requires access to private keys.
     //! Callers may ask the user to unlock the wallet and retry the operation.
     WALLET_UNLOCK_NEEDED,
+
+    //! The wallet has private keys disabled (WALLET_FLAG_DISABLE_PRIVATE_KEYS)
+    //! but the operation requires them. Callers may present the accompanying
+    //! message explaining that the operation is unavailable for this wallet.
+    WALLET_PRIVATE_KEYS_DISABLED,
 };
 
 struct WalletError {

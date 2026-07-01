@@ -3851,7 +3851,7 @@ util::Expected<CExtPubKey, WalletError> CWallet::AddHDKey(const std::optional<CE
 
     if (IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
         return util::Unexpected{WalletError{
-            WalletErrorCode::WALLET_ERROR,
+            WalletErrorCode::WALLET_PRIVATE_KEYS_DISABLED,
             _("addhdkey is not available for wallets without private keys")
         }};
     }
