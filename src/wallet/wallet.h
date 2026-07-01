@@ -25,6 +25,7 @@
 #include <tinyformat.h>
 #include <uint256.h>
 #include <util/btcsignals.h>
+#include <util/expected.h>
 #include <util/fs.h>
 #include <util/hasher.h>
 #include <util/log.h>
@@ -1052,8 +1053,8 @@ public:
     //! Requires the wallet to be unlocked.
     //! @param[in] existing_key Optional extended private key to add. If not provided,
     //!                         a new random HD key will be generated.
-    //! @return The master xpub for the added HD key, or an error on failure.
-    util::Result<CExtPubKey> AddHDKey(const std::optional<CExtKey>& existing_key);
+    //! @return The master xpub for the added HD key, or a `WalletError` on failure.
+    util::Expected<CExtPubKey, WalletError> AddHDKey(const std::optional<CExtKey>& existing_key);
 
     /** Move all records from the BDB database to a new SQLite database for storage.
      * The original BDB file will be deleted and replaced with a new SQLite file.

@@ -887,7 +887,10 @@ RPCMethod addhdkey()
 
             auto res = wallet->AddHDKey(existing_key);
             if (!res) {
-                throw JSONRPCError(RPC_WALLET_ERROR, util::ErrorString(res).original);
+                if (res.error().code == wallet::WalletErrorCode::WALLET_UNLOCK_NEEDED) {
+                    throw JSONRPCError(RPC_WALLET_UNLOCK_NEEDED, res.error().message.original);
+                }
+                throw JSONRPCError(RPC_WALLET_ERROR, res.error().message.original);
             }
 
             UniValue response(UniValue::VOBJ);
