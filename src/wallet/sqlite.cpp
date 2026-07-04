@@ -428,7 +428,7 @@ void SQLiteBatch::Close()
             // by closing and reopening the database. Closing the database should also ensure that any changes made since the transaction
             // was opened will be rolled back and future transactions can succeed without committing old data.
             force_conn_refresh = true;
-            LogWarning("SQLiteBatch: Batch closed and failed to abort transaction, resetting db connection..");
+            LogWarning("SQLiteBatch:  transaction, resetting db connection..");
         }
     }
 
@@ -720,6 +720,15 @@ std::unique_ptr<SQLiteDatabase> MakeSQLiteDatabase(const fs::path& path, const D
         error = Untranslated(e.what());
         return nullptr;
     }
+}
+
+InMemoryWalletDatabase::InMemoryWalletDatabase()
+    : SQLiteDatabase(fs::path{}, fs::path{":memory:"}, DatabaseOptions(), SQLITE_OPEN_MEMORY)
+{}
+
+std::unique_ptr<WalletDatabase> MakeInMemoryWalletDatabase()
+{
+    return std::make_unique<InMemoryWalletDatabase>();
 }
 
 std::string SQLiteDatabaseVersion()
