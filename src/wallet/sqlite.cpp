@@ -261,6 +261,7 @@ void SQLiteDatabase::Open(int additional_flags)
     int flags = SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | additional_flags;
 
     if (m_db == nullptr) {
+        m_journal_file_path.reset();
         if (!(flags & SQLITE_OPEN_MEMORY)) {
             TryCreateDirectories(m_dir_path);
             if (!IsDirWritable(m_dir_path)) {
@@ -271,6 +272,18 @@ void SQLiteDatabase::Open(int additional_flags)
         int ret = sqlite3_open_v2(m_file_path.c_str(), &m_db, flags, nullptr);
         if (ret != SQLITE_OK) {
             throw std::runtime_error(strprintf("SQLiteDatabase: Failed to open database: %s\n", sqlite3_errstr(ret)));
+        }
+        if (!(flags & SQLITE_OPEN_MEMORY)) {
+#if SQLITE_VERSION_NUMBER >= 3031000
+            if (const auto db_filename{sqlite3_db_filename(m_db, "main")}) {
+                const char* journal_filename{sqlite3_filename_journal(db_filename)};
+                if (journal_filename && journal_filename[0] != '\0') {
+                    m_journal_file_path = fs::PathFromString(journal_filename);
+                }
+            }
+#else
+            m_journal_file_path = m_dir_path / fs::PathFromString(m_file_path + "-journal");
+#endif
         }
         ret = sqlite3_extended_result_codes(m_db, 1);
         if (ret != SQLITE_OK) {

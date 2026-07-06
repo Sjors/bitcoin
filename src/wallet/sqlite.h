@@ -8,6 +8,7 @@
 #include <sync.h>
 #include <wallet/db.h>
 
+#include <optional>
 #include <semaphore>
 
 struct bilingual_str;
@@ -111,6 +112,8 @@ private:
 
     const std::string m_display_file_name;
 
+    std::optional<fs::path> m_journal_file_path;
+
     const int m_additional_flags;
 
     /**
@@ -162,7 +165,7 @@ public:
     {
         std::vector<fs::path> files;
         files.emplace_back(m_dir_path / fs::PathFromString(m_file_path));
-        files.emplace_back(m_dir_path / fs::PathFromString(m_file_path + "-journal"));
+        if (m_journal_file_path) files.emplace_back(*m_journal_file_path);
         return files;
     }
     std::string Format() override { return "sqlite"; }
