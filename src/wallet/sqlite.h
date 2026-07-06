@@ -103,6 +103,8 @@ public:
 class SQLiteDatabase : public WalletDatabase
 {
 private:
+    friend class SQLiteBatch;
+
     const fs::path m_dir_path;
 
     const std::string m_file_path;

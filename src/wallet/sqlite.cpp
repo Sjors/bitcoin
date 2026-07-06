@@ -448,6 +448,9 @@ void SQLiteBatch::Close()
     }
 
     if (force_conn_refresh) {
+        if (m_database.m_additional_flags & SQLITE_OPEN_MEMORY) {
+            throw std::runtime_error("SQLiteDatabase: Cannot recover in-memory database connection");
+        }
         m_database.Close();
         try {
             m_database.Open();
