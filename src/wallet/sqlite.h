@@ -108,7 +108,7 @@ private:
 
     const fs::path m_dir_path;
 
-    const std::string m_file_path;
+    const std::optional<fs::path> m_file_path;
 
     const std::string m_display_file_name;
 
@@ -127,10 +127,10 @@ private:
 
     void Cleanup() noexcept EXCLUSIVE_LOCKS_REQUIRED(!g_sqlite_mutex);
 
-    void Open(int additional_flags);
-
 protected:
-    SQLiteDatabase(const fs::path& dir_path, const fs::path& file_path, const DatabaseOptions& options, int additional_flags);
+    //! For an in-memory database, pass no file path and include
+    //! SQLITE_OPEN_MEMORY in additional_flags.
+    SQLiteDatabase(const fs::path& dir_path, const std::optional<fs::path>& file_path, const DatabaseOptions& options, int additional_flags);
 
 public:
     SQLiteDatabase() = delete;
@@ -164,7 +164,7 @@ public:
     std::vector<fs::path> Files() override
     {
         std::vector<fs::path> files;
-        files.emplace_back(m_dir_path / fs::PathFromString(m_file_path));
+        if (m_file_path) files.emplace_back(*m_file_path);
         if (m_journal_file_path) files.emplace_back(*m_journal_file_path);
         return files;
     }
@@ -186,7 +186,6 @@ class InMemoryWalletDatabase : public SQLiteDatabase
 {
 public:
     InMemoryWalletDatabase();
-    std::vector<fs::path> Files() override { return {}; }
 };
 
 std::unique_ptr<SQLiteDatabase> MakeSQLiteDatabase(const fs::path& path, const DatabaseOptions& options, DatabaseStatus& status, bilingual_str& error);

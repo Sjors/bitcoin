@@ -115,15 +115,16 @@ SQLiteDatabase::SQLiteDatabase(const fs::path& dir_path, const fs::path& file_pa
     : SQLiteDatabase(dir_path, file_path, options, /*additional_flags=*/0)
 {}
 
-SQLiteDatabase::SQLiteDatabase(const fs::path& dir_path, const fs::path& file_path, const DatabaseOptions& options, int additional_flags)
+SQLiteDatabase::SQLiteDatabase(const fs::path& dir_path, const std::optional<fs::path>& file_path, const DatabaseOptions& options, int additional_flags)
     : WalletDatabase(),
       m_dir_path(dir_path),
-      m_file_path(fs::PathToString(file_path)),
-      m_display_file_name((additional_flags & SQLITE_OPEN_MEMORY) ? "<in-memory>" : fs::PathToString(file_path)),
+      m_file_path(file_path),
+      m_display_file_name(m_file_path ? fs::PathToString(*m_file_path) : "<in-memory>"),
       m_additional_flags(additional_flags),
       m_write_semaphore(1),
       m_use_unsafe_sync(options.use_unsafe_sync)
 {
+    Assert(m_file_path.has_value() != bool(m_additional_flags & SQLITE_OPEN_MEMORY));
     {
         LOCK(g_sqlite_mutex);
         if (++g_sqlite_count == 1) {
@@ -145,7 +146,7 @@ SQLiteDatabase::SQLiteDatabase(const fs::path& dir_path, const fs::path& file_pa
     }
 
     try {
-        Open(additional_flags);
+        Open();
     } catch (const std::runtime_error&) {
         // If open fails, cleanup this object and rethrow the exception
         Cleanup();
@@ -253,27 +254,23 @@ bool SQLiteDatabase::Verify(bilingual_str& error)
 
 void SQLiteDatabase::Open()
 {
-    Open(m_additional_flags);
-}
-
-void SQLiteDatabase::Open(int additional_flags)
-{
-    int flags = SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | additional_flags;
+    int flags = SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | m_additional_flags;
 
     if (m_db == nullptr) {
         m_journal_file_path.reset();
-        if (!(flags & SQLITE_OPEN_MEMORY)) {
+        if (m_file_path) {
             TryCreateDirectories(m_dir_path);
             if (!IsDirWritable(m_dir_path)) {
                 throw std::runtime_error(strprintf("SQLiteDatabase: Failed to open database in directory '%s': directory is not writable", fs::PathToString(m_dir_path)));
             }
         }
 
-        int ret = sqlite3_open_v2(m_file_path.c_str(), &m_db, flags, nullptr);
+        const std::string file_path_str{m_file_path ? fs::PathToString(*m_file_path) : ""};
+        int ret = sqlite3_open_v2(file_path_str.c_str(), &m_db, flags, nullptr);
         if (ret != SQLITE_OK) {
             throw std::runtime_error(strprintf("SQLiteDatabase: Failed to open database: %s\n", sqlite3_errstr(ret)));
         }
-        if (!(flags & SQLITE_OPEN_MEMORY)) {
+        if (m_file_path) {
 #if SQLITE_VERSION_NUMBER >= 3031000
             if (const auto db_filename{sqlite3_db_filename(m_db, "main")}) {
                 const char* journal_filename{sqlite3_filename_journal(db_filename)};
@@ -282,7 +279,7 @@ void SQLiteDatabase::Open(int additional_flags)
                 }
             }
 #else
-            m_journal_file_path = m_dir_path / fs::PathFromString(m_file_path + "-journal");
+            m_journal_file_path = fs::PathFromString(fs::PathToString(*m_file_path) + "-journal");
 #endif
         }
         ret = sqlite3_extended_result_codes(m_db, 1);
@@ -739,7 +736,7 @@ std::unique_ptr<SQLiteDatabase> MakeSQLiteDatabase(const fs::path& path, const D
 }
 
 InMemoryWalletDatabase::InMemoryWalletDatabase()
-    : SQLiteDatabase(fs::path{}, fs::path{}, DatabaseOptions(), SQLITE_OPEN_MEMORY)
+    : SQLiteDatabase(fs::path{}, std::nullopt, DatabaseOptions(), SQLITE_OPEN_MEMORY)
 {}
 
 std::unique_ptr<WalletDatabase> MakeInMemoryWalletDatabase()
