@@ -109,6 +109,8 @@ private:
 
     const std::string m_file_path;
 
+    const std::string m_display_file_name;
+
     const int m_additional_flags;
 
     /**
@@ -154,7 +156,7 @@ public:
      */
     bool Backup(const std::string& dest) const override;
 
-    std::string DisplayFileName() override { return m_file_path; }
+    std::string DisplayFileName() override { return m_display_file_name; }
     /** Return paths to all database created files */
     std::vector<fs::path> Files() override
     {
@@ -181,7 +183,6 @@ class InMemoryWalletDatabase : public SQLiteDatabase
 {
 public:
     InMemoryWalletDatabase();
-    std::string DisplayFileName() override { return "<in-memory>"; }
     std::vector<fs::path> Files() override { return {}; }
 };
 
