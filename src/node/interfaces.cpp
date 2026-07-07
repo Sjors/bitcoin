@@ -90,6 +90,7 @@ using interfaces::Chain;
 using interfaces::FoundBlock;
 using interfaces::Handler;
 using interfaces::MakeSignalHandler;
+using interfaces::MemoryLoad;
 using interfaces::Mining;
 using interfaces::Node;
 using interfaces::Rpc;
@@ -1033,6 +1034,11 @@ public:
         // for validity. Treat duplicates as errors for mining clients, and only
         // return success when validation completed without setting a reason.
         return accepted && new_block && reason.empty();
+    }
+
+    MemoryLoad getMemoryLoad() override
+    {
+        return {.usage = block_template_manager().GetTemplateMemoryUsage()};
     }
 
     const NodeContext* context() override { return &m_node; }
