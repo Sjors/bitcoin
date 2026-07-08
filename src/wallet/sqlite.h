@@ -8,6 +8,7 @@
 #include <sync.h>
 #include <wallet/db.h>
 
+#include <optional>
 #include <semaphore>
 
 struct bilingual_str;
@@ -107,7 +108,7 @@ private:
 
     const fs::path m_dir_path;
 
-    const std::string m_file_path;
+    const std::optional<fs::path> m_file_path;
 
     const int m_additional_flags;
 
@@ -125,7 +126,9 @@ private:
     void Open(int additional_flags);
 
 protected:
-    SQLiteDatabase(const fs::path& dir_path, const fs::path& file_path, const DatabaseOptions& options, int additional_flags);
+    //! For an in-memory database, pass no file path and include
+    //! SQLITE_OPEN_MEMORY in additional_flags.
+    SQLiteDatabase(const fs::path& dir_path, const std::optional<fs::path>& file_path, const DatabaseOptions& options, int additional_flags);
 
 public:
     SQLiteDatabase() = delete;
@@ -154,13 +157,17 @@ public:
      */
     bool Backup(const std::string& dest) const override;
 
-    std::string Filename() override { return m_file_path; }
+    /** Return the full path to the primary database file, or the magic
+     *  ":memory:" name for an in-memory database. */
+    std::string Filename() override { return m_file_path ? fs::PathToString(*m_file_path) : ":memory:"; }
     /** Return paths to all database created files */
     std::vector<fs::path> Files() override
     {
         std::vector<fs::path> files;
-        files.emplace_back(m_dir_path / fs::PathFromString(m_file_path));
-        files.emplace_back(m_dir_path / fs::PathFromString(m_file_path + "-journal"));
+        if (m_file_path) {
+            files.emplace_back(m_dir_path / *m_file_path);
+            files.emplace_back(m_dir_path / (*m_file_path + "-journal"));
+        }
         return files;
     }
     std::string Format() override { return "sqlite"; }
@@ -181,7 +188,6 @@ class InMemoryWalletDatabase : public SQLiteDatabase
 {
 public:
     InMemoryWalletDatabase();
-    std::vector<fs::path> Files() override { return {}; }
 };
 
 std::unique_ptr<SQLiteDatabase> MakeSQLiteDatabase(const fs::path& path, const DatabaseOptions& options, DatabaseStatus& status, bilingual_str& error);

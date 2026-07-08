@@ -152,7 +152,7 @@ public:
      */
     virtual void Close() = 0;
 
-    /** Return path to main database file for logs and error messages. */
+    /** Return the full path to the primary database file. */
     virtual std::string Filename() = 0;
 
     /** Return paths to all database created files */
