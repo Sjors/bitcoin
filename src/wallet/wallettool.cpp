@@ -203,8 +203,8 @@ bool ExecuteWalletToolFunc(const ArgsManager& args, const std::string& command)
         tfm::format(std::cout, "%s\n", *backup_result);
         wallet_instance->Close();
     } else if (command == "decryptbackup") {
-        if (!args.IsArgSet("-pubkey")) {
-            tfm::format(std::cerr, "Extended public key must be provided via -pubkey for decryptbackup.\n");
+        if (!args.IsArgSet("-pubkey") && !args.IsArgSet("-wallet")) {
+            tfm::format(std::cerr, "Provide an extended public key via -pubkey, or a -wallet whose keys can decrypt the backup.\n");
             return false;
         }
 
@@ -227,7 +227,9 @@ bool ExecuteWalletToolFunc(const ArgsManager& args, const std::string& command)
             const std::shared_ptr<CWallet> wallet_instance = MakeWallet(name, path, options);
             if (!wallet_instance) return false;
 
-            auto import_result{wallet_instance->ImportEncryptedDescriptorBackup(base64_input, args.GetArg("-pubkey", ""))};
+            std::optional<std::string> pubkey;
+            if (args.IsArgSet("-pubkey")) pubkey = args.GetArg("-pubkey", "");
+            auto import_result{wallet_instance->ImportEncryptedDescriptorBackup(base64_input, pubkey)};
             if (!import_result) {
                 tfm::format(std::cerr, "%s\n", util::ErrorString(import_result).original);
                 wallet_instance->Close();

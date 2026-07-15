@@ -894,7 +894,11 @@ public:
 
     [[nodiscard]] bool BackupWallet(const std::string& strDest) const;
     util::Result<std::string> CreateEncryptedDescriptorBackup(const std::optional<std::string>& target_xpub, bool compact) const;
-    util::Result<int> ImportEncryptedDescriptorBackup(const std::string& base64_str, const std::string& pubkey_str);
+    //! When no pubkey is provided, candidate decryption keys are derived from
+    //! the wallet's own HD keys at the backup's derivation path hints and the
+    //! BIP138 common derivation paths.
+    util::Result<int> ImportEncryptedDescriptorBackup(const std::string& base64_str, const std::optional<std::string>& pubkey_str);
+    util::Result<std::vector<uint8_t>> DecryptEncryptedBackupBase64WithWalletKeys(const std::string& base64_str) const;
     static util::Result<std::vector<uint8_t>> DecryptEncryptedBackupBase64WithExtPubKey(const std::string& base64_str, const std::string& pubkey_str);
     static util::Result<EncryptedBackupMetadata> GetEncryptedBackupMetadata(const std::string& base64_str);
 

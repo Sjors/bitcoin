@@ -767,6 +767,13 @@ BOOST_AUTO_TEST_CASE(interface_create_encrypted_descriptor_backup_test)
     auto compact_plaintext{DecryptBackupWithDescriptor(*compact_decoded, multipath_descriptor)};
     BOOST_REQUIRE_MESSAGE(compact_plaintext, util::ErrorString(compact_plaintext).original);
     BOOST_CHECK_EQUAL(std::string(compact_plaintext->begin(), compact_plaintext->end()), multipath_descriptor);
+
+    // Without an explicit xpub, the wallet derives candidate decryption keys
+    // from its own HD keys at the common derivation paths.
+    auto decrypted{wallet.DecryptEncryptedBackupBase64WithWalletKeys(*backup)};
+    BOOST_REQUIRE_MESSAGE(decrypted, util::ErrorString(decrypted).original);
+    const std::string decrypted_str{decrypted->begin(), decrypted->end()};
+    BOOST_CHECK(decrypted_str.find("descriptor_sets") != std::string::npos);
 }
 
 BOOST_AUTO_TEST_CASE(refuse_excluded_expressions_test)

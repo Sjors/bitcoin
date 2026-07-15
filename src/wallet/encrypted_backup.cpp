@@ -1168,9 +1168,92 @@ util::Result<std::vector<uint8_t>> CWallet::DecryptEncryptedBackupBase64WithExtP
     return JoinPlaintextItems(*plaintexts);
 }
 
-util::Result<int> CWallet::ImportEncryptedDescriptorBackup(const std::string& base64_str, const std::string& pubkey_str)
+util::Result<std::vector<uint8_t>> CWallet::DecryptEncryptedBackupBase64WithWalletKeys(const std::string& base64_str) const
 {
-    auto decrypted{DecryptEncryptedBackupBase64WithExtPubKey(base64_str, pubkey_str)};
+    auto backup_result{DecodeEncryptedBackupBase64(base64_str)};
+    if (!backup_result) {
+        return util::Error{Untranslated(strprintf("Failed to decode backup: %s", util::ErrorString(backup_result).original))};
+    }
+
+    // Try the path hints from the backup header first, then the common
+    // derivation paths that recovery implementations check automatically.
+    std::vector<DerivationPath> candidate_paths{backup_result->derivation_paths};
+    const auto common_paths{CommonDerivationPaths()};
+    candidate_paths.insert(candidate_paths.end(), common_paths.begin(), common_paths.end());
+
+    // Collect the root key of every descriptor in the wallet, with the
+    // corresponding private key when available.
+    std::map<CExtPubKey, std::optional<CExtKey>> root_keys;
+    {
+        LOCK(cs_wallet);
+        for (auto* spkm : GetAllScriptPubKeyMans()) {
+            auto* desc_spkm{dynamic_cast<DescriptorScriptPubKeyMan*>(spkm)};
+            if (!desc_spkm) continue;
+            LOCK(desc_spkm->cs_desc_man);
+            const WalletDescriptor w_desc{desc_spkm->GetWalletDescriptor()};
+            std::set<CPubKey> desc_pubkeys;
+            std::set<CExtPubKey> desc_xpubs;
+            w_desc.descriptor->GetPubKeys(desc_pubkeys, desc_xpubs);
+            for (const CExtPubKey& xpub : desc_xpubs) {
+                auto& xprv{root_keys[xpub]};
+                if (!xprv) {
+                    if (std::optional<CKey> key{desc_spkm->GetKey(xpub.pubkey.GetID())}) {
+                        xprv = CExtKey(xpub, *key);
+                    }
+                }
+            }
+        }
+    }
+
+    // A key that decrypts the backup ends the search either way: when the
+    // payload holds no descriptor content, no other key would fare better.
+    bilingual_str content_error;
+    const auto try_key{[&](const CPubKey& pubkey) -> std::optional<std::vector<uint8_t>> {
+        if (!pubkey.IsFullyValid() || !pubkey.IsValidNonHybrid()) return std::nullopt;
+        auto payload{DecryptBackupPayloadWithKey(*backup_result, XOnlyPubKey{pubkey})};
+        if (!payload) return std::nullopt;
+        auto plaintexts{FindPlaintextsForContent(*payload, BIP_DESCRIPTORS)};
+        if (!plaintexts) {
+            content_error = Untranslated("Backup was decrypted, but it contains no descriptor (BIP380) content.");
+            return std::nullopt;
+        }
+        return JoinPlaintextItems(*plaintexts);
+    }};
+
+    for (const auto& [xpub, xprv] : root_keys) {
+        // The root key itself may be the account-level key, e.g. for an
+        // imported watch-only descriptor.
+        if (auto plaintext{try_key(xpub.pubkey)}) return *plaintext;
+
+        // With the private key, derive candidate account-level keys at the
+        // hinted and common paths (hardened derivation requires it).
+        if (!xprv) continue;
+        for (const auto& path : candidate_paths) {
+            CExtKey derived{*xprv};
+            bool derive_ok{true};
+            for (const uint32_t child : path) {
+                CExtKey next;
+                if (!derived.Derive(next, child)) {
+                    derive_ok = false;
+                    break;
+                }
+                derived = next;
+            }
+            if (!derive_ok) continue;
+            if (auto plaintext{try_key(derived.Neuter().pubkey)}) return *plaintext;
+        }
+    }
+
+    if (!content_error.empty()) {
+        return util::Error{content_error};
+    }
+    return util::Error{Untranslated("Failed to decrypt backup: no wallet key matches any recipient.")};
+}
+
+util::Result<int> CWallet::ImportEncryptedDescriptorBackup(const std::string& base64_str, const std::optional<std::string>& pubkey_str)
+{
+    auto decrypted{pubkey_str ? DecryptEncryptedBackupBase64WithExtPubKey(base64_str, *pubkey_str)
+                              : DecryptEncryptedBackupBase64WithWalletKeys(base64_str)};
     if (!decrypted) {
         return util::Error{util::ErrorString(decrypted)};
     }
