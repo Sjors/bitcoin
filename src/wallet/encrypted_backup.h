@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <utility>
@@ -120,9 +121,14 @@ struct EncryptedBackupMetadata {
  * are excluded. Keys are sorted lexicographically and deduplicated.
  *
  * @param[in] descriptor The descriptor string
+ * @param[out] excluded_expressions If provided, filled with the key expressions
+ *             that do not contribute to the encryption key set (literal pubkeys
+ *             and observable xpubs), so their holders cannot decrypt a backup.
+ *             The NUMS point is not reported, since no cosigner holds it.
  * @return Vector of normalized x-only public keys, or error message
  */
-util::Result<std::vector<XOnlyPubKey>> ExtractKeysFromDescriptor(const std::string& descriptor);
+util::Result<std::vector<XOnlyPubKey>> ExtractKeysFromDescriptor(const std::string& descriptor,
+                                                                 std::set<std::string>* excluded_expressions = nullptr);
 
 /**
  * Compute the decryption secret from a set of public keys.
