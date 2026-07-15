@@ -682,7 +682,9 @@ class ToolWalletTest(BitcoinTestFramework):
         assert_equal(stderr, "")
 
         # Re-importing must update existing descriptor managers, not duplicate them.
-        p = self.bitcoin_wallet_process(f"-wallet={import_wallet_name}", f"-pubkey={xpub_for_decrypt}", "decryptbackup")
+        # -pubkey is omitted: the wallet's own (just imported) descriptor keys
+        # are used to decrypt the backup.
+        p = self.bitcoin_wallet_process(f"-wallet={import_wallet_name}", "decryptbackup")
         import_output, stderr = p.communicate(input=backup_base64)
         if p.poll() != 0:
             self.log.error(f"decryptbackup re-import failed: stderr={stderr} stdout={import_output}")
