@@ -499,7 +499,8 @@ class ToolWalletTest(BitcoinTestFramework):
         metadata = json.loads(inspect_output)
         assert_equal(metadata["version"], 1)
         assert_equal(metadata["encryption"], "ChaCha20-Poly1305")
-        assert metadata["individual_secrets"] >= 1
+        # A single real recipient, padded with decoy secrets to the smallest bucket
+        assert_equal(metadata["individual_secrets"], 5)
         # Without -xpub, there should be no derivation paths
         assert_equal(metadata["derivation_paths"], [])
         self.log.debug(f"Backup metadata: {json.dumps(metadata, indent=2)}")
@@ -525,8 +526,9 @@ class ToolWalletTest(BitcoinTestFramework):
         inspect_output, stderr = p.communicate(input=backup_with_path_base64)
         assert_equal(p.poll(), 0)
         metadata_with_path = json.loads(inspect_output)
-        # BIP44 testnet path: m/44'/1'/0'
-        assert_equal(metadata_with_path["derivation_paths"], ["m/44'/1'/0'"])
+        # The BIP44 testnet path m/44'/1'/0' is a common derivation path that
+        # recovery implementations try automatically, so it is omitted.
+        assert_equal(metadata_with_path["derivation_paths"], [])
         self.log.info(f"Derivation paths in backup: {metadata_with_path['derivation_paths']}")
 
         # Decrypt the backup using just the xpub (no wallet needed)

@@ -158,6 +158,26 @@ std::vector<uint256> ComputeAllIndividualSecrets(const uint256& decryption_secre
                                                   const std::vector<XOnlyPubKey>& keys);
 
 /**
+ * Whether the path is one of the common derivation paths that recovery
+ * implementations try automatically (m/44h|49h|84h|86h|87h/<coin>h/<account>h
+ * and m/48h/<coin>h/<account>h/1h|2h, with coin 0 or 1 and accounts 0-9).
+ * Such paths can be omitted from a backup, which enhances privacy.
+ *
+ * @param[in] path The derivation path
+ * @return True if the path is a common derivation path
+ */
+bool IsCommonDerivationPath(const DerivationPath& path);
+
+/**
+ * All common derivation paths (see IsCommonDerivationPath), for both mainnet
+ * and test coin types. Recovery implementations try these automatically when
+ * searching for a matching decryption key.
+ *
+ * @return Vector of common derivation paths
+ */
+std::vector<DerivationPath> CommonDerivationPaths();
+
+/**
  * Encode derivation paths according to the backup format.
  *
  * @param[in] paths Vector of derivation paths
@@ -212,13 +232,17 @@ util::Result<std::pair<std::optional<EncryptedBackupContentType>, size_t>> Decod
  * @param[in] plaintext The data to encrypt (typically the descriptor itself or labels)
  * @param[in] content Content type metadata
  * @param[in] derivation_paths Optional derivation paths to include
+ * @param[in] decoys Whether to pad the individual secrets with random decoys,
+ *            hiding the exact number of recipients. Recommended (SHOULD) by
+ *            BIP138; may be disabled to minimize the backup size.
  * @return The encrypted backup structure, or error message
  */
 util::Result<EncryptedBackup> CreateEncryptedBackup(
     const std::string& descriptor,
     std::span<const uint8_t> plaintext,
     const EncryptedBackupContentType& content,
-    const std::vector<DerivationPath>& derivation_paths = {});
+    const std::vector<DerivationPath>& derivation_paths = {},
+    bool decoys = true);
 
 /**
  * Encode an encrypted backup to binary format.

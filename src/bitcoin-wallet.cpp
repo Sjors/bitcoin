@@ -41,7 +41,7 @@ static void SetupWalletToolArgs(ArgsManager& argsman)
     argsman.AddArg("-debug=<category>", "Output debugging information (default: 0).", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-printtoconsole", "Send trace/debug info to console (default: 1 when no -debug is true, 0 otherwise).", ArgsManager::ALLOW_ANY, OptionsCategory::DEBUG_TEST);
     argsman.AddArg("-pubkey=<key>", "Extended public key (xpub/tpub) for decrypting a backup", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::COMMAND_OPTIONS);
-    argsman.AddArg("-xpub=<key>", "Extended public key (xpub/tpub) whose derivation path to include in backup header", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::COMMAND_OPTIONS);
+    argsman.AddArg("-xpub=<key>", "Extended public key (xpub/tpub) whose derivation path to include in backup header. Common derivation paths, which recovery implementations try automatically, are omitted.", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION, OptionsCategory::COMMAND_OPTIONS);
     argsman.AddArg("-compact", "Use compact descriptor backup content for encryptbackup. When importing decrypted compact descriptors, use timestamp \"now\" to avoid an automatic rescan, then call rescanblockchain after import.", ArgsManager::ALLOW_ANY, OptionsCategory::COMMAND_OPTIONS);
 
     argsman.AddCommand("info", "Get wallet info");
