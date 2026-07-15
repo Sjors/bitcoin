@@ -622,6 +622,13 @@ class ToolWalletTest(BitcoinTestFramework):
         assert_equal(stderr, "")
         compact_backup_base64 = compact_backup_output.strip()
 
+        # Compact backups skip the decoy padding to save space
+        p = self.bitcoin_wallet_process("inspectbackup")
+        compact_inspect_output, stderr = p.communicate(input=compact_backup_base64)
+        assert_equal(p.poll(), 0)
+        compact_metadata = json.loads(compact_inspect_output)
+        assert_equal(compact_metadata["individual_secrets"], 1)
+
         self.log.info("Decrypting compact backup using xpub...")
         p = self.bitcoin_wallet_process(f"-pubkey={compact_xpub}", "decryptbackup")
         compact_decrypted_output, stderr = p.communicate(input=compact_backup_base64)
