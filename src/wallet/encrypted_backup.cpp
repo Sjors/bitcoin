@@ -115,7 +115,8 @@ static std::optional<DerivationPath> ExtractTargetDerivationPath(std::string_vie
     return parsed_path;
 }
 
-util::Result<std::vector<XOnlyPubKey>> ExtractKeysFromDescriptor(const std::string& descriptor)
+util::Result<std::vector<XOnlyPubKey>> ExtractKeysFromDescriptor(const std::string& descriptor,
+                                                                 std::set<std::string>* excluded_expressions)
 {
     FlatSigningProvider provider;
     std::string error;
@@ -134,6 +135,24 @@ util::Result<std::vector<XOnlyPubKey>> ExtractKeysFromDescriptor(const std::stri
             const XOnlyPubKey xonly{ext_pubkey.pubkey};
             if (xonly == XOnlyPubKey::NUMS_H) continue;
             normalized_keys.insert(xonly);
+        }
+
+        if (excluded_expressions) {
+            // Literal pubkeys are always excluded; xpubs are excluded when
+            // observable from spends. The NUMS point is not reported, since
+            // no cosigner holds it.
+            std::set<CPubKey> all_pubkeys;
+            std::set<CExtPubKey> all_ext_pubkeys;
+            desc->GetPubKeys(all_pubkeys, all_ext_pubkeys);
+            for (const auto& pubkey : all_pubkeys) {
+                if (XOnlyPubKey{pubkey} == XOnlyPubKey::NUMS_H) continue;
+                excluded_expressions->insert(HexStr(pubkey));
+            }
+            for (const auto& ext_pubkey : all_ext_pubkeys) {
+                if (ext_pubkeys.contains(ext_pubkey)) continue;
+                if (XOnlyPubKey{ext_pubkey.pubkey} == XOnlyPubKey::NUMS_H) continue;
+                excluded_expressions->insert(EncodeExtPubKey(ext_pubkey));
+            }
         }
     }
 
@@ -447,9 +466,23 @@ util::Result<EncryptedBackup> CreateEncryptedBackup(
     }
 
     // Extract keys from descriptor
-    auto keys_result = ExtractKeysFromDescriptor(descriptor);
+    std::set<std::string> excluded_expressions;
+    auto keys_result = ExtractKeysFromDescriptor(descriptor, &excluded_expressions);
     if (!keys_result) {
         return util::Error{util::ErrorString(keys_result)};
+    }
+
+    // BIP138 requires making the user aware of each excluded key expression,
+    // since the cosigner holding that key will be unable to decrypt the
+    // backup. Refusing outright is stricter than the BIP, which permits
+    // creating the backup after a warning, but there is no warning channel
+    // here and a backup that a cosigner silently cannot recover from is
+    // exactly what the requirement guards against.
+    if (!excluded_expressions.empty()) {
+        return util::Error{Untranslated(strprintf(
+            "The following key expressions cannot be part of the encryption key set, "
+            "so their holders would be unable to decrypt the backup: %s",
+            util::Join(excluded_expressions, ", ")))};
     }
     const std::vector<XOnlyPubKey>& keys = *keys_result;
 

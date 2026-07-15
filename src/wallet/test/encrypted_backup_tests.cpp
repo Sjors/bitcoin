@@ -764,6 +764,32 @@ BOOST_AUTO_TEST_CASE(interface_create_encrypted_descriptor_backup_test)
     BOOST_CHECK_EQUAL(std::string(compact_plaintext->begin(), compact_plaintext->end()), multipath_descriptor);
 }
 
+BOOST_AUTO_TEST_CASE(refuse_excluded_expressions_test)
+{
+    // A literal pubkey never contributes to the encryption key set, so its
+    // holder could not decrypt the backup. BIP138 requires making the user
+    // aware of each such expression; we refuse to create the backup, which
+    // is stricter.
+    const std::string literal_key{"03c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5"};
+    const std::string descriptor{"wsh(multi(1,[d34db33f/84h/1h/0h]tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba/0/*," + literal_key + "))"};
+
+    EncryptedBackupContentType content;
+    content.type = DataType::BIP_NUMBER;
+    content.bip_number = BIP_DESCRIPTORS;
+
+    std::vector<uint8_t> plaintext(descriptor.begin(), descriptor.end());
+    auto backup_result = CreateEncryptedBackup(descriptor, plaintext, content, {});
+    BOOST_REQUIRE(!backup_result);
+    BOOST_CHECK_MESSAGE(util::ErrorString(backup_result).original.find(literal_key) != std::string::npos,
+        "Error message should name the excluded expression: " << util::ErrorString(backup_result).original);
+
+    // The NUMS point identifies no cosigner, so it does not trigger a refusal.
+    const std::string nums_descriptor{"tr(50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0,pk([d34db33f/84h/1h/0h]tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba/0/*))"};
+    std::vector<uint8_t> nums_plaintext(nums_descriptor.begin(), nums_descriptor.end());
+    auto nums_result = CreateEncryptedBackup(nums_descriptor, nums_plaintext, content, {});
+    BOOST_CHECK_MESSAGE(nums_result, util::ErrorString(nums_result).original);
+}
+
 BOOST_AUTO_TEST_CASE(wrong_key_decryption_test)
 {
     // Test that decryption fails with wrong key
