@@ -1128,7 +1128,9 @@ util::Result<std::string> CWallet::CreateEncryptedDescriptorBackup(const std::op
         .payload = {},
     };
 
-    auto backup_result{CreateEncryptedBackup(primary_descriptor, plaintext, content, derivation_paths)};
+    // Compact backups favor size (e.g. for QR codes or engraving), so skip
+    // the decoy padding, which BIP138 recommends but does not require.
+    auto backup_result{CreateEncryptedBackup(primary_descriptor, plaintext, content, derivation_paths, /*decoys=*/!compact)};
     if (!backup_result) {
         return util::Error{Untranslated(strprintf("Failed to create encrypted backup: %s", util::ErrorString(backup_result).original))};
     }

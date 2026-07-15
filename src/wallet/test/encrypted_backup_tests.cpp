@@ -757,6 +757,11 @@ BOOST_AUTO_TEST_CASE(interface_create_encrypted_descriptor_backup_test)
     auto compact_backup{compact_interface->createEncryptedDescriptorBackup(std::nullopt, /*compact=*/true)};
     BOOST_REQUIRE_MESSAGE(compact_backup, util::ErrorString(compact_backup).original);
 
+    // Compact backups skip decoy padding, so only the real secret remains
+    auto compact_metadata{CWallet::GetEncryptedBackupMetadata(*compact_backup)};
+    BOOST_REQUIRE_MESSAGE(compact_metadata, util::ErrorString(compact_metadata).original);
+    BOOST_CHECK_EQUAL(compact_metadata->individual_secret_count, 1);
+
     auto compact_decoded{DecodeEncryptedBackupBase64(*compact_backup)};
     BOOST_REQUIRE_MESSAGE(compact_decoded, util::ErrorString(compact_decoded).original);
     auto compact_plaintext{DecryptBackupWithDescriptor(*compact_decoded, multipath_descriptor)};
