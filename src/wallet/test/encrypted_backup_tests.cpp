@@ -465,6 +465,18 @@ BOOST_AUTO_TEST_CASE(full_backup_vector_test)
         uint256 decryption_secret = ComputeDecryptionSecret(keys);
         auto individual_secrets = ComputeAllIndividualSecrets(decryption_secret, keys);
 
+        // Decoy secrets pad the count to a bucket boundary; the encoder sorts
+        // them in with the real ones.
+        if (vec.exists("decoy_individual_secrets")) {
+            for (const UniValue& decoy : vec["decoy_individual_secrets"].getValues()) {
+                auto decoy_bytes = ParseHex(decoy.get_str());
+                BOOST_REQUIRE_EQUAL(decoy_bytes.size(), uint256::size());
+                uint256 decoy_secret;
+                std::memcpy(decoy_secret.data(), decoy_bytes.data(), decoy_bytes.size());
+                individual_secrets.push_back(decoy_secret);
+            }
+        }
+
         std::vector<DerivationPath> derivation_paths;
         const UniValue& paths_arr = vec["derivation_paths"];
         for (size_t j = 0; j < paths_arr.size(); ++j) {
@@ -472,6 +484,9 @@ BOOST_AUTO_TEST_CASE(full_backup_vector_test)
             BOOST_REQUIRE(ParseNonEmptyHDKeypath(paths_arr[j].get_str(), path));
             derivation_paths.push_back(path);
         }
+        // Encoders omit common derivation paths, since recovery implementations
+        // try them automatically.
+        std::erase_if(derivation_paths, IsCommonDerivationPath);
 
         auto content = ParseHex(vec["content"].get_str());
         std::string plaintext_str = vec["plaintext"].get_str();
@@ -698,7 +713,8 @@ BOOST_AUTO_TEST_CASE(interface_create_encrypted_descriptor_backup_test)
     auto metadata{CWallet::GetEncryptedBackupMetadata(*backup)};
     BOOST_REQUIRE_MESSAGE(metadata, util::ErrorString(metadata).original);
     BOOST_CHECK_EQUAL(static_cast<int>(metadata->version), static_cast<int>(ENCRYPTED_BACKUP_VERSION));
-    BOOST_CHECK(metadata->individual_secret_count > 0);
+    // A single real recipient, padded to the smallest decoy bucket
+    BOOST_CHECK_EQUAL(metadata->individual_secret_count, 5);
     BOOST_CHECK_EQUAL(metadata->encryption, "ChaCha20-Poly1305");
     BOOST_CHECK(metadata->derivation_paths.empty());
 
@@ -706,7 +722,7 @@ BOOST_AUTO_TEST_CASE(interface_create_encrypted_descriptor_backup_test)
     auto interface_metadata{wallet_backup->getEncryptedDescriptorBackupMetadata(*backup)};
     BOOST_REQUIRE_MESSAGE(interface_metadata, util::ErrorString(interface_metadata).original);
     BOOST_CHECK_EQUAL(interface_metadata->version, static_cast<int>(ENCRYPTED_BACKUP_VERSION));
-    BOOST_CHECK(interface_metadata->individual_secret_count > 0);
+    BOOST_CHECK_EQUAL(interface_metadata->individual_secret_count, 5);
     BOOST_CHECK_EQUAL(interface_metadata->encryption, "ChaCha20-Poly1305");
     BOOST_CHECK(interface_metadata->derivation_paths.empty());
 

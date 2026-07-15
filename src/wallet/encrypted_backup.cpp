@@ -180,6 +180,40 @@ std::vector<uint256> ComputeAllIndividualSecrets(const uint256& decryption_secre
     return result;
 }
 
+bool IsCommonDerivationPath(const DerivationPath& path)
+{
+    constexpr uint32_t HARDENED{0x80000000};
+    if (path.size() != 3 && path.size() != 4) return false;
+    const uint32_t purpose{path[0]};
+    // Coin type 0 (mainnet) or 1 (test networks)
+    if (path[1] != HARDENED && path[1] != (1 | HARDENED)) return false;
+    // Accounts 0 through 9
+    if (path[2] < HARDENED || path[2] > (9 | HARDENED)) return false;
+    if (path.size() == 3) {
+        return purpose == (44 | HARDENED) || purpose == (49 | HARDENED) ||
+               purpose == (84 | HARDENED) || purpose == (86 | HARDENED) ||
+               purpose == (87 | HARDENED);
+    }
+    return purpose == (48 | HARDENED) && (path[3] == (1 | HARDENED) || path[3] == (2 | HARDENED));
+}
+
+std::vector<DerivationPath> CommonDerivationPaths()
+{
+    constexpr uint32_t HARDENED{0x80000000};
+    std::vector<DerivationPath> paths;
+    for (uint32_t coin{0}; coin <= 1; ++coin) {
+        for (uint32_t account{0}; account <= 9; ++account) {
+            for (uint32_t purpose : {44, 49, 84, 86, 87}) {
+                paths.push_back({purpose | HARDENED, coin | HARDENED, account | HARDENED});
+            }
+            for (uint32_t script_type{1}; script_type <= 2; ++script_type) {
+                paths.push_back({48 | HARDENED, coin | HARDENED, account | HARDENED, script_type | HARDENED});
+            }
+        }
+    }
+    return paths;
+}
+
 util::Result<std::vector<uint8_t>> EncodeDerivationPaths(const std::vector<DerivationPath>& paths)
 {
     // Sort lexicographically and deduplicate for consistent encoding
@@ -405,7 +439,8 @@ util::Result<EncryptedBackup> CreateEncryptedBackup(
     const std::string& descriptor,
     std::span<const uint8_t> plaintext,
     const EncryptedBackupContentType& content,
-    const std::vector<DerivationPath>& derivation_paths)
+    const std::vector<DerivationPath>& derivation_paths,
+    bool decoys)
 {
     if (plaintext.empty()) {
         return util::Error{Untranslated("Plaintext cannot be empty")};
@@ -421,6 +456,20 @@ util::Result<EncryptedBackup> CreateEncryptedBackup(
     // Compute secrets
     uint256 decryption_secret = ComputeDecryptionSecret(keys);
     std::vector<uint256> individual_secrets = ComputeAllIndividualSecrets(decryption_secret, keys);
+
+    // Append random decoy secrets so the total count lands on a bucket
+    // boundary (5, 10, 20, ..., saturating at the 255 count limit), hiding
+    // the exact number of real decryption keys.
+    if (decoys) {
+        size_t bucket{5};
+        while (bucket < individual_secrets.size()) bucket *= 2;
+        bucket = std::min<size_t>(bucket, 255);
+        while (individual_secrets.size() < bucket) {
+            uint256 decoy;
+            GetStrongRandBytes(decoy);
+            individual_secrets.push_back(decoy);
+        }
+    }
 
     auto content_encoded = EncodeContentType(content);
     if (!content_encoded) {
@@ -445,10 +494,15 @@ util::Result<EncryptedBackup> CreateEncryptedBackup(
     std::vector<uint8_t> ciphertext(payload.size() + AEADChaCha20Poly1305::EXPANSION);
     aead.Encrypt(MakeByteSpan(payload), {}, nonce96, MakeWritableByteSpan(ciphertext));
 
+    // Common derivation paths are tried automatically on recovery, so omitting
+    // them enhances privacy without complicating the recovery process.
+    std::vector<DerivationPath> uncommon_paths{derivation_paths};
+    std::erase_if(uncommon_paths, IsCommonDerivationPath);
+
     // Build result
     EncryptedBackup backup;
     backup.version = ENCRYPTED_BACKUP_VERSION;
-    backup.derivation_paths = derivation_paths;
+    backup.derivation_paths = std::move(uncommon_paths);
     backup.individual_secrets = std::move(individual_secrets);
     backup.encryption = EncryptionAlgorithm::CHACHA20_POLY1305;
     backup.nonce = nonce;
