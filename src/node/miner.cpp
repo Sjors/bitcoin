@@ -7,6 +7,7 @@
 
 #include <chain.h>
 #include <chainparams.h>
+#include <coins.h>
 #include <common/args.h>
 #include <consensus/amount.h>
 #include <consensus/consensus.h>
@@ -37,6 +38,7 @@
 #include <util/log.h>
 #include <util/result.h>
 #include <util/signalinterrupt.h>
+#include <util/thread.h>
 #include <util/time.h>
 #include <util/translation.h>
 #include <validation.h>
@@ -54,24 +56,109 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace node {
+
+//! Number of input coins the prefetch thread fetches per cs_main acquisition,
+//! so it does not hold up validation for the duration of a full block's worth
+//! of coin database reads.
+static constexpr size_t PREFETCH_BATCH_SIZE{128};
 
 TxCollection::TxCollection(std::vector<Wtxid> wtxids, const NodeContext& node)
     : m_wtxids(std::move(wtxids)),
       m_node(node)
 {
-    LOCK(m_mutex);
-    CTxMemPool& mempool{*Assert(m_node.mempool)};
-    LOCK(mempool.cs);
-    for (const auto& wtxid : m_wtxids) {
-        const auto it{mempool.GetIter(wtxid)};
-        CTransactionRef tx{it ? (*it)->GetSharedTx() : nullptr};
-        if (!m_transactions.emplace(wtxid, std::move(tx)).second) {
-            throw std::runtime_error(strprintf("duplicate wtxid %s", wtxid.ToString()));
+    {
+        LOCK(m_mutex);
+        CTxMemPool& mempool{*Assert(m_node.mempool)};
+        std::vector<CTransactionRef> found;
+        {
+            LOCK(mempool.cs);
+            for (const auto& wtxid : m_wtxids) {
+                const auto it{mempool.GetIter(wtxid)};
+                CTransactionRef tx{it ? (*it)->GetSharedTx() : nullptr};
+                if (tx) found.push_back(tx);
+                if (!m_transactions.emplace(wtxid, std::move(tx)).second) {
+                    throw std::runtime_error(strprintf("duplicate wtxid %s", wtxid.ToString()));
+                }
+            }
+        }
+        QueuePrefetch(found);
+    }
+    // Start the prefetch thread only after the collection is fully
+    // constructed. Coins are loaded in the background while the client
+    // learns which transactions are missing and provides them.
+    m_prefetch_thread = std::thread(&util::TraceThread, "txprefetch", [this] { PrefetchThread(); });
+}
+
+TxCollection::~TxCollection()
+{
+    {
+        LOCK(m_mutex);
+        m_prefetch_stop = true;
+    }
+    m_prefetch_cv.notify_all();
+    if (m_prefetch_thread.joinable()) m_prefetch_thread.join();
+}
+
+void TxCollection::QueuePrefetch(const std::vector<CTransactionRef>& txs)
+{
+    AssertLockHeld(m_mutex);
+    // Inputs spending another collected transaction do not have a coin in the
+    // UTXO set. This misses spends of a transaction that is added later, which
+    // merely costs a cheap negative coin database lookup.
+    std::unordered_set<Txid, SaltedTxidHasher> collected;
+    for (const auto& [_, tx] : m_transactions) {
+        if (tx) collected.insert(tx->GetHash());
+    }
+    for (const auto& tx : txs) {
+        for (const auto& txin : tx->vin) {
+            if (!collected.contains(txin.prevout.hash)) m_prefetch_queue.push_back(txin.prevout);
         }
     }
+    if (!m_prefetch_queue.empty()) m_prefetch_cv.notify_all();
+}
+
+void TxCollection::PrefetchThread()
+{
+    while (true) {
+        std::vector<COutPoint> batch;
+        {
+            WAIT_LOCK(m_mutex, lock);
+            m_prefetch_cv.wait(lock, [this]() EXCLUSIVE_LOCKS_REQUIRED(m_mutex) {
+                return m_prefetch_stop || !m_prefetch_queue.empty();
+            });
+            if (m_prefetch_stop) return;
+            m_prefetch_busy = true;
+            const size_t n{std::min(PREFETCH_BATCH_SIZE, m_prefetch_queue.size())};
+            batch.assign(m_prefetch_queue.begin(), m_prefetch_queue.begin() + n);
+            m_prefetch_queue.erase(m_prefetch_queue.begin(), m_prefetch_queue.begin() + n);
+        }
+        {
+            ChainstateManager& chainman{*Assert(m_node.chainman)};
+            LOCK(chainman.GetMutex());
+            // HaveCoin() pulls the coin from disk into the cache; a coin
+            // fetched this way is clean, so it does not grow the next flush
+            // and can be evicted at any time.
+            CCoinsViewCache& coins{chainman.ActiveChainstate().CoinsTip()};
+            for (const auto& outpoint : batch) coins.HaveCoin(outpoint);
+        }
+        {
+            LOCK(m_mutex);
+            m_prefetch_busy = false;
+            if (m_prefetch_queue.empty()) m_prefetch_cv.notify_all();
+        }
+    }
+}
+
+void TxCollection::WaitForPrefetch()
+{
+    WAIT_LOCK(m_mutex, lock);
+    m_prefetch_cv.wait(lock, [this]() EXCLUSIVE_LOCKS_REQUIRED(m_mutex) {
+        return m_prefetch_stop || (m_prefetch_queue.empty() && !m_prefetch_busy);
+    });
 }
 
 std::vector<uint32_t> TxCollection::UnknownTxPos() const
@@ -97,10 +184,15 @@ void TxCollection::AddMissingTxs(const std::vector<CTransactionRef>& txs)
             throw std::runtime_error(strprintf("unexpected wtxid %s", tx->GetWitnessHash().ToString()));
         }
     }
+    std::vector<CTransactionRef> added;
     for (const auto& tx : txs) {
         auto& entry{m_transactions.at(tx->GetWitnessHash())};
-        if (!entry) entry = tx;
+        if (!entry) {
+            entry = tx;
+            added.push_back(tx);
+        }
     }
+    QueuePrefetch(added);
 }
 
 std::unique_ptr<CBlockTemplate> TxCollection::MakeTemplate(const uint256& prevhash,
