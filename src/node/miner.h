@@ -16,10 +16,13 @@
 #include <util/hasher.h>
 #include <util/time.h>
 
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -195,16 +198,26 @@ bool CooldownIfHeadersAhead(ChainstateManager& chainman, KernelNotifications& ke
 
 /** Node-side implementation of the interfaces::TxCollection interface: holds
  *  the client-requested transactions, tracks which are still missing, and
- *  assembles them into a block template. */
+ *  assembles them into a block template.
+ *
+ *  A background thread prefetches the input coins of collected transactions
+ *  into the active chainstate's coins cache, so that by the time the client
+ *  calls MakeTemplate() its TestBlockValidity() check does not have to read
+ *  them from disk. Prefetch work is queued by the constructor and by
+ *  AddMissingTxs(), both of which return without waiting for it. */
 class TxCollection
 {
 public:
     TxCollection(std::vector<Wtxid> wtxids, const NodeContext& node);
+    ~TxCollection();
     /** Return zero-based positions for requested transactions that are still missing. */
     std::vector<uint32_t> UnknownTxPos() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
     /** Add transactions matching previously requested wtxids. Throws on null
      *  or unexpected transactions, in which case nothing is added. */
     void AddMissingTxs(const std::vector<CTransactionRef>& txs) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    /** Block until all queued input coins have been prefetched. Only useful
+     *  for tests and benchmarks; MakeTemplate() does not require it. */
+    void WaitForPrefetch() EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
     /**
      * Assemble and validate a block template from the collected transactions.
      * If @p coinbase is provided the block is validated with it, otherwise a
@@ -216,6 +229,13 @@ public:
                                                  std::string& debug) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
 
 private:
+    /** Queue the input coins of @p txs for prefetching, skipping inputs that
+     *  spend outputs of other transactions in the collection. */
+    void QueuePrefetch(const std::vector<CTransactionRef>& txs) EXCLUSIVE_LOCKS_REQUIRED(m_mutex);
+    /** Background thread: fetch queued coins into the active chainstate's
+     *  coins cache in small batches, taking cs_main per batch. */
+    void PrefetchThread() EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+
     /** Requested transaction order as provided by the client. */
     const std::vector<Wtxid> m_wtxids;
     /** Protects m_transactions: IPC clients may call methods concurrently
@@ -223,6 +243,15 @@ private:
     mutable Mutex m_mutex;
     /** Collected transactions keyed by wtxid. */
     std::unordered_map<Wtxid, CTransactionRef, SaltedWtxidHasher> m_transactions GUARDED_BY(m_mutex);
+    /** Input coins waiting to be prefetched. */
+    std::deque<COutPoint> m_prefetch_queue GUARDED_BY(m_mutex);
+    /** Set to true when the prefetch thread is fetching a batch. */
+    bool m_prefetch_busy GUARDED_BY(m_mutex){false};
+    /** Tells the prefetch thread to exit. */
+    bool m_prefetch_stop GUARDED_BY(m_mutex){false};
+    /** Signals new work, completed work and shutdown to/from the prefetch thread. */
+    mutable std::condition_variable m_prefetch_cv;
+    std::thread m_prefetch_thread;
     const NodeContext& m_node;
 };
 } // namespace node
