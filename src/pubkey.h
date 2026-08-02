@@ -276,6 +276,12 @@ public:
     /** Construct a Taproot tweaked output point with this point as internal key. */
     std::optional<std::pair<XOnlyPubKey, bool>> CreateTapTweak(const uint256* merkle_root) const;
 
+    /** Add tweak*G to this point, with the 32-byte `tweak` scalar used directly
+     *  (unlike CreateTapTweak, which derives the tweak from a Merkle root).
+     *  Returns the resulting x-only point and its parity, or nullopt on failure.
+     *  This computes P = X + tweak*G, e.g. a BIP341 output key N + a*G. */
+    std::optional<std::pair<XOnlyPubKey, bool>> AddTweak(const uint256& tweak) const;
+
     /** Returns a list of CKeyIDs for the CPubKeys that could have been used to create this XOnlyPubKey.
      * As the CKeyID is the Hash160(full pubkey), the produced CKeyIDs are for the versions of this
      * XOnlyPubKey with 0x02 and 0x03 prefixes.

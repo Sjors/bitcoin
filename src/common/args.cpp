@@ -848,6 +848,7 @@ const std::vector<std::string> TEST_OPTIONS_DOC{
     "addrman (use deterministic addrman)",
     "reindex_after_failure_noninteractive_yes (When asked for a reindex after failure interactively, simulate as-if answered with 'yes')",
     "bip94 (enforce BIP94 consensus rules)",
+    "fakenums (use a NUMS point with a known discrete log for the quantum tripwire, so a theft and proof can be simulated)",
 };
 
 bool HasTestOption(const ArgsManager& args, const std::string& test_option)

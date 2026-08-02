@@ -19,6 +19,7 @@
 #include <node/kernel_notifications.h>
 #include <node/mining_args.h>
 #include <node/mining_types.h>
+#include <node/quantum.h>
 #include <policy/feerate.h>
 #include <policy/policy.h>
 #include <pow.h>
@@ -182,6 +183,34 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock()
     const CAmount block_reward{nFees + GetBlockSubsidy(nHeight, chainparams.GetConsensus())};
     coinbaseTx.vout[0].nValue = block_reward;
     coinbase_tx.block_reward_remaining = block_reward;
+
+    // Quantum tripwire: until the "quantum" deployment activates, publish the
+    // single stored "aRsm" ECDL-break proof as a required OP_RETURN output in the
+    // coinbase. The proof is QUANTUM_PROOF_SIZE bytes, carried in a standard
+    // null-data output with zero value (so block_reward_remaining is unaffected),
+    // and added as a required_output that IPC mining clients must include,
+    // alongside the witness commitment appended below.
+    //
+    // The proof cannot fit in the 80-byte block header, so the coinbase is the
+    // only place to carry it. Using a coinbase OP_RETURN as a signalling channel
+    // mirrors a draft for coinbase-based version-bit signalling:
+    //   https://gnusha.org/pi/bitcoindev/D52CEDCC-C7EF-429E-802F-F28DC9241FF0@sprovoost.nl/
+    // In that thread Antoine Poinsot argued against using the coinbase for
+    // signalling -- chiefly that, unlike version bits in the header, it forces
+    // nodes to read full blocks to learn the activation state. We sidestep that
+    // by persisting the activation point (block hash + proof) to a small file
+    // (see node::QuantumProofStore), so determining activation after the one-off
+    // signal needs no block re-reads: a header lookup suffices, even on pruned
+    // nodes. We publish the proof in exactly one block: once that block connects,
+    // the deployment activates from the next block and we stop adding it
+    // (IsActiveAtHeight() below).
+    if (auto& quantum{GetQuantumProofStore()}; !quantum.IsActiveAtHeight(nHeight)) {
+        if (const auto proof{quantum.GetProof()}) {
+            CTxOut proof_out{0, CScript() << OP_RETURN << *proof};
+            coinbaseTx.vout.push_back(proof_out);
+            coinbase_tx.required_outputs.push_back(proof_out);
+        }
+    }
 
     // Start the coinbase scriptSig with the block height as required by BIP34.
     // Mining clients are expected to append extra data to this prefix, so

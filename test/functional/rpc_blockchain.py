@@ -244,6 +244,7 @@ class BlockchainTest(BitcoinTestFramework):
                 },
                 'active': False
             },
+            'quantum': {'type': 'tripwire', 'active': False},
           }
         })
 
