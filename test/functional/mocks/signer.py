@@ -3,13 +3,12 @@
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-import os
-import sys
 import argparse
 import base64
 import json
+import os
+import sys
 import urllib.parse
-import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
@@ -33,24 +32,25 @@ DEFAULT_FINGERPRINT = "00000001"
 DEFAULT_REGISTRATION = "cmRlc2MBBHRlc3Q="
 
 
-def read_state(name):
-    path = os.path.join(os.getcwd(), name)
+def get_mock_signers():
+    """Return the mock fingerprint-to-wallet mapping.
+
+    Tests that need more than the default signer write this mapping to the
+    node's working directory. Each wallet is hosted by the dedicated offline
+    mock node referenced by mock_rpc_url.
+    """
+    path = os.path.join(os.getcwd(), "mock_signers")
     if not os.path.isfile(path):
-        return None
+        return {DEFAULT_FINGERPRINT: MOCK_WALLET}
     with open(path, "r", encoding="utf8") as f:
-        return f.read().strip()
-
-
-def device_fingerprint():
-    return read_state("mock_fingerprint") or DEFAULT_FINGERPRINT
+        return json.load(f)
 
 
 def validate_fingerprint(args):
-    if args.fingerprint != device_fingerprint():
+    if args.fingerprint not in get_mock_signers():
         sys.stdout.write(json.dumps({"error": "Unexpected fingerprint", "fingerprint": args.fingerprint}))
         return False
     return True
-
 
 def perform_pre_checks():
     mock_result_path = os.path.join(os.getcwd(), "mock_result")
@@ -62,7 +62,10 @@ def perform_pre_checks():
             sys.exit(int(mock_result[0]))
 
 def enumerate(args):
-    sys.stdout.write(json.dumps([{"fingerprint": device_fingerprint(), "type": "trezor", "model": "trezor_t"}]))
+    sys.stdout.write(json.dumps([
+        {"fingerprint": fingerprint, "type": "trezor", "model": "trezor_t"}
+        for fingerprint in get_mock_signers()
+    ]))
 
 def getdescriptors(args):
     xpub = "tpubD6NzVbkrYhZ4WaWSyoBvQwbpLkojyoTZPRsgXELWz3Popb3qkjcJyJUGLnL4qHHoQvao8ESaAstxYSnhyswJ76uZPStJRJCTKvosUCJZL5B"
@@ -91,9 +94,12 @@ def displayaddress(args):
     if args.registration is not None and not validate_registration(args):
         return
 
-    address = read_state("mock_displayaddress")
-    if address is not None:
-        return sys.stdout.write(json.dumps({"address": address}))
+    address_path = os.path.join(os.getcwd(), f"mock_displayaddress_{args.fingerprint}")
+    if not os.path.isfile(address_path):
+        address_path = os.path.join(os.getcwd(), "mock_displayaddress")
+    if os.path.isfile(address_path):
+        with open(address_path, "r", encoding="utf8") as f:
+            return sys.stdout.write(json.dumps({"address": f.read().strip()}))
     if args.registration is not None:
         return sys.stdout.write(json.dumps({"error": "mock_displayaddress not set"}))
 
@@ -112,23 +118,26 @@ def displayaddress(args):
 
     return sys.stdout.write(json.dumps({"address": expected_desc[args.desc]}))
 
-def get_mock_wallet():
+def get_mock_wallet(fingerprint):
     """RPC connection to the wallet holding our private keys, created on
     first use. The test provides a dedicated offline node for it and passes
     the node's RPC URL via a file in our working directory."""
     with open(os.path.join(os.getcwd(), "mock_rpc_url"), "r", encoding="utf8") as f:
         node_url = f.read().strip()
+    wallet_name = get_mock_signers()[fingerprint]
     node = AuthServiceProxy(node_url)
-    wallet = AuthServiceProxy(f"{node_url}/wallet/{MOCK_WALLET}")
+    wallet = AuthServiceProxy(f"{node_url}/wallet/{urllib.parse.quote(wallet_name)}")
     try:
-        node.loadwallet(filename=MOCK_WALLET)
+        node.loadwallet(filename=wallet_name)
         return wallet
     except JSONRPCException as e:
         if e.error["code"] == -35:  # RPC_WALLET_ALREADY_LOADED
             return wallet
         if e.error["code"] != -18:  # RPC_WALLET_NOT_FOUND
             raise
-    node.createwallet(wallet_name=MOCK_WALLET, blank=True)
+    if fingerprint != DEFAULT_FINGERPRINT or wallet_name != MOCK_WALLET:
+        raise RuntimeError(f"Mock signer wallet {wallet_name} not found")
+    node.createwallet(wallet_name=wallet_name, blank=True)
     requests = []
     for desc in [f"pkh({tprv}/<0;1>/*)", f"sh(wpkh({tprv}/<0;1>/*))", f"wpkh({tprv}/<0;1>/*)", f"tr({tprv}/<0;1>/*)"]:
         checksum = node.getdescriptorinfo(descriptor=desc)["checksum"]
@@ -157,7 +166,7 @@ def registerdescriptor(args):
 
     if "/<0;1>/*" not in args.descriptor:
         return sys.stdout.write(json.dumps({"error": "Expected multipath descriptor", "descriptor": args.descriptor}))
-    if args.fingerprint == DEFAULT_FINGERPRINT and read_state("mock_fingerprint") is None:
+    if args.fingerprint == DEFAULT_FINGERPRINT and not os.path.isfile(os.path.join(os.getcwd(), "mock_signers")):
         registration = DEFAULT_REGISTRATION
     else:
         registration = base64.b64encode(json.dumps({
@@ -181,57 +190,21 @@ def validate_registration(args):
         return False
     return True
 
-def registered_signtx(args):
-    if read_state("mock_signtx_crash") is not None:
-        sys.stderr.write("mock signer crashed\n")
-        sys.exit(1)
-
-    error = read_state("mock_signtx_error")
-    if error is not None:
-        return sys.stdout.write(json.dumps({"error": error}))
-    if not validate_registration(args):
-        return
-
-    delegate_url = read_state("mock_signtx_delegate_url")
-    if delegate_url is None:
-        return sys.stdout.write(json.dumps({"error": "no mock_signtx_delegate_url configured"}))
-
-    parsed = urllib.parse.urlparse(delegate_url)
-    netloc = parsed.hostname or ""
-    if parsed.port is not None:
-        netloc += f":{parsed.port}"
-    rebuilt = urllib.parse.urlunparse(parsed._replace(netloc=netloc))
-    body = json.dumps({
-        "jsonrpc": "1.0",
-        "id": "signer",
-        "method": "walletprocesspsbt",
-        "params": [args.psbt],
-    }).encode()
-    headers = {"Content-Type": "application/json", "Content-Length": str(len(body))}
-    if parsed.username is not None:
-        userpass = f"{parsed.username}:{parsed.password or ''}".encode()
-        headers["Authorization"] = "Basic " + base64.b64encode(userpass).decode()
-    request = urllib.request.Request(rebuilt, data=body, headers=headers, method="POST")
-    with urllib.request.urlopen(request, timeout=30) as response:
-        reply = json.loads(response.read())
-    if reply.get("error"):
-        return sys.stdout.write(json.dumps({"error": str(reply["error"])}))
-
-    counter_path = os.path.join(os.getcwd(), "mock_signtx_counter")
-    counter = 1
-    if os.path.isfile(counter_path):
-        with open(counter_path, "r", encoding="utf8") as f:
-            counter = int(f.read().strip()) + 1
-    with open(counter_path, "w", encoding="utf8") as f:
-        f.write(str(counter))
-    return sys.stdout.write(json.dumps({"psbt": reply["result"]["psbt"]}))
-
-
 def signtx(args):
     if not validate_fingerprint(args):
         return
-    if args.registration is not None:
-        return registered_signtx(args)
+
+    if os.path.isfile(os.path.join(os.getcwd(), "mock_signtx_crash")):
+        sys.stderr.write("mock signer crashed\n")
+        sys.exit(1)
+
+    error_path = os.path.join(os.getcwd(), "mock_signtx_error")
+    if os.path.isfile(error_path):
+        with open(error_path, "r", encoding="utf8") as f:
+            return sys.stdout.write(json.dumps({"error": f.read().strip()}))
+
+    if args.registration is not None and not validate_registration(args):
+        return
 
     # The test can instruct us to sign in a specific, possibly misbehaving, way
     mode = None
@@ -250,8 +223,16 @@ def signtx(args):
     elif mode == "sighash_all_anyonecanpay":
         sign_options["sighashtype"] = "ALL|ANYONECANPAY"
 
-    result = get_mock_wallet().walletprocesspsbt(psbt=psbt, sign=True, bip32derivs=False, finalize=False, **sign_options)
+    result = get_mock_wallet(args.fingerprint).walletprocesspsbt(psbt=psbt, sign=True, bip32derivs=False, finalize=False, **sign_options)
     reply = result["psbt"]
+
+    counter_path = os.path.join(os.getcwd(), f"mock_signtx_{args.fingerprint}_counter")
+    counter = 1
+    if os.path.isfile(counter_path):
+        with open(counter_path, "r", encoding="utf8") as f:
+            counter = int(f.read().strip()) + 1
+    with open(counter_path, "w", encoding="utf8") as f:
+        f.write(str(counter))
 
     if mode == "sighash_none_hidden":
         # Drop the declared sighash type, leaving only the signatures

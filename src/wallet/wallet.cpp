@@ -2263,28 +2263,41 @@ std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, co
                 }
             }
             if (registration_spk_man) {
-                auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
-                if (signer) {
-                    const ExternalSignerRegistration* matching_registration{nullptr};
-                    for (const auto& entry : m_external_signer_registrations) {
-                        if (entry.fingerprint == signer->m_fingerprint) {
-                            matching_registration = &entry;
-                            break;
+                // Fan out to every connected external signer that has a
+                // descriptor registered with this wallet (e.g. a
+                // 3-of-3 MuSig2 split across two HW wallets and a hot
+                // cosigner). FillPSBTRegistered itself absorbs the local
+                // descriptor signer's contribution on each call, so we
+                // ask the first matching signer to do the local pass +
+                // its device round, then ask each subsequent signer to
+                // do only its device round.
+                auto signers{ExternalSignerScriptPubKeyMan::GetExternalSigners()};
+                if (signers) {
+                    bool any_dispatched{false};
+                    for (auto& signer : *signers) {
+                        const ExternalSignerRegistration* matching_registration{nullptr};
+                        for (const auto& entry : m_external_signer_registrations) {
+                            if (entry.fingerprint == signer.m_fingerprint) {
+                                matching_registration = &entry;
+                                break;
+                            }
                         }
-                    }
-                    if (matching_registration) {
+                        if (!matching_registration) continue;
                         int n_signed_registered = 0;
                         auto registration_err = registration_spk_man->FillPSBTRegistered(target, txdata,
                                                                                           options,
                                                                                           &n_signed_registered,
-                                                                                          *signer,
+                                                                                          signer,
                                                                                           matching_registration->registration);
-                        if (registration_err) return registration_err;
+                        if (registration_err) {
+                            return registration_err;
+                        }
                         if (n_signed) {
                             (*n_signed) += n_signed_registered;
                         }
-                        registration_dispatched = true;
+                        any_dispatched = true;
                     }
+                    registration_dispatched = any_dispatched;
                 }
             }
         }
@@ -2879,32 +2892,47 @@ util::Result<void> CWallet::DisplayAddress(const CTxDestination& dest)
         if (signer_spk_man == nullptr) {
             continue;
         }
-        auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
-        if (!signer) throw std::runtime_error(util::ErrorString(signer).original);
+        auto signers{ExternalSignerScriptPubKeyMan::GetExternalSigners()};
+        if (!signers) throw std::runtime_error(util::ErrorString(signers).original);
 
         // If the matched SPKM is part of a registered descriptor, ask the
-        // device to display the address using its opaque registration.
+        // first connected device whose fingerprint matches a registration
+        // to display the address using that registration. For multi-signer
+        // wallets (e.g. 3-of-3 MuSig2) any one of the cosigner devices is
+        // sufficient -- they all encode the same address from the same
+        // descriptor, and the user only needs one device to confirm visually.
         if (IsCandidateForDescriptorRegistration(*signer_spk_man)) {
+            ExternalSigner* matching_signer{nullptr};
             const ExternalSignerRegistration* matching_registration{nullptr};
-            for (const auto& entry : m_external_signer_registrations) {
-                if (entry.fingerprint == signer->m_fingerprint) {
-                    matching_registration = &entry;
-                    break;
+            for (auto& signer : *signers) {
+                for (const auto& entry : m_external_signer_registrations) {
+                    if (entry.fingerprint == signer.m_fingerprint) {
+                        matching_signer = &signer;
+                        matching_registration = &entry;
+                        break;
+                    }
                 }
+                if (matching_signer) break;
             }
-            if (matching_registration) {
+            if (matching_signer) {
                 const auto index{signer_spk_man->GetScriptPubKeyIndex(scriptPubKey)};
                 if (!index) return util::Error{_("Could not locate address in script pub key map")};
                 const std::optional<bool> internal{IsInternalScriptPubKeyMan(signer_spk_man)};
                 if (!internal) return util::Error{_("Could not determine receive/change chain for address")};
-                return signer_spk_man->DisplayAddressRegistered(dest, *signer,
+                return signer_spk_man->DisplayAddressRegistered(dest, *matching_signer,
                                                                 matching_registration->registration,
                                                                 *internal,
                                                                 static_cast<uint32_t>(*index));
             }
         }
 
-        return signer_spk_man->DisplayAddress(dest, *signer);
+        // Non-registered single-sig fallback: only meaningful when one signer
+        // is connected. Multi-signer setups always go through the registered
+        // path above.
+        if (signers->size() != 1) {
+            return util::Error{_("Multiple external signers connected; address display requires a registered descriptor")};
+        }
+        return signer_spk_man->DisplayAddress(dest, signers->front());
     }
     return util::Error{_("There is no ScriptPubKeyManager for this address")};
 }
@@ -2987,18 +3015,26 @@ util::Result<std::vector<ExternalSignerRegistration>> CWallet::RegisterDescripto
         if (signer_spk_man == nullptr) {
             continue;
         }
-        auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
-        if (!signer) return util::Error{util::ErrorString(signer)};
+        auto signers{ExternalSignerScriptPubKeyMan::GetExternalSigners()};
+        if (!signers) return util::Error{util::ErrorString(signers)};
 
-        util::Result<std::string> res{signer_spk_man->RegisterDescriptor(*signer, descriptor_name, *descriptor)};
-        if (!res) return util::Error{util::ErrorString(res)};
+        // Fan out registration to every connected signer. For multi-signer
+        // wallets (e.g. MuSig2 split across two HW devices) each device
+        // prompts independently and returns its own opaque registration.
+        std::vector<ExternalSignerRegistration> registrations;
+        for (auto& signer : *signers) {
+            util::Result<std::string> res{signer_spk_man->RegisterDescriptor(signer, descriptor_name, *descriptor)};
+            if (!res) return util::Error{util::ErrorString(res)};
 
-        WalletBatch batch(GetDatabase());
-        if (!batch.WriteExternalSignerRegistration(signer->m_fingerprint, *res)) {
-            return util::Error{_("Failed to store external signer descriptor registration in wallet database.")};
+            WalletBatch batch(GetDatabase());
+            if (!batch.WriteExternalSignerRegistration(signer.m_fingerprint, *res)) {
+                return util::Error{_("Failed to store external signer descriptor registration in wallet database.")};
+            }
+            LoadExternalSignerRegistration(signer.m_fingerprint, *res);
+            registrations.emplace_back(ExternalSignerRegistration{signer.m_fingerprint, *res});
         }
-        LoadExternalSignerRegistration(signer->m_fingerprint, *res);
-        return std::vector<ExternalSignerRegistration>{{signer->m_fingerprint, *res}};
+
+        return registrations;
     }
     return util::Error{_("Could not find ExternalSignerScriptPubKeyManager")};
 }
