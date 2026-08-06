@@ -8,7 +8,15 @@ This mock is driven by files dropped by the test in the node's cwd:
 
   mock_fingerprint
       Hex-encoded master key fingerprint to advertise from `enumerate`
-      and to validate against `--fingerprint`. Required.
+      and to validate against `--fingerprint`. Required if
+      `mock_fingerprints` is not set.
+
+  mock_fingerprints
+      Comma-separated list of fingerprints. Used by tests that exercise
+      multi-device flows (e.g. a 2-of-2 MuSig2 wallet where two HW
+      devices are connected at the same time). The mock then validates
+      `--fingerprint` against the set instead of a single value, and
+      `enumerate` lists every fingerprint as a separate device.
 
   mock_signtx_delegate_url
       `signtx` runs the incoming PSBT through `walletprocesspsbt`
@@ -16,11 +24,14 @@ This mock is driven by files dropped by the test in the node's cwd:
       `/wallet/<name>`-suffixed). This lets the mock act as a real
       cosigner in the MuSig2 dance: the cosigner wallet adds its own
       pubnonce and -- once every participant's nonce is in the PSBT --
-      its partial signature.
+      its partial signature. Per-fingerprint variants in
+      `mock_signtx_delegate_<fingerprint>_url` take precedence so
+      multi-device tests can route each fingerprint to its own
+      cosigner wallet.
 
-  mock_signtx_counter
+  mock_signtx_<fingerprint>_counter
       Maintained by this script: the number of successful signtx
-      invocations seen by the device. Tests assert against it.
+      invocations seen for this device. Tests assert against it.
 
   mock_signtx_error
       If present, every registered `signtx` call returns a structured
@@ -32,8 +43,8 @@ This mock is driven by files dropped by the test in the node's cwd:
       Address to echo from the registered `displayaddress` command. Tests
       stage the expected address (or an intentionally wrong one) here.
 
-Only the subset of the signer wire protocol needed for this MuSig2 flow is
-implemented: enumerate, registerdescriptor, signtx (registered variant), and
+Only the subset of the signer wire protocol needed for the MuSig2 flow is
+implemented: enumerate, registerdescriptor, signtx (registered variant),
 displayaddress (registered variant). It is intentionally separate from
 mocks/signer.py so the existing single-sig tests there are unaffected.
 """
@@ -59,16 +70,23 @@ def _read_state(name):
         return f.read().strip()
 
 
-def _device_fingerprint():
+def _device_fingerprints():
+    fps = _read_state("mock_fingerprints")
+    if fps is not None:
+        return [fp.strip() for fp in fps.split(",") if fp.strip()]
     fp = _read_state("mock_fingerprint")
     if fp is None:
         sys.stdout.write(json.dumps({"error": "mock_fingerprint not set"}))
         sys.exit(0)
-    return fp
+    return [fp]
+
+
+def _device_fingerprint():
+    return _device_fingerprints()[0]
 
 
 def _validate_fingerprint(args):
-    if args.fingerprint != _device_fingerprint():
+    if args.fingerprint not in _device_fingerprints():
         sys.stdout.write(json.dumps({
             "error": "Unexpected fingerprint", "fingerprint": args.fingerprint,
         }))
@@ -78,7 +96,8 @@ def _validate_fingerprint(args):
 
 def enumerate_cmd(_args):
     sys.stdout.write(json.dumps([
-        {"fingerprint": _device_fingerprint(), "type": "mock_musig", "model": "mock_musig"}
+        {"fingerprint": fp, "type": "mock_musig", "model": "mock_musig"}
+        for fp in _device_fingerprints()
     ]))
 
 
@@ -86,7 +105,7 @@ def getdescriptors_cmd(args):
     # Returned to satisfy createwallet(external_signer=True), which calls
     # SetupDescriptorScriptPubKeyMans during wallet creation. The default
     # account descriptors below are placeholders. To exercise the registered
-    # signing path the test stages MuSig2 descriptor strings via
+    # registered signing path the test stages MuSig2 descriptor strings via
     # `mock_getdescriptors_bech32m_receive` / `_internal`; when present,
     # those override the BECH32M slots so the wallet imports the registered
     # descriptor as an ExternalSignerScriptPubKeyMan (the only SPKM kind
@@ -116,11 +135,15 @@ def getdescriptors_cmd(args):
 def registerdescriptor_cmd(args):
     if not _validate_fingerprint(args):
         return
+    if "/<0;1>/*" not in args.descriptor:
+        return sys.stdout.write(json.dumps({
+            "error": "Expected multipath descriptor",
+        }))
     payload = json.dumps({
         "fingerprint": args.fingerprint,
         "name": args.name,
         "descriptor": args.descriptor,
-    }).encode()
+    }, sort_keys=True).encode()
     sys.stdout.write(json.dumps({
         "registration": base64.b64encode(payload).decode(),
     }))
@@ -162,13 +185,15 @@ def signtx_cmd(args):
     if not _validate_registration(args):
         return
 
-    counter_path = _state_path("mock_signtx_counter")
+    fp = args.fingerprint
+    counter_path = _state_path(f"mock_signtx_{fp}_counter")
     counter = 1
     if os.path.isfile(counter_path):
         with open(counter_path, "r") as f:
             counter = int(f.read().strip()) + 1
 
-    delegate_url = _read_state("mock_signtx_delegate_url")
+    delegate_url = _read_state(f"mock_signtx_delegate_{fp}_url") \
+        or _read_state("mock_signtx_delegate_url")
     if delegate_url is not None:
         # urllib does not turn URL-embedded credentials into a Basic
         # Authorization header on its own; do it manually.
