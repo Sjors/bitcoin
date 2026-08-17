@@ -46,15 +46,42 @@ class ListDescriptorsTest(BitcoinTestFramework):
         assert_equal(8, len(result['descriptors']))
         assert_equal(8, len([d for d in result['descriptors'] if d['active']]))
         assert_equal(4, len([d for d in result['descriptors'] if d['internal']]))
+        assert_equal(8, len([d for d in result['descriptors'] if 'multipath_desc' in d]))
         for item in result['descriptors']:
             assert_not_equal(item['desc'], '')
             assert_equal(item['next_index'], 0)
             assert_equal(item['range'], [0, 0])
             assert item['timestamp'] is not None
 
+        private_result = node.get_wallet_rpc('w3').listdescriptors(True)
+        assert_equal(8, len([d for d in private_result['descriptors'] if 'multipath_desc' in d]))
+        assert all('tprv' in d['multipath_desc'] for d in private_result['descriptors'])
+
         self.log.info('Test that descriptor strings are returned in lexicographically sorted order.')
         descriptor_strings = [descriptor['desc'] for descriptor in result['descriptors']]
         assert_equal(descriptor_strings, sorted(descriptor_strings))
+
+        self.log.info('Test multipath descriptors are recombined.')
+        node.createwallet(wallet_name='multipath', disable_private_keys=True, blank=True)
+        wallet = node.get_wallet_rpc('multipath')
+        xpubs = [ExtendedPrivateKey.generate().pubkey().to_string() for _ in range(2)]
+        multipath_desc = f'wsh(multi(2,{xpubs[0]}/<0;1>/*,{xpubs[1]}/<2;3>/*))'
+        result = wallet.importdescriptors([{
+            'desc': descsum_create(multipath_desc),
+            'timestamp': 'now',
+            'active': True,
+            'range': [0, 1],
+        }])
+        assert result[0]['success']
+
+        descriptors = wallet.listdescriptors()['descriptors']
+        assert_equal(len(descriptors), 2)
+        assert_equal({descriptor['internal'] for descriptor in descriptors}, {False, True})
+        assert_equal({descriptor['multipath_desc'] for descriptor in descriptors}, {descsum_create(multipath_desc)})
+        assert_equal(
+            {descriptor['desc'] for descriptor in descriptors},
+            set(node.getdescriptorinfo(multipath_desc)['multipath_expansion']),
+        )
 
         self.log.info('Test descriptors with hardened derivations are listed in importable form.')
         extended_key = ExtendedPrivateKey.generate()
