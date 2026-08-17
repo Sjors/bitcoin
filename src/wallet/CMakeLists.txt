@@ -10,6 +10,7 @@ add_library(bitcoin_wallet STATIC EXCLUDE_FROM_ALL
   crypter.cpp
   db.cpp
   descriptor_info.cpp
+  descriptor_recombiner.cpp
   dump.cpp
   encrypted_backup.cpp
   export.cpp
