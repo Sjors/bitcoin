@@ -1485,9 +1485,10 @@ class PSBTTest(BitcoinTestFramework):
         keypath_only_prepopulated_psbt = self.nodes[2].descriptorprocesspsbt(
             psbt=prepopulated_psbt["psbt"],
             descriptors=[taproot_descriptor],
-            finalize=False,
+            finalize=True,
             keypath_only=True,
         )
+        assert "warnings" not in keypath_only_prepopulated_psbt
         decoded = self.nodes[2].decodepsbt(keypath_only_prepopulated_psbt["psbt"])
         assert "taproot_scripts" in decoded["inputs"][0]
         assert "taproot_key_path_sig" not in decoded["inputs"][0]
@@ -1509,6 +1510,14 @@ class PSBTTest(BitcoinTestFramework):
         assert_equal(analysis["inputs"][0]["is_final"], True)
         assert_equal(analysis["inputs"][0]["taproot_spend_path"], "script_path")
 
+        not_finalized = self.nodes[2].descriptorprocesspsbt(
+            psbt=signed_psbt["psbt"],
+            descriptors=[taproot_descriptor],
+            finalize=False,
+            keypath_only=True,
+        )
+        assert "warnings" not in not_finalized
+
         # Do not finalize an existing script-path signature when keypath_only is
         # requested, since that would produce a broadcastable script-path spend.
         keypath_only_signed_psbt = self.nodes[2].descriptorprocesspsbt(
@@ -1518,9 +1527,25 @@ class PSBTTest(BitcoinTestFramework):
             keypath_only=True,
         )
         assert_equal(keypath_only_signed_psbt["complete"], False)
+        expected_warning = ["A complete Taproot script-path spend was not finalized (keypath_only)."]
+        assert_equal(keypath_only_signed_psbt["warnings"], expected_warning)
         decoded = self.nodes[2].decodepsbt(keypath_only_signed_psbt["psbt"])
         assert "taproot_script_path_sigs" in decoded["inputs"][0]
         assert "final_scriptwitness" not in decoded["inputs"][0]
+
+        # walletprocesspsbt applies the same safety policy and warning.
+        self.nodes[0].createwallet(wallet_name="keypath_only_warning")
+        warning_wallet = self.nodes[0].get_wallet_rpc("keypath_only_warning")
+        imported = warning_wallet.importdescriptors([{"desc": taproot_descriptor, "timestamp": "now"}])
+        assert imported[0]["success"]
+        wallet_keypath_only_signed_psbt = warning_wallet.walletprocesspsbt(
+            psbt=signed_psbt["psbt"],
+            finalize=True,
+            keypath_only=True,
+        )
+        assert_equal(wallet_keypath_only_signed_psbt["complete"], False)
+        assert_equal(wallet_keypath_only_signed_psbt["warnings"], expected_warning)
+        warning_wallet.unloadwallet()
 
         # The standalone finalizer has no key-path-only policy and can explicitly
         # finalize the otherwise unchanged script-path signature.

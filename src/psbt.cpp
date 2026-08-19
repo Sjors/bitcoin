@@ -828,6 +828,27 @@ bool FinalizePSBT(PartiallySignedTransaction& psbtx)
     return complete;
 }
 
+bool HasFinalizableTaprootScriptPath(const PartiallySignedTransaction& psbtx)
+{
+    PartiallySignedTransaction finalized{psbtx};
+    FinalizePSBT(finalized);
+    const std::optional<PrecomputedTransactionData> txdata{PrecomputePSBTData(finalized)};
+    if (!txdata) return false;
+
+    for (size_t i = 0; i < psbtx.inputs.size(); ++i) {
+        const PSBTInput& input{psbtx.inputs[i]};
+        const PSBTInput& finalized_input{finalized.inputs[i]};
+        if (PSBTInputSigned(input) || !PSBTInputSigned(finalized_input)) continue;
+
+        CTxOut utxo;
+        if (!input.GetUTXO(utxo) || !utxo.scriptPubKey.IsPayToTaproot()) continue;
+
+        if (PSBTInputSignedAndVerified(finalized, i, &*txdata) &&
+            GetTaprootSpendPath(finalized_input.final_script_witness) == TaprootSpendPath::SCRIPT_PATH) return true;
+    }
+    return false;
+}
+
 bool FinalizeAndExtractPSBT(PartiallySignedTransaction& psbtx, CMutableTransaction& result)
 {
     // It's not safe to extract a PSBT that isn't finalized, and there's no easy way to check

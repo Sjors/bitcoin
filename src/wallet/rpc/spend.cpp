@@ -1624,6 +1624,10 @@ RPCMethod walletprocesspsbt()
                         {RPCResult::Type::STR, "psbt", "The base64-encoded partially signed transaction"},
                         {RPCResult::Type::BOOL, "complete", "If the transaction has a complete set of signatures"},
                         {RPCResult::Type::STR_HEX, "hex", /*optional=*/true, "The hex-encoded network transaction if complete"},
+                        {RPCResult::Type::ARR, "warnings", /*optional=*/true, "Warning messages",
+                        {
+                            {RPCResult::Type::STR, "", "warning"},
+                        }},
                     }
                 },
                 RPCExamples{
@@ -1669,6 +1673,11 @@ RPCMethod walletprocesspsbt()
     ssTx << psbtx;
     result.pushKV("psbt", EncodeBase64(ssTx.str()));
     result.pushKV("complete", complete);
+    if (keypath_only && finalize && HasFinalizableTaprootScriptPath(psbtx)) {
+        UniValue warnings{UniValue::VARR};
+        warnings.push_back("A complete Taproot script-path spend was not finalized (keypath_only).");
+        result.pushKV("warnings", std::move(warnings));
+    }
     if (complete) {
         CMutableTransaction mtx;
         // Returns true if complete, which we already think it is.

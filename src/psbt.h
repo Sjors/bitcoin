@@ -1681,6 +1681,12 @@ void UpdatePSBTOutput(const SigningProvider& provider, PartiallySignedTransactio
 bool FinalizePSBT(PartiallySignedTransaction& psbtx);
 
 /**
+ * Checks whether an unfinalized Taproot input could be finalized with a
+ * script-path witness using data already present in the PSBT.
+ */
+bool HasFinalizableTaprootScriptPath(const PartiallySignedTransaction& psbtx);
+
+/**
  * Finalizes a PSBT if possible, and extracts it to a CMutableTransaction if it could be finalized.
  *
  * @param[in]  psbtx PartiallySignedTransaction
