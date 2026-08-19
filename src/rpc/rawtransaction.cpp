@@ -2003,6 +2003,7 @@ static RPCMethod analyzepsbt()
                                 {RPCResult::Type::STR_HEX, "redeemscript", /*optional=*/true, "Hash160 of the redeem script that is missing"},
                                 {RPCResult::Type::STR_HEX, "witnessscript", /*optional=*/true, "SHA256 of the witness script that is missing"},
                             }},
+                            {RPCResult::Type::STR, "taproot_spend_path", /*optional=*/true, "How the input spends its Taproot output (\"key_path\" or \"script_path\"), if known"},
                             {RPCResult::Type::STR, "next", /*optional=*/true, "Role of the next person that this input needs to go to"},
                         }},
                     }},
@@ -2036,6 +2037,9 @@ static RPCMethod analyzepsbt()
         input_univ.pushKV("has_utxo", input.has_utxo);
         input_univ.pushKV("is_final", input.is_final);
         input_univ.pushKV("next", PSBTRoleName(input.next));
+        if (input.taproot_spend_path) {
+            input_univ.pushKV("taproot_spend_path", *input.taproot_spend_path == TaprootSpendPath::KEY_PATH ? "key_path" : "script_path");
+        }
 
         if (!input.missing_pubkeys.empty()) {
             UniValue missing_pubkeys_univ(UniValue::VARR);

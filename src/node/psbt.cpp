@@ -89,9 +89,15 @@ PSBTAnalysis AnalyzePSBT(PartiallySignedTransaction psbtx)
                 }
             } else {
                 input_analysis.next = PSBTRole::FINALIZER;
+                if (utxo.scriptPubKey.IsPayToTaproot()) {
+                    input_analysis.taproot_spend_path = GetTaprootSpendPath(input.final_script_witness);
+                }
             }
         } else if (!utxo.IsNull()){
             input_analysis.is_final = true;
+            if (utxo.scriptPubKey.IsPayToTaproot()) {
+                input_analysis.taproot_spend_path = GetTaprootSpendPath(input.final_script_witness);
+            }
         }
     }
 

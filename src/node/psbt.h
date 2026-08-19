@@ -17,6 +17,7 @@ struct PSBTInputAnalysis {
     bool has_utxo; //!< Whether we have UTXO information for this input
     bool is_final; //!< Whether the input has all required information including signatures
     PSBTRole next; //!< Which of the BIP 174 roles needs to handle this input next
+    std::optional<TaprootSpendPath> taproot_spend_path; //!< How this input spends its Taproot output, if known
 
     std::vector<CKeyID> missing_pubkeys; //!< Pubkeys whose BIP32 derivation path is missing
     std::vector<CKeyID> missing_sigs;    //!< Pubkeys whose signatures are missing

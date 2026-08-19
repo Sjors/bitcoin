@@ -1501,6 +1501,13 @@ class PSBTTest(BitcoinTestFramework):
         )
         decoded = self.nodes[2].decodepsbt(signed_psbt["psbt"])
         assert "taproot_script_path_sigs" in decoded["inputs"][0]
+        analysis = self.nodes[2].analyzepsbt(signed_psbt["psbt"])
+        assert_equal(analysis["inputs"][0]["next"], "finalizer")
+        assert_equal(analysis["inputs"][0]["taproot_spend_path"], "script_path")
+        finalized_psbt = self.nodes[2].finalizepsbt(signed_psbt["psbt"], extract=False)
+        analysis = self.nodes[2].analyzepsbt(finalized_psbt["psbt"])
+        assert_equal(analysis["inputs"][0]["is_final"], True)
+        assert_equal(analysis["inputs"][0]["taproot_spend_path"], "script_path")
 
         # Do not finalize an existing script-path signature when keypath_only is
         # requested, since that would produce a broadcastable script-path spend.
