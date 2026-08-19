@@ -3,11 +3,34 @@
 // file COPYING or https://www.opensource.org/licenses/mit-license.php.
 
 #include <psbt.h>
+#include <script/script.h>
 
 #include <boost/test/unit_test.hpp>
 #include <test/util/setup_common.h>
 
 BOOST_FIXTURE_TEST_SUITE(psbt_tests, BasicTestingSetup)
+
+BOOST_AUTO_TEST_CASE(taproot_spend_path)
+{
+    CScriptWitness witness;
+    BOOST_CHECK(!GetTaprootSpendPath(witness));
+
+    witness.stack = {{0x01}};
+    BOOST_CHECK(GetTaprootSpendPath(witness) == TaprootSpendPath::KEY_PATH);
+
+    witness.stack = {{0x01}, {0x02}};
+    BOOST_CHECK(GetTaprootSpendPath(witness) == TaprootSpendPath::SCRIPT_PATH);
+
+    witness.stack = {{0x01}, {ANNEX_TAG}};
+    BOOST_CHECK(GetTaprootSpendPath(witness) == TaprootSpendPath::KEY_PATH);
+
+    witness.stack = {{0x01}, {0x02}, {0x03}, {ANNEX_TAG}};
+    BOOST_CHECK(GetTaprootSpendPath(witness) == TaprootSpendPath::SCRIPT_PATH);
+
+    // An empty final stack element is not an annex.
+    witness.stack = {{0x01}, {}};
+    BOOST_CHECK(GetTaprootSpendPath(witness) == TaprootSpendPath::SCRIPT_PATH);
+}
 
 static PSBTProprietary MakeProprietary(uint64_t subtype, uint8_t key_data, uint8_t value)
 {

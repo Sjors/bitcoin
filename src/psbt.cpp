@@ -8,6 +8,7 @@
 #include <node/types.h>
 #include <policy/policy.h>
 #include <primitives/transaction.h>
+#include <script/script.h>
 #include <script/signingprovider.h>
 #include <util/check.h>
 #include <util/result.h>
@@ -552,6 +553,16 @@ bool PSBTOutput::Merge(const PSBTOutput& output)
 bool PSBTInputSigned(const PSBTInput& input)
 {
     return !input.final_script_sig.empty() || !input.final_script_witness.IsNull();
+}
+
+std::optional<TaprootSpendPath> GetTaprootSpendPath(const CScriptWitness& witness)
+{
+    size_t stack_size{witness.stack.size()};
+    if (stack_size >= 2 && !witness.stack.back().empty() && witness.stack.back()[0] == ANNEX_TAG) {
+        --stack_size;
+    }
+    if (stack_size == 0) return std::nullopt;
+    return stack_size == 1 ? TaprootSpendPath::KEY_PATH : TaprootSpendPath::SCRIPT_PATH;
 }
 
 bool PSBTInputSignedAndVerified(const PartiallySignedTransaction& psbt, unsigned int input_index, const PrecomputedTransactionData* txdata)

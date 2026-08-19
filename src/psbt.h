@@ -1622,6 +1622,18 @@ public:
     }
 };
 
+enum class TaprootSpendPath {
+    KEY_PATH,
+    SCRIPT_PATH,
+};
+
+/**
+ * Classify a final Taproot witness as a key-path or script-path spend.
+ * Returns std::nullopt for an empty witness. The caller is responsible for
+ * establishing that the witness spends a Taproot output.
+ */
+std::optional<TaprootSpendPath> GetTaprootSpendPath(const CScriptWitness& witness);
+
 enum class PSBTRole {
     CREATOR,
     UPDATER,
