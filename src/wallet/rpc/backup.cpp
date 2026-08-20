@@ -249,6 +249,35 @@ static UniValue ProcessDescriptorImport(CWallet& wallet, const UniValue& data, c
                warnings.push_back(w);
             }
 
+            // Auto-bind any descriptor xpubs whose corresponding xprv the wallet
+            // already knows (via `addhdkey` or an active descriptor). This lets the
+            // caller import e.g. `tr(musig([fp_A/87h/1h/0h]xpub_A,[fp_B/87h/1h/0h]xpub_B)/<0;1>/*)`
+            // without having to manually splice the hot cosigner's xprv into the
+            // descriptor string.
+            if (!wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
+                std::vector<std::pair<KeyOriginInfo, CExtPubKey>> origins;
+                parsed_desc->GetKeyOrigins(origins);
+                if (!origins.empty()) {
+                    std::map<uint32_t, CExtKey> seeds = wallet.GetHDSeeds();
+                    for (const auto& [origin, root_extkey] : origins) {
+                        // Skip if we already know this xprv.
+                        if (keys.keys.contains(root_extkey.pubkey.GetID())) {
+                            continue;
+                        }
+                        uint32_t fp;
+                        std::memcpy(&fp, origin.fingerprint.data(), 4);
+                        auto it = seeds.find(fp);
+                        if (it == seeds.end()) continue;
+                        std::vector<uint32_t> path(origin.path.begin(), origin.path.end());
+                        auto derived = DeriveExtKey(it->second, path);
+                        if (!derived) continue;
+                        // Verify the derived xpub matches the descriptor's root xpub
+                        // (guards against fingerprint collisions between unrelated seeds).
+                        if (derived->first.Neuter() != root_extkey) continue;
+                        keys.keys.emplace(root_extkey.pubkey.GetID(), derived->first.key);
+                    }
+                }
+            }
             // If private keys are enabled, check some things.
             if (!wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
                 if (keys.keys.empty()) {

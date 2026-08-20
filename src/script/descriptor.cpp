@@ -259,6 +259,11 @@ public:
 
     /** Whether this PubkeyProvider can always provide a public key without cache or private key arguments */
     virtual bool CanSelfExpand() const = 0;
+
+    /** Append (master-rooted origin info, root extended pubkey) for every BIP 32 key
+     *  expression carried by this provider. Used by the wallet to bind known wallet
+     *  HD seeds to descriptor xpubs at import time. Default: do nothing. */
+    virtual void GetKeyOrigins(std::vector<std::pair<KeyOriginInfo, CExtPubKey>>& out) const {}
 };
 
 class OriginPubkeyProvider final : public PubkeyProvider
@@ -330,6 +335,21 @@ public:
         return std::make_unique<OriginPubkeyProvider>(m_expr_index, m_origin, m_provider->Clone(), m_apostrophe);
     }
     bool CanSelfExpand() const override { return m_provider->CanSelfExpand(); }
+
+    void GetKeyOrigins(std::vector<std::pair<KeyOriginInfo, CExtPubKey>>& out) const override
+    {
+        // Only emit if the inner provider is a BIP 32 expression with a root xpub.
+        // For musig() and other aggregations, recurse into the inner provider so
+        // each participant emits its own (origin, root xpub) pair.
+        if (m_provider->IsBIP32()) {
+            std::optional<CExtPubKey> root = m_provider->GetRootExtPubKey();
+            if (root) {
+                out.emplace_back(m_origin, *root);
+                return;
+            }
+        }
+        m_provider->GetKeyOrigins(out);
+    }
 };
 
 /** An object representing a parsed constant public key in a descriptor. */
@@ -833,6 +853,13 @@ public:
         }
         return true;
     }
+
+    void GetKeyOrigins(std::vector<std::pair<KeyOriginInfo, CExtPubKey>>& out) const override
+    {
+        for (const auto& p : m_participants) {
+            p->GetKeyOrigins(out);
+        }
+    }
 };
 
 /** Base class for all Descriptor implementations. */
@@ -1069,6 +1096,17 @@ public:
         }
         for (const auto& arg : m_subdescriptor_args) {
             arg->GetPubKeys(pubkeys, ext_pubs);
+        }
+    }
+
+    // NOLINTNEXTLINE(misc-no-recursion)
+    void GetKeyOrigins(std::vector<std::pair<KeyOriginInfo, CExtPubKey>>& out) const override
+    {
+        for (const auto& p : m_pubkey_args) {
+            p->GetKeyOrigins(out);
+        }
+        for (const auto& arg : m_subdescriptor_args) {
+            arg->GetKeyOrigins(out);
         }
     }
 

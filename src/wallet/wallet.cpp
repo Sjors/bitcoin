@@ -37,6 +37,7 @@
 #include <pubkey.h>
 #include <random.h>
 #include <script/descriptor.h>
+#include <script/parsing.h>
 #include <script/interpreter.h>
 #include <script/script.h>
 #include <script/sign.h>
@@ -401,13 +402,6 @@ std::shared_ptr<CWallet> CreateWallet(WalletContext& context, const std::string&
     Assert(wallet_creation_flags & WALLET_FLAG_DESCRIPTORS);
     options.require_format = DatabaseFormat::SQLITE;
 
-
-    // Private keys must be disabled for an external signer wallet
-    if ((wallet_creation_flags & WALLET_FLAG_EXTERNAL_SIGNER) && !(wallet_creation_flags & WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
-        error = Untranslated("Private keys must be disabled when using an external signer");
-        status = DatabaseStatus::FAILED_CREATE;
-        return nullptr;
-    }
 
     // Do not allow a passphrase when private keys are disabled
     if (born_encrypted && (wallet_creation_flags & WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
@@ -1815,6 +1809,17 @@ uint64_t CWallet::GetWalletFlags() const
     return m_wallet_flags;
 }
 
+void CWallet::LoadExternalSignerRegistration(const std::string& fingerprint, const std::string& registration)
+{
+    for (auto& entry : m_external_signer_registrations) {
+        if (entry.fingerprint == fingerprint) {
+            entry.registration = registration;
+            return;
+        }
+    }
+    m_external_signer_registrations.emplace_back(ExternalSignerRegistration{fingerprint, registration});
+}
+
 void CWallet::MaybeUpdateBirthTime(int64_t time)
 {
     int64_t birthtime = m_birth_time.load();
@@ -2202,7 +2207,7 @@ bool CWallet::SignTransaction(CMutableTransaction& tx, const std::map<COutPoint,
     return false;
 }
 
-std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, const common::PSBTFillOptions& options, bool& complete, size_t* n_signed) const
+std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, const common::PSBTFillOptions& options, bool& complete, size_t* n_signed)
 {
     if (n_signed) {
         *n_signed = 0;
@@ -2233,25 +2238,171 @@ std::optional<PSBTError> CWallet::FillPSBT(PartiallySignedTransaction& psbtx, co
     }
     const PrecomputedTransactionData& txdata = *txdata_res;
 
-    // Fill in information from ScriptPubKeyMans
-    for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
-        int n_signed_this_spkm = 0;
-        const auto error{spk_man->FillPSBT(psbtx, txdata, options, &n_signed_this_spkm)};
-        if (error) {
-            return error;
+    // One signing pass: dispatch any registered descriptor first
+    // (covers all of this wallet's related descriptors at once), then
+    // every remaining ScriptPubKeyMan. Returns either a PSBTError or
+    // `complete` set to whether every input is now signed.
+    auto fill_pass = [&](PartiallySignedTransaction& target) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet) -> std::optional<PSBTError> {
+        // If a descriptor is registered with the external signer, dispatch
+        // the registered signing path once. Mirrors the registration
+        // detection block in CWallet::DisplayAddress, but
+        // hoisted out of the per-SPKM loop so we don't shell out to
+        // the device once per SPKM.
+        bool registration_dispatched = false;
+        if (options.sign && !m_external_signer_registrations.empty()) {
+            ExternalSignerScriptPubKeyMan* registration_spk_man = nullptr;
+            for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
+                auto* candidate = dynamic_cast<ExternalSignerScriptPubKeyMan*>(spk_man);
+                if (candidate && IsCandidateForDescriptorRegistration(*candidate)) {
+                    registration_spk_man = candidate;
+                    break;
+                }
+            }
+            if (registration_spk_man) {
+                // Fan out to every connected external signer that has a
+                // descriptor registered with this wallet (e.g. a
+                // 3-of-3 MuSig2 split across two HW wallets and a hot
+                // cosigner). FillPSBTRegistered itself absorbs the local
+                // descriptor signer's contribution on each call, so we
+                // ask the first matching signer to do the local pass +
+                // its device round, then ask each subsequent signer to
+                // do only its device round.
+                auto signers{ExternalSignerScriptPubKeyMan::GetExternalSigners()};
+                if (signers) {
+                    bool any_dispatched{false};
+                    for (auto& signer : *signers) {
+                        const ExternalSignerRegistration* matching_registration{nullptr};
+                        for (const auto& entry : m_external_signer_registrations) {
+                            if (entry.fingerprint == signer.m_fingerprint) {
+                                matching_registration = &entry;
+                                break;
+                            }
+                        }
+                        if (!matching_registration) continue;
+                        int n_signed_registered = 0;
+                        auto registration_err = registration_spk_man->FillPSBTRegistered(target, txdata,
+                                                                                          options,
+                                                                                          &n_signed_registered,
+                                                                                          signer,
+                                                                                          matching_registration->registration);
+                        if (registration_err) {
+                            return registration_err;
+                        }
+                        if (n_signed) {
+                            (*n_signed) += n_signed_registered;
+                        }
+                        any_dispatched = true;
+                    }
+                    registration_dispatched = any_dispatched;
+                }
+            }
         }
 
-        if (n_signed) {
-            (*n_signed) += n_signed_this_spkm;
+        // Fill in information from ScriptPubKeyMans
+        for (ScriptPubKeyMan* spk_man : GetAllScriptPubKeyMans()) {
+            int n_signed_this_spkm = 0;
+            // If we already dispatched the registered descriptor above, skip
+            // every ExternalSignerScriptPubKeyMan in this loop: the
+            // registration call covered the registered descriptor's SPKMs, and
+            // the device would reject anything else.
+            if (options.sign && registration_dispatched && dynamic_cast<ExternalSignerScriptPubKeyMan*>(spk_man) != nullptr) {
+                continue;
+            }
+
+            const auto error{spk_man->FillPSBT(target, txdata, options, &n_signed_this_spkm)};
+            if (error) {
+                return error;
+            }
+
+            if (n_signed) {
+                (*n_signed) += n_signed_this_spkm;
+            }
         }
+
+        RemoveUnnecessaryTransactions(target);
+
+        // Complete if every input is now signed
+        complete = true;
+        for (size_t i = 0; i < target.inputs.size(); ++i) {
+            complete &= PSBTInputSignedAndVerified(target, i, &txdata);
+        }
+        return {};
+    };
+
+    if (auto err = fill_pass(psbtx)) {
+        return err;
     }
 
-    RemoveUnnecessaryTransactions(psbtx);
-
-    // Complete if every input is now signed
-    complete = true;
-    for (size_t i = 0; i < psbtx.inputs.size(); ++i) {
-        complete &= PSBTInputSignedAndVerified(psbtx, i, &txdata);
+    // Multi-round signing flows (e.g. MuSig2) need a second sign pass:
+    // the first only exchanged pub nonces, so the PSBT isn't complete
+    // yet. Only retry when round 2 is actually feasible -- i.e. every
+    // input that participates in a MuSig2 session has a complete set
+    // of pub nonces from every expected participant. If some cosigner
+    // is offline (no nonces yet), there's nothing the device can do
+    // in round 2 and we shouldn't waste a confirmation prompt; just
+    // hand back the round-1 PSBT for out-of-band exchange. Likewise
+    // for non-MuSig2 flows we skip the retry: there's no known one-
+    // pass-incomplete case there.
+    //
+    // We can't pair PSBT_IN_MUSIG2_PARTICIPANT_PUBKEYS entries to
+    // PSBT_IN_MUSIG2_PUB_NONCE entries by aggregate pubkey: the former
+    // stores the pre-tweak aggregate while the latter stores the
+    // post-tweak one (after BIP32 derivations and the BIP86 taproot
+    // tweak). Use a structural check instead: per input, require at
+    // least one pubnonces group per participants entry, and each
+    // group to have at least as many nonces as the largest
+    // participants list.
+    auto musig2_round2_ready = [](const PartiallySignedTransaction& p) {
+        bool any_musig2{false};
+        for (const auto& input : p.inputs) {
+            if (input.m_musig2_participants.empty()) continue;
+            any_musig2 = true;
+            if (input.m_musig2_pubnonces.size() < input.m_musig2_participants.size()) return false;
+            size_t max_participants{0};
+            for (const auto& [_, parts] : input.m_musig2_participants) {
+                max_participants = std::max(max_participants, parts.size());
+            }
+            for (const auto& [_, nonces] : input.m_musig2_pubnonces) {
+                if (nonces.size() < max_participants) return false;
+            }
+        }
+        return any_musig2;
+    };
+    if (options.sign && !complete && musig2_round2_ready(psbtx)) {
+        PartiallySignedTransaction probe = psbtx;
+        bool probe_complete = complete;
+        std::optional<PSBTError> probe_err;
+        try {
+            probe_err = fill_pass(probe);
+        } catch (...) {
+            // Swallow: any error in the optional second round just
+            // means we hand back the round-1 PSBT.
+        }
+        // fill_pass writes through to outer `complete`. When the
+        // round-2 attempt errored, preserve the round-1 PSBT and the
+        // round-1 `complete` flag. Otherwise keep the probe even if
+        // the PSBT isn't yet complete: any partial-signature or
+        // pubnonce contribution that round 2 produced is real signing
+        // work, and discarding it would orphan the corresponding
+        // single-use MuSig2 secnonce that fill_pass already consumed
+        // out of m_musig2_secnonces.
+        //
+        // BIP327 safety: this is not a secnonce-reuse risk. The
+        // wallet's m_musig2_secnonces map is held by reference inside
+        // the FlatSigningProvider, so DeleteMuSig2Session in
+        // CreateMuSig2PartialSig mutates the wallet state regardless
+        // of whether we keep or discard the probe PSBT. The deletion
+        // happens exactly once per (script_pubkey, part_pubkey,
+        // sighash) session and SetMuSig2SecNonce asserts on duplicate
+        // inserts, so the wallet cannot regenerate a secnonce for a
+        // session it has already signed. Preserving the probe's psig
+        // just lets a subsequent FillPSBT call observe the work
+        // instead of silently losing it.
+        if (!probe_err) {
+            psbtx = std::move(probe);
+        } else {
+            complete = probe_complete;
+        }
     }
 
     return {};
@@ -2733,15 +2884,174 @@ util::Result<void> CWallet::DisplayAddress(const CTxDestination& dest)
 {
     CScript scriptPubKey = GetScriptForDestination(dest);
     for (const auto& spk_man : GetScriptPubKeyMans(scriptPubKey)) {
+        auto signer_spk_man = dynamic_cast<ExternalSignerScriptPubKeyMan*>(spk_man);
+        if (signer_spk_man == nullptr) {
+            continue;
+        }
+        auto signers{ExternalSignerScriptPubKeyMan::GetExternalSigners()};
+        if (!signers) throw std::runtime_error(util::ErrorString(signers).original);
+
+        // If the matched SPKM is part of a registered descriptor, ask the
+        // first connected device whose fingerprint matches a registration
+        // to display the address using that registration. For multi-signer
+        // wallets (e.g. 3-of-3 MuSig2) any one of the cosigner devices is
+        // sufficient -- they all encode the same address from the same
+        // descriptor, and the user only needs one device to confirm visually.
+        if (IsCandidateForDescriptorRegistration(*signer_spk_man)) {
+            ExternalSigner* matching_signer{nullptr};
+            const ExternalSignerRegistration* matching_registration{nullptr};
+            for (auto& signer : *signers) {
+                for (const auto& entry : m_external_signer_registrations) {
+                    if (entry.fingerprint == signer.m_fingerprint) {
+                        matching_signer = &signer;
+                        matching_registration = &entry;
+                        break;
+                    }
+                }
+                if (matching_signer) break;
+            }
+            if (matching_signer) {
+                const auto index{signer_spk_man->GetScriptPubKeyIndex(scriptPubKey)};
+                if (!index) return util::Error{_("Could not locate address in script pub key map")};
+                const std::optional<bool> internal{IsInternalScriptPubKeyMan(signer_spk_man)};
+                if (!internal) return util::Error{_("Could not determine receive/change chain for address")};
+                return signer_spk_man->DisplayAddressRegistered(dest, *matching_signer,
+                                                                matching_registration->registration,
+                                                                *internal,
+                                                                static_cast<uint32_t>(*index));
+            }
+        }
+
+        // Non-registered single-sig fallback: only meaningful when one signer
+        // is connected. Multi-signer setups always go through the registered
+        // path above.
+        if (signers->size() != 1) {
+            return util::Error{_("Multiple external signers connected; address display requires a registered descriptor")};
+        }
+        return signer_spk_man->DisplayAddress(dest, signers->front());
+    }
+    return util::Error{_("There is no ScriptPubKeyManager for this address")};
+}
+
+bool CWallet::IsCandidateForDescriptorRegistration(DescriptorScriptPubKeyMan& spkm)
+{
+    std::string desc;
+    if (!Assume(spkm.GetDescriptorString(desc, /*priv=*/false))) return false;
+
+    std::span<const char> sp{desc};
+
+    if (!(script::Const("tr(", sp, /*skip=*/true) || script::Const("wsh(", sp, /*skip=*/true))) return false;
+    // Must be MuSig2, have a leaf script or segwit multisig
+    if (desc.find(',') == std::string::npos) return false;
+
+    return true;
+}
+
+util::Result<std::string> CWallet::DeriveRegistrationDescriptor(const std::optional<std::pair<DescriptorScriptPubKeyMan&, DescriptorScriptPubKeyMan&>>& spk_pair)
+{
+    std::string receive_descriptor;
+    std::string change_descriptor;
+
+    DescriptorScriptPubKeyMan* receive{nullptr};
+    DescriptorScriptPubKeyMan* change{nullptr};
+
+    if (spk_pair) {
+        if (!IsCandidateForDescriptorRegistration(spk_pair->first) || !IsCandidateForDescriptorRegistration(spk_pair->second)) {
+            return util::Error{_("Provided descriptors are not suitable for registration")};
+        }
+        receive = &spk_pair->first;
+        change = &spk_pair->second;
+    } else {
+        for (bool internal : {false, true}) {
+            // TODO: support P2SH.
+            for (const OutputType type : {OutputType::BECH32M, OutputType::BECH32}) {
+                // Only look for a single candidate
+                if (!internal && receive) continue;
+                if (internal && change) continue;
+
+                auto spk_man = GetScriptPubKeyMan(type, internal);
+                if (!spk_man) continue;
+                auto desc_spk_man = dynamic_cast<DescriptorScriptPubKeyMan*>(spk_man);
+                if (!desc_spk_man) continue;
+
+                if (!IsCandidateForDescriptorRegistration(*desc_spk_man)) continue;
+
+                if (internal) {
+                    change = desc_spk_man;
+                } else {
+                    receive = desc_spk_man;
+                }
+            }
+        }
+    }
+
+    if (!receive || !change) {
+        return util::Error{_("No suitable receive and change descriptors found for registration")};
+    }
+
+    bool res{receive->GetDescriptorString(receive_descriptor, /*priv=*/false)};
+    res &= change->GetDescriptorString(change_descriptor, /*priv=*/false);
+    if (!Assume(res)) {
+        return util::Error{_("Failed to get descriptor strings")};
+    }
+
+    // Drop the checksums, then restore the multipath expression that was
+    // expanded into separate receive and change descriptors at import time.
+    if (const auto checksum{receive_descriptor.find('#')}; checksum != std::string::npos) receive_descriptor.erase(checksum);
+    if (const auto checksum{change_descriptor.find('#')}; checksum != std::string::npos) change_descriptor.erase(checksum);
+    if (receive_descriptor.find("/0/*") == std::string::npos || change_descriptor.find("/1/*") == std::string::npos) {
+        return util::Error{_("Receive and change descriptors do not contain the expected /0/* and /1/* paths")};
+    }
+    util::ReplaceAll(receive_descriptor, "/0/*", "/<0;1>/*", /*regex=*/false);
+    util::ReplaceAll(change_descriptor, "/1/*", "/<0;1>/*", /*regex=*/false);
+
+    if (receive_descriptor != change_descriptor) {
+        return util::Error{Untranslated(strprintf(
+            "Receive and change descriptors are incompatible for registration:\n%s\n%s",
+            receive_descriptor,
+            change_descriptor
+        ))};
+    }
+
+    return receive_descriptor;
+}
+
+util::Result<std::vector<ExternalSignerRegistration>> CWallet::RegisterDescriptor(const std::optional<std::string>& name)
+{
+    const std::string descriptor_name{name.value_or(m_name)};
+
+    // A wallet with multiple complex descriptor pairs could have multiple
+    // registrations, but selecting a specific pair is currently unsupported.
+    const auto descriptor{DeriveRegistrationDescriptor(/*spk_pair=*/std::nullopt)};
+    if (!descriptor) return util::Error{util::ErrorString(descriptor)};
+
+    for (const auto& spk_man : GetActiveScriptPubKeyMans()) {
         auto signer_spk_man = dynamic_cast<ExternalSignerScriptPubKeyMan *>(spk_man);
         if (signer_spk_man == nullptr) {
             continue;
         }
-        auto signer{ExternalSignerScriptPubKeyMan::GetExternalSigner()};
-        if (!signer) throw std::runtime_error(util::ErrorString(signer).original);
-        return signer_spk_man->DisplayAddress(dest, *signer);
+        auto signers{ExternalSignerScriptPubKeyMan::GetExternalSigners()};
+        if (!signers) return util::Error{util::ErrorString(signers)};
+
+        // Fan out registration to every connected signer. For multi-signer
+        // wallets (e.g. MuSig2 split across two HW devices) each device
+        // prompts independently and returns its own opaque registration.
+        std::vector<ExternalSignerRegistration> registrations;
+        for (auto& signer : *signers) {
+            util::Result<std::string> res{signer_spk_man->RegisterDescriptor(signer, descriptor_name, *descriptor)};
+            if (!res) return util::Error{util::ErrorString(res)};
+
+            WalletBatch batch(GetDatabase());
+            if (!batch.WriteExternalSignerRegistration(signer.m_fingerprint, *res)) {
+                return util::Error{_("Failed to store external signer descriptor registration in wallet database.")};
+            }
+            LoadExternalSignerRegistration(signer.m_fingerprint, *res);
+            registrations.emplace_back(ExternalSignerRegistration{signer.m_fingerprint, *res});
+        }
+
+        return registrations;
     }
-    return util::Error{_("There is no ScriptPubKeyManager for this address")};
+    return util::Error{_("Could not find ExternalSignerScriptPubKeyManager")};
 }
 
 void CWallet::LoadLockedCoin(const COutPoint& coin, bool persistent)
@@ -3599,6 +3909,20 @@ void CWallet::ConnectScriptPubKeyManNotifiers()
     }
 }
 
+std::set<DescriptorScriptPubKeyMan*> CWallet::GetScriptlessSPKMs() const
+{
+    std::set<DescriptorScriptPubKeyMan*> spk_mans;
+    for (const auto& spkm : GetAllScriptPubKeyMans()) {
+        DescriptorScriptPubKeyMan* desc_spkm = dynamic_cast<DescriptorScriptPubKeyMan*>(spkm);
+        if (!desc_spkm) continue;
+        LOCK(desc_spkm->cs_desc_man);
+        if (!desc_spkm->GetWalletDescriptor().descriptor->HasScripts()) {
+            spk_mans.insert(desc_spkm);
+        }
+    }
+    return spk_mans;
+}
+
 void CWallet::LoadDescriptorScriptPubKeyMan(uint256 id, WalletDescriptor& desc, const KeyMap& keys, const CryptedKeyMap& ckeys)
 {
     std::unique_ptr<DescriptorScriptPubKeyMan> spk_manager;
@@ -3703,10 +4027,10 @@ void CWallet::SetupDescriptorScriptPubKeyMans()
 void CWallet::SetupWalletGeneration()
 {
     AssertLockHeld(cs_wallet);
-    // Skip setup for non-external-signer wallets that are either blank
-    // or have private keys disabled (not having private keys implies blank).
-    if (!IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER) &&
-        (IsWalletFlagSet(WALLET_FLAG_BLANK_WALLET) || IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS))) {
+    // Skip setup for blank wallets. Non-external-signer wallets with disabled
+    // private keys also skip setup (not having private keys implies blank).
+    if (IsWalletFlagSet(WALLET_FLAG_BLANK_WALLET) ||
+        (!IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER) && IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS))) {
         return;
     }
     SetupDescriptorScriptPubKeyMans();
@@ -3810,7 +4134,12 @@ util::Result<std::reference_wrapper<DescriptorScriptPubKeyMan>> CWallet::AddWall
             return util::Error{util::ErrorString(spkm_res)};
         }
     } else {
-        auto new_spk_man = DescriptorScriptPubKeyMan::CreateFromImport(*this, desc, m_keypool_size, signing_provider);
+        std::unique_ptr<DescriptorScriptPubKeyMan> new_spk_man;
+        if (IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER)) {
+            new_spk_man = ExternalSignerScriptPubKeyMan::CreateFromImport(*this, desc, m_keypool_size, signing_provider);
+        } else {
+            new_spk_man = DescriptorScriptPubKeyMan::CreateFromImport(*this, desc, m_keypool_size, signing_provider);
+        }
         spk_man = new_spk_man.get();
 
         // Save the descriptor to memory
@@ -4569,6 +4898,48 @@ CWallet::HDPubKeyMap CWallet::GetHDPubKeys(HDKeyFilter filter) const
         }
     }
     return xpubs;
+}
+
+std::map<uint32_t, CExtKey> CWallet::GetHDSeeds() const
+{
+    AssertLockHeld(cs_wallet);
+
+    Assert(IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
+
+    std::map<uint32_t, CExtKey> out;
+    if (IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) return out;
+
+    auto consider = [&](const CExtPubKey& xpub) {
+        // Only depth-0 entries are HD seeds.
+        if (xpub.nDepth != 0) return;
+        std::optional<CKey> key = GetKey(xpub.pubkey.GetID());
+        if (!key) return;
+        CExtKey seed(xpub, *key);
+        const CKeyID id = seed.Neuter().pubkey.GetID();
+        uint32_t fp;
+        std::memcpy(&fp, id.begin(), 4);
+        out.emplace(fp, std::move(seed));
+    };
+
+    // Active descriptors first.
+    for (const auto& [xpub, spkms] : GetHDPubKeys(HDKeyFilter::Active)) {
+        consider(xpub);
+    }
+
+    // Plus any `unused(KEY)` SPKMs (added via `addhdkey`).
+    for (auto* spkm : GetAllScriptPubKeyMans()) {
+        auto* desc_spkm = dynamic_cast<DescriptorScriptPubKeyMan*>(spkm);
+        if (!desc_spkm) continue;
+        LOCK(desc_spkm->cs_desc_man);
+        WalletDescriptor w_desc = desc_spkm->GetWalletDescriptor();
+        if (w_desc.descriptor->HasScripts()) continue;
+        std::set<CPubKey> dummy_pubs;
+        std::set<CExtPubKey> xpubs;
+        w_desc.descriptor->GetPubKeys(dummy_pubs, xpubs);
+        for (const CExtPubKey& xpub : xpubs) consider(xpub);
+    }
+
+    return out;
 }
 
 std::optional<CKey> CWallet::GetKey(const CKeyID& keyid) const
