@@ -2,6 +2,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <common/merkle.h>
 #include <consensus/merkle.h>
 #include <test/util/common.h>
 #include <test/util/random.h>
@@ -160,6 +161,60 @@ BOOST_AUTO_TEST_CASE(merkle_test_empty_block)
     // This tests the early-return path in MerkleComputation
     std::vector<uint256> merkle_path = TransactionMerklePath(block, 0);
     BOOST_CHECK(merkle_path.empty());
+}
+
+BOOST_AUTO_TEST_CASE(merkle_branch_shape_test)
+{
+    CBlock block;
+    block.vtx.resize(5);
+    for (std::size_t pos = 0; pos < block.vtx.size(); pos++) {
+        CMutableTransaction mtx;
+        mtx.nLockTime = pos;
+        block.vtx[pos] = MakeTransactionRef(std::move(mtx));
+    }
+
+    const uint32_t pos{4};
+    const auto path{TransactionMerklePath(block, pos)};
+    const auto root{::ComputeMerkleRootFromBranch(block.vtx[pos]->GetHash().ToUint256(), path, pos, block.vtx.size())};
+    BOOST_REQUIRE(root);
+    BOOST_CHECK_EQUAL(*root, BlockMerkleRoot(block));
+
+    // The last leaf in a five transaction tree is duplicated at the bottom
+    // level. A verifier that knows the tree shape can reject a different
+    // sibling there.
+    auto invalid_path{path};
+    invalid_path[0] = uint256::ONE;
+    BOOST_CHECK(!::ComputeMerkleRootFromBranch(block.vtx[pos]->GetHash().ToUint256(), invalid_path, pos, block.vtx.size()));
+
+    BOOST_CHECK(!::ComputeMerkleRootFromBranch(block.vtx[pos]->GetHash().ToUint256(), path, pos, block.vtx.size() - 1));
+    BOOST_CHECK(!::ComputeMerkleRootFromBranch(block.vtx[pos]->GetHash().ToUint256(), path, block.vtx.size(), block.vtx.size()));
+
+    invalid_path = path;
+    invalid_path.push_back(uint256::ONE);
+    BOOST_CHECK(!::ComputeMerkleRootFromBranch(block.vtx[pos]->GetHash().ToUint256(), invalid_path, pos, block.vtx.size()));
+}
+
+BOOST_AUTO_TEST_CASE(witness_merkle_path_test)
+{
+    CBlock block;
+    block.vtx.resize(3);
+    for (std::size_t pos = 0; pos < block.vtx.size(); pos++) {
+        CMutableTransaction mtx;
+        mtx.nLockTime = pos;
+        if (pos > 0) {
+            mtx.vin.resize(1);
+            mtx.vin[0].scriptWitness.stack.emplace_back(std::vector<unsigned char>{uint8_t(pos)});
+        }
+        block.vtx[pos] = MakeTransactionRef(std::move(mtx));
+    }
+
+    for (uint32_t pos = 0; pos < block.vtx.size(); ++pos) {
+        const uint256 leaf{pos == 0 ? uint256{} : block.vtx[pos]->GetWitnessHash().ToUint256()};
+        const auto path{WitnessMerklePath(block, pos)};
+        const auto root{::ComputeMerkleRootFromBranch(leaf, path, pos, block.vtx.size())};
+        BOOST_REQUIRE(root);
+        BOOST_CHECK_EQUAL(*root, BlockWitnessMerkleRoot(block));
+    }
 }
 
 BOOST_AUTO_TEST_CASE(merkle_test_oneTx_block)
