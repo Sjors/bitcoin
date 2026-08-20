@@ -106,6 +106,7 @@ add_library(bitcoin_common STATIC EXCLUDE_FROM_ALL
   common/init.cpp
   common/interfaces.cpp
   common/license_info.cpp
+  common/merkle.cpp
   common/messages.cpp
   common/netif.cpp
   common/pcp.cpp
@@ -241,6 +242,7 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/transaction.cpp
   node/txdownloadman_impl.cpp
   node/txorphanage.cpp
+  node/txproof.cpp
   node/txreconciliation.cpp
   node/utxo_snapshot.cpp
   node/warnings.cpp

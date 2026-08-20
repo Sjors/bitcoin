@@ -389,6 +389,10 @@ static RPCMethod getindexinfo()
         result.pushKVs(SummaryToJSON(g_txindex->GetSummary(), index_name));
     }
 
+    if (g_wtxindex) {
+        result.pushKVs(SummaryToJSON(g_wtxindex->GetSummary(), index_name));
+    }
+
     if (g_coin_stats_index) {
         result.pushKVs(SummaryToJSON(g_coin_stats_index->GetSummary(), index_name));
     }

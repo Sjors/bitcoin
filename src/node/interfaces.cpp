@@ -10,9 +10,9 @@
 #include <chainparams.h>
 #include <coins.h>
 #include <common/args.h>
+#include <common/merkle.h>
 #include <common/settings.h>
 #include <consensus/amount.h>
-#include <consensus/merkle.h>
 #include <consensus/validation.h>
 #include <external_signer.h>
 #include <httprpc.h>
