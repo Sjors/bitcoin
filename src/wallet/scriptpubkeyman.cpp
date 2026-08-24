@@ -1688,4 +1688,34 @@ bool DescriptorScriptPubKeyMan::CanUpdateToWalletDescriptor(const WalletDescript
 
     return true;
 }
+
+util::Result<std::string> DeriveMultipathDescriptor(const DescriptorScriptPubKeyMan& receive, const DescriptorScriptPubKeyMan& change)
+{
+    std::string receive_descriptor;
+    std::string change_descriptor;
+    bool res{receive.GetDescriptorString(receive_descriptor, /*priv=*/false)};
+    res &= change.GetDescriptorString(change_descriptor, /*priv=*/false);
+    if (!Assume(res)) {
+        return util::Error{_("Failed to get descriptor strings")};
+    }
+
+    // Combine the normalized public descriptors, so that key origin
+    // information is presented the same way as in other descriptor RPCs.
+    FlatSigningProvider keys;
+    std::string error;
+    auto receive_descs{Parse(receive_descriptor, keys, error)};
+    auto change_descs{Parse(change_descriptor, keys, error)};
+    if (!Assume(receive_descs.size() == 1 && change_descs.size() == 1)) {
+        return util::Error{_("Failed to parse descriptor strings")};
+    }
+    const auto multipath{receive_descs.at(0)->ToStringMultipath(*change_descs.at(0))};
+    if (!multipath) {
+        return util::Error{Untranslated(strprintf(
+            "Receive and change descriptors are not derived from the same multipath descriptor:\n%s\n%s",
+            receive_descriptor,
+            change_descriptor
+        ))};
+    }
+    return *multipath;
+}
 } // namespace wallet

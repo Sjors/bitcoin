@@ -413,6 +413,23 @@ public:
     void UpgradeDescriptorCache();
 };
 
+//! Reconstruct the multipath descriptor that a receive and change descriptor
+//! pair was derived from.
+//!
+//! A multipath descriptor, conventionally with a /<0;1>/* derivation path,
+//! is expanded into a separate receive (/0/*) and change (/1/*) descriptor
+//! when it is imported, and single key wallets are generated as such a pair
+//! to begin with. This combines the pair back into a single multipath
+//! descriptor via Descriptor::ToStringMultipath, using the normalized public
+//! form and without a checksum.
+//!
+//! @param[in] receive The SPKM holding the receive descriptor.
+//! @param[in] change  The SPKM holding the change descriptor.
+//!
+//! @return the combined multipath descriptor, or an error if the descriptors
+//!         are not a receive/change pair.
+util::Result<std::string> DeriveMultipathDescriptor(const DescriptorScriptPubKeyMan& receive, const DescriptorScriptPubKeyMan& change);
+
 /** struct containing information needed for migrating legacy wallets to descriptor wallets */
 struct MigrationData
 {
