@@ -140,6 +140,20 @@ struct Descriptor {
     /** Convert the descriptor to a normalized string. Normalized descriptors have the xpub at the last hardened step. This fails if the provided provider does not have the private keys to derive that xpub. */
     virtual bool ToNormalizedString(const SigningProvider& provider, std::string& out, const DescriptorCache* cache = nullptr) const = 0;
 
+    //! Combine this receive descriptor with its change counterpart back into the
+    //! multipath descriptor (BIP 389) both were derived from, e.g. combine
+    //! wpkh(XPUB/0/*) with wpkh(XPUB/1/*) into wpkh(XPUB/<0;1>/*).
+    //!
+    //! The descriptors must be identical apart from at most one derivation path
+    //! element per key expression, whose change index must be greater than the
+    //! receive index, and must differ in at least one such element.
+    //!
+    //! @param[in] change The descriptor to treat as the change (second) half.
+    //! @returns the combined multipath descriptor string, in public form and
+    //!          without a checksum, or std::nullopt if the descriptors are not
+    //!          such a receive/change pair.
+    virtual std::optional<std::string> ToStringMultipath(const Descriptor& change) const = 0;
+
     /** Whether the descriptor can be used to produce its address(es) without needing a cache or private keys. */
     virtual bool CanSelfExpand() const = 0;
 

@@ -39,6 +39,7 @@
 #include <memory>
 #include <numeric>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -221,6 +222,20 @@ public:
      */
     virtual bool ToNormalizedString(const SigningProvider& arg, std::string& out, const DescriptorCache* cache = nullptr) const = 0;
 
+    /** Get the multipath descriptor string form that this provider and its change
+     *  counterpart were derived from, treating this provider as the receive half.
+     *  Returns false if the providers are not identical apart from at most one
+     *  derivation path element, where the change element must be greater.
+     *  By default only identical providers combine; providers that contain a
+     *  derivation path override this.
+     */
+    virtual bool ToStringMultipath(const PubkeyProvider& change, std::string& out) const
+    {
+        if (ToString() != change.ToString()) return false;
+        out = ToString();
+        return true;
+    }
+
     /** Derive a private key, if private data is available in arg and put it into out. */
     virtual void GetPrivKey(int pos, const SigningProvider& arg, FlatSigningProvider& out) const = 0;
 
@@ -249,6 +264,36 @@ public:
     /** Whether this PubkeyProvider can always provide a public key without cache or private key arguments */
     virtual bool CanSelfExpand() const = 0;
 };
+
+/** Combine a receive and change derivation path back into the multipath form they
+ *  were derived from, e.g. /0/2 and /1/2 into /<0;1>/2. The paths must be identical
+ *  apart from at most one element, whose hardened flag must match and whose change
+ *  index must be greater than the receive index. Returns std::nullopt if the
+ *  paths cannot be combined; note that identical paths combine into a path without
+ *  a multipath element, which is the caller's responsibility to handle.
+ */
+static std::optional<std::string> FormatMultipathKeypath(const KeyPath& receive, const KeyPath& change, bool apostrophe)
+{
+    if (receive.size() != change.size()) return std::nullopt;
+    const auto [receive_it, change_it]{std::ranges::mismatch(receive, change)};
+    // Identical paths combine into a path without a multipath element
+    if (receive_it == receive.end()) return FormatHDKeypath(receive, apostrophe);
+    // The hardened flag must match. Since it lives in the top bit, the change
+    // index is greater than the receive index iff the raw change element is
+    // greater. No other element may differ.
+    if ((*receive_it ^ *change_it) & BIP32_HARDENED_FLAG || *change_it <= *receive_it ||
+        !std::equal(std::next(receive_it), receive.end(), std::next(change_it))) {
+        return std::nullopt;
+    }
+    // Reuse FormatHDKeypath for the elements around the multipath one, so that
+    // they are formatted exactly as in any other descriptor string.
+    const auto format_index{[&](uint32_t num) {
+        return strprintf("%u%s", num & ~BIP32_HARDENED_FLAG, (num & BIP32_HARDENED_FLAG) ? (apostrophe ? "'" : "h") : "");
+    }};
+    return FormatHDKeypath({receive.begin(), receive_it}, apostrophe) +
+           "/<" + format_index(*receive_it) + ";" + format_index(*change_it) + ">" +
+           FormatHDKeypath({std::next(receive_it), receive.end()}, apostrophe);
+}
 
 class OriginPubkeyProvider final : public PubkeyProvider
 {
@@ -288,6 +333,17 @@ public:
     size_t GetSize() const override { return m_provider->GetSize(); }
     bool IsBIP32() const override { return m_provider->IsBIP32(); }
     std::string ToString(StringType type) const override { return "[" + OriginString(type) + "]" + m_provider->ToString(type); }
+    bool ToStringMultipath(const PubkeyProvider& change, std::string& out) const override
+    {
+        const auto* other{dynamic_cast<const OriginPubkeyProvider*>(&change)};
+        std::string sub;
+        if (!other || m_origin != other->m_origin || m_apostrophe != other->m_apostrophe ||
+            !m_provider->ToStringMultipath(*other->m_provider, sub)) {
+            return false;
+        }
+        out = "[" + OriginString(StringType::PUBLIC) + "]" + sub;
+        return true;
+    }
     bool ToPrivateString(const SigningProvider& arg, std::string& ret) const override
     {
         std::string sub;
@@ -521,6 +577,19 @@ public:
     {
         return ToString(type, /*normalized=*/false);
     }
+    bool ToStringMultipath(const PubkeyProvider& change, std::string& out) const override
+    {
+        const auto* other{dynamic_cast<const BIP32PubkeyProvider*>(&change)};
+        if (!other || m_root_extkey != other->m_root_extkey || m_derive != other->m_derive || m_apostrophe != other->m_apostrophe) return false;
+        const auto path{FormatMultipathKeypath(m_path, other->m_path, m_apostrophe)};
+        if (!path) return false;
+        out = EncodeExtPubKey(m_root_extkey) + *path;
+        if (IsRange()) {
+            out += "/*";
+            if (m_derive == DeriveType::HARDENED_RANGED) out += m_apostrophe ? '\'' : 'h';
+        }
+        return true;
+    }
     bool ToPrivateString(const SigningProvider& arg, std::string& out) const override
     {
         CExtKey key;
@@ -734,6 +803,29 @@ public:
         }
         return out;
     }
+    bool ToStringMultipath(const PubkeyProvider& change, std::string& out) const override
+    {
+        const auto* other{dynamic_cast<const MuSigPubkeyProvider*>(&change)};
+        if (!other || m_derive != other->m_derive || m_participants.size() != other->m_participants.size()) return false;
+        out = "musig(";
+        bool participant_multipath{false};
+        for (size_t i = 0; i < m_participants.size(); ++i) {
+            if (i) out += ",";
+            std::string tmp;
+            if (!m_participants[i]->ToStringMultipath(*other->m_participants[i], tmp)) return false;
+            participant_multipath |= tmp.find('<') != std::string::npos;
+            out += tmp;
+        }
+        out += ")";
+        const auto path{FormatMultipathKeypath(m_path, other->m_path, /*apostrophe=*/false)};
+        // Cannot have multipath participant keys if musig() is also multipath
+        if (!path || (participant_multipath && path->find('<') != std::string::npos)) return false;
+        out += *path;
+        if (IsRangedDerivation()) {
+            out += "/*";
+        }
+        return true;
+    }
     bool ToPrivateString(const SigningProvider& arg, std::string& out) const override
     {
         bool any_privkeys = false;
@@ -875,6 +967,7 @@ public:
         PRIVATE,
         NORMALIZED,
         COMPAT, // string calculation that mustn't change over time to stay compatible with previous software versions
+        MULTIPATH, // combine with a change counterpart descriptor into the multipath string both were derived from
     };
 
     // NOLINTNEXTLINE(misc-no-recursion)
@@ -915,17 +1008,16 @@ public:
     }
 
     // NOLINTNEXTLINE(misc-no-recursion)
-    virtual bool ToStringSubScriptHelper(const SigningProvider* arg, std::string& ret, const StringType type, const DescriptorCache* cache = nullptr) const
+    virtual bool ToStringSubScriptHelper(const SigningProvider* arg, std::string& ret, const StringType type, const DescriptorCache* cache = nullptr, const DescriptorImpl* multipath_change = nullptr) const
     {
-        size_t pos = 0;
         bool is_private{type == StringType::PRIVATE};
         // For private string output, track if at least one key has a private key available.
         // Initialize to true for non-private types.
         bool any_success{!is_private};
-        for (const auto& scriptarg : m_subdescriptor_args) {
-            if (pos++) ret += ",";
+        for (size_t i = 0; i < m_subdescriptor_args.size(); ++i) {
+            if (i) ret += ",";
             std::string tmp;
-            bool subscript_res{scriptarg->ToStringHelper(arg, tmp, type, cache)};
+            bool subscript_res{m_subdescriptor_args[i]->ToStringHelper(arg, tmp, type, cache, multipath_change ? multipath_change->m_subdescriptor_args[i].get() : nullptr)};
             if (!is_private && !subscript_res) return false;
             any_success = any_success || subscript_res;
             ret += tmp;
@@ -934,9 +1026,20 @@ public:
     }
 
     // NOLINTNEXTLINE(misc-no-recursion)
-    virtual bool ToStringHelper(const SigningProvider* arg, std::string& out, const StringType type, const DescriptorCache* cache = nullptr) const
+    virtual bool ToStringHelper(const SigningProvider* arg, std::string& out, const StringType type, const DescriptorCache* cache = nullptr, const DescriptorImpl* multipath_change = nullptr) const
     {
         std::string extra = ToStringExtra();
+        if (type == StringType::MULTIPATH) {
+            // The change counterpart must be identical apart from the
+            // derivation paths inside its pubkey arguments.
+            if (!multipath_change ||
+                m_name != multipath_change->m_name ||
+                extra != multipath_change->ToStringExtra() ||
+                m_pubkey_args.size() != multipath_change->m_pubkey_args.size() ||
+                m_subdescriptor_args.size() != multipath_change->m_subdescriptor_args.size()) {
+                return false;
+            }
+        }
         size_t pos = extra.size() > 0 ? 1 : 0;
         std::string ret = m_name + "(" + extra;
         bool is_private{type == StringType::PRIVATE};
@@ -944,7 +1047,8 @@ public:
         // Initialize to true for non-private types.
         bool any_success{!is_private};
 
-        for (const auto& pubkey : m_pubkey_args) {
+        for (size_t i = 0; i < m_pubkey_args.size(); ++i) {
+            const auto& pubkey{m_pubkey_args[i]};
             if (pos++) ret += ",";
             std::string tmp;
             switch (type) {
@@ -960,11 +1064,14 @@ public:
                 case StringType::COMPAT:
                     tmp = pubkey->ToString(PubkeyProvider::StringType::COMPAT);
                     break;
+                case StringType::MULTIPATH:
+                    if (!pubkey->ToStringMultipath(*multipath_change->m_pubkey_args[i], tmp)) return false;
+                    break;
             }
             ret += tmp;
         }
         std::string subscript;
-        bool subscript_res{ToStringSubScriptHelper(arg, subscript, type, cache)};
+        bool subscript_res{ToStringSubScriptHelper(arg, subscript, type, cache, multipath_change)};
         if (!is_private && !subscript_res) return false;
         any_success = any_success || subscript_res;
         if (pos && subscript.size()) ret += ',';
@@ -990,6 +1097,16 @@ public:
     {
         bool ret = ToStringHelper(&arg, out, StringType::NORMALIZED, cache);
         out = AddChecksum(out);
+        return ret;
+    }
+
+    std::optional<std::string> ToStringMultipath(const Descriptor& change) const override final
+    {
+        const auto* change_impl{dynamic_cast<const DescriptorImpl*>(&change)};
+        std::string ret;
+        if (!change_impl || !ToStringHelper(nullptr, ret, StringType::MULTIPATH, nullptr, change_impl)) return std::nullopt;
+        // A receive/change descriptor pair differs in at least one derivation path element
+        if (ret.find('<') == std::string::npos) return std::nullopt;
         return ret;
     }
 
@@ -1520,8 +1637,13 @@ protected:
         out.tr_trees[output] = builder;
         return Vector(GetScriptForDestination(output));
     }
-    bool ToStringSubScriptHelper(const SigningProvider* arg, std::string& ret, const StringType type, const DescriptorCache* cache = nullptr) const override
+    bool ToStringSubScriptHelper(const SigningProvider* arg, std::string& ret, const StringType type, const DescriptorCache* cache = nullptr, const DescriptorImpl* multipath_change = nullptr) const override
     {
+        const TRDescriptor* change_tr{nullptr};
+        if (type == StringType::MULTIPATH) {
+            change_tr = dynamic_cast<const TRDescriptor*>(multipath_change);
+            if (!change_tr || change_tr->m_depths != m_depths) return false;
+        }
         if (m_depths.empty()) {
             // If there are no sub-descriptors and a PRIVATE string
             // is requested, return `false` to indicate that the presence
@@ -1543,7 +1665,7 @@ protected:
                 path.push_back(false);
             }
             std::string tmp;
-            bool subscript_res{m_subdescriptor_args[pos]->ToStringHelper(arg, tmp, type, cache)};
+            bool subscript_res{m_subdescriptor_args[pos]->ToStringHelper(arg, tmp, type, cache, change_tr ? change_tr->m_subdescriptor_args[pos].get() : nullptr)};
             if (!is_private && !subscript_res) return false;
             any_success = any_success || subscript_res;
             ret += tmp;
@@ -1638,13 +1760,16 @@ class StringMaker {
     //! StringType to serialize keys
     const DescriptorImpl::StringType m_type;
     const DescriptorCache* m_cache;
+    //! Counterpart keys of the change descriptor for StringType::MULTIPATH.
+    const std::vector<std::unique_ptr<PubkeyProvider>>* m_multipath_change;
 
 public:
     StringMaker(const SigningProvider* arg LIFETIMEBOUND,
                 const std::vector<std::unique_ptr<PubkeyProvider>>& pubkeys LIFETIMEBOUND,
                 DescriptorImpl::StringType type,
-                const DescriptorCache* cache LIFETIMEBOUND)
-        : m_arg(arg), m_pubkeys(pubkeys), m_type(type), m_cache(cache) {}
+                const DescriptorCache* cache LIFETIMEBOUND,
+                const std::vector<std::unique_ptr<PubkeyProvider>>* multipath_change LIFETIMEBOUND = nullptr)
+        : m_arg(arg), m_pubkeys(pubkeys), m_type(type), m_cache(cache), m_multipath_change(multipath_change) {}
 
     std::optional<std::string> ToString(uint32_t key, bool& has_priv_key) const
     {
@@ -1662,6 +1787,9 @@ public:
             break;
         case DescriptorImpl::StringType::COMPAT:
             ret = m_pubkeys[key]->ToString(PubkeyProvider::StringType::COMPAT);
+            break;
+        case DescriptorImpl::StringType::MULTIPATH:
+            if (!m_pubkeys[key]->ToStringMultipath(*(*m_multipath_change)[key], ret)) return {};
             break;
         }
         return ret;
@@ -1710,10 +1838,22 @@ public:
     }
 
     bool ToStringHelper(const SigningProvider* arg, std::string& out, const StringType type,
-                        const DescriptorCache* cache = nullptr) const override
+                        const DescriptorCache* cache = nullptr, const DescriptorImpl* multipath_change = nullptr) const override
     {
+        const std::vector<std::unique_ptr<PubkeyProvider>>* multipath_change_pubkeys{nullptr};
+        if (type == StringType::MULTIPATH) {
+            const auto* other{dynamic_cast<const MiniscriptDescriptor*>(multipath_change)};
+            if (!other || m_pubkey_args.size() != other->m_pubkey_args.size()) return false;
+            // The miniscript itself must be identical; compare with the key
+            // expressions replaced by their indices.
+            struct KeyIndexMaker {
+                std::optional<std::string> ToString(uint32_t key, bool&) const { return util::ToString(key); }
+            };
+            if (m_node.ToString(KeyIndexMaker{}) != other->m_node.ToString(KeyIndexMaker{})) return false;
+            multipath_change_pubkeys = &other->m_pubkey_args;
+        }
         bool has_priv_key{false};
-        auto res = m_node.ToString(StringMaker(arg, m_pubkey_args, type, cache), has_priv_key);
+        auto res = m_node.ToString(StringMaker(arg, m_pubkey_args, type, cache, multipath_change_pubkeys), has_priv_key);
         if (res) out = *res;
         if (type == StringType::PRIVATE) {
             Assume(res.has_value());

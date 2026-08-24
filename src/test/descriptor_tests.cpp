@@ -1418,4 +1418,64 @@ BOOST_AUTO_TEST_CASE(unused_descriptor_test)
     CheckUnused("unused(xprvA1RpRA33e1JQ7ifknakTFpgNXPmW2YvmhqLQYMmrj4xJXXWYpDPS3xz7iAxn8L39njGVyuoseXzU6rcxFLJ8HFsTjSyQbLYnMpCqE2VbFWc/0h/0h/1)", "unused(xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0h/0h/1)");
 }
 
+BOOST_AUTO_TEST_CASE(descriptor_to_string_multipath)
+{
+    const std::string xpub_a{"xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL"};
+    const std::string xpub_b{"xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y"};
+    const std::string pubkey{"03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd"};
+
+    const auto parse_multipath{[](const std::string& desc) {
+        FlatSigningProvider keys;
+        std::string error;
+        auto parsed{Parse(desc, keys, error)};
+        BOOST_REQUIRE_MESSAGE(parsed.size() == 2, desc + ": " + error);
+        return parsed;
+    }};
+
+    // Combining the expanded receive and change descriptors roundtrips the multipath descriptor
+    for (const std::string& multipath_desc : std::vector<std::string>{
+        "pkh(" + xpub_a + "/<0;1>/*)",
+        "sh(wpkh(" + xpub_a + "/<0;1>/*))",
+        "wpkh(" + xpub_a + "/<0;1>/*)",
+        "tr(" + xpub_a + "/<0;1>/*)",
+        "wsh(sortedmulti(2," + xpub_a + "/<0;1>/*," + xpub_b + "/<0;1>/*))",
+        // A key expression without a multipath element keeps its own path
+        "wsh(multi(2," + xpub_a + "/<0;1>/*," + xpub_b + "/5/*))",
+        "wsh(multi(2," + xpub_a + "/<0;1>/*," + xpub_b + "/5h/6/*))",
+        "tr(" + xpub_a + "/<0;1>/*,{pk(" + xpub_b + "/<0;1>/*),pk(" + pubkey + ")})",
+        "tr(musig(" + xpub_a + "," + xpub_b + ")/<0;1>/*)",
+        "tr(" + pubkey + ",pk(musig(" + xpub_a + "/<0;1>/*," + xpub_b + ")))",
+        // Index pairs other than <0;1>, at other depths, unranged, hardened, and shared leading digits
+        "wpkh(" + xpub_a + "/<2;3>/*)",
+        "wsh(multi(2," + xpub_a + "/<0;1>/*," + xpub_b + "/<2;3>/*))",
+        "wpkh(" + xpub_a + "/<0;1>/2/*)",
+        "pk(" + xpub_a + "/<0;1>)",
+        "pkh(" + xpub_a + "/9h/<0h;1h>)",
+        "pkh(" + xpub_a + "/9'/<0';1'>)",
+        "wpkh(" + xpub_b + "/<12;13>/*)",
+        "wpkh(" + xpub_b + "/<1;10>/*)",
+        // Miniscript
+        "wsh(or_d(pk([2557c640/48h/1h/0h/2h]xpub6ArU6mnJDxmynaVKLV8FiFDaA9bVUw6efLEqt99qGK6B4QVWiNjc21JNFKkXNjgT8NCUmpFpSSBrYFtWEAqGirbqT4J1bRFpWyAnYdzmZUm/<0;1>/*),and_v(v:pkh([00aabb22/48h/1h/0h/2h]xpub6ArU6mnJDxmyogzqia2fdnD3gWHvfDtZAHdmKx4ccJwUBZd3rpgQM9qgmPAn1mqT2yh81uvGGohMkg3fNLoXZzn7sRo4a1X3KnCAVot2yuS/<0;1>/*),older(2))))",
+    }) {
+        auto parsed{parse_multipath(multipath_desc)};
+        const auto combined{parsed.at(0)->ToStringMultipath(*parsed.at(1))};
+        BOOST_REQUIRE_MESSAGE(combined, multipath_desc);
+        BOOST_CHECK_EQUAL(*combined, multipath_desc);
+
+        // The reverse order is not a receive/change pair
+        BOOST_CHECK(!parsed.at(1)->ToStringMultipath(*parsed.at(0)));
+        // Identical descriptors do not form a pair either
+        BOOST_CHECK(!parsed.at(0)->ToStringMultipath(*parsed.at(0)));
+    }
+
+    // Elements with mismatching hardened markers do not combine (vector from BIP 389)
+    auto hardened_mismatch{parse_multipath("pkh(" + xpub_a + "/<2147483647h;0>/0)")};
+    BOOST_CHECK(!hardened_mismatch.at(0)->ToStringMultipath(*hardened_mismatch.at(1)));
+
+    // Halves of different multipath descriptors do not combine
+    auto multi_2of2{parse_multipath("wsh(multi(2," + xpub_a + "/<0;1>/*," + xpub_b + "/<0;1>/*))")};
+    auto multi_1of2{parse_multipath("wsh(multi(1," + xpub_a + "/<0;1>/*," + xpub_b + "/<0;1>/*))")};
+    BOOST_CHECK(!multi_2of2.at(0)->ToStringMultipath(*multi_1of2.at(1)));
+}
+
 BOOST_AUTO_TEST_SUITE_END()
