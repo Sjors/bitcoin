@@ -190,6 +190,58 @@ class ListDescriptorsTest(BitcoinTestFramework):
             if desc not in expected_descs:
                 raise AssertionError(f"{desc} missing")
 
+        self.log.info('Test multipath field for the default wallet descriptor pairs')
+        result = node.get_wallet_rpc('w3').listdescriptors()
+        # Only the receive descriptor of each pair has a multipath field
+        for item in result['descriptors']:
+            if item['internal']:
+                assert 'multipath' not in item
+            else:
+                assert_equal(item['multipath'], item['desc'].split('#')[0].replace('/0/*', '/<0;1>/*'))
+        assert_equal(len({d['multipath'] for d in result['descriptors'] if not d['internal']}), 4)
+
+        self.log.info('Test multipath field roundtrips imported multipath descriptors')
+        node.createwallet(wallet_name='w7', blank=True, disable_private_keys=True)
+        wallet = node.get_wallet_rpc('w7')
+        multipath_desc = f'wsh(sortedmulti(2,{xpubs[0]}/<0;1>/*,{xpubs[1]}/<0;1>/*))'
+        other_index_desc = f'wpkh({xpubs[2]}/<2;3>/*)'
+        wallet.importdescriptors([{
+            'desc': descsum_create(multipath_desc),
+            'timestamp': TIME_GENESIS_BLOCK,
+            'active': True,
+        }, {
+            'desc': descsum_create(other_index_desc),
+            'timestamp': TIME_GENESIS_BLOCK,
+        }])
+        result = wallet.listdescriptors()
+        assert_equal(4, len(result['descriptors']))
+        for item in result['descriptors']:
+            desc = item['desc'].split('#')[0]
+            if '/0/*' in desc:
+                assert_equal(item['multipath'], multipath_desc)
+            elif '/2/*' in desc:
+                assert_equal(item['multipath'], other_index_desc)
+            else:
+                # Change descriptors do not repeat the multipath descriptor
+                assert 'multipath' not in item
+
+        self.log.info('Test multipath field stays public when listing private descriptors')
+        node.createwallet(wallet_name='w8', blank=True)
+        wallet = node.get_wallet_rpc('w8')
+        extended_key = ExtendedPrivateKey.generate()
+        wallet.importdescriptors([{
+            'desc': descsum_create(f'wpkh({extended_key.to_string()}/<0;1>/*)'),
+            'timestamp': TIME_GENESIS_BLOCK,
+            'active': True,
+        }])
+        result = wallet.listdescriptors(True)
+        assert_equal(2, len(result['descriptors']))
+        for item in result['descriptors']:
+            assert extended_key.to_string() in item['desc']
+            if '/0/*' in item['desc']:
+                assert_equal(item['multipath'], f'wpkh({extended_key.pubkey().to_string()}/<0;1>/*)')
+            else:
+                assert 'multipath' not in item
 
 
 if __name__ == '__main__':

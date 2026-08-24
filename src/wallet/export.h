@@ -23,6 +23,9 @@ struct WalletDescInfo {
     std::optional<bool> internal;
     std::optional<std::pair<int64_t,int64_t>> range;
     int64_t next_index;
+    //! The multipath descriptor this descriptor and its receive or change
+    //! counterpart were derived from, if such a counterpart exists.
+    std::optional<std::string> multipath;
 };
 
 //! Export the descriptors from a wallet so that they can be imported elsewhere

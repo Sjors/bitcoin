@@ -3461,6 +3461,21 @@ std::set<ScriptPubKeyMan*> CWallet::GetAllScriptPubKeyMans() const
     return spk_mans;
 }
 
+std::optional<std::string> CWallet::GetMultipathDescriptor(const DescriptorScriptPubKeyMan& spkm, bool as_change) const
+{
+    AssertLockHeld(cs_wallet);
+
+    for (const auto& spk_man : GetAllScriptPubKeyMans()) {
+        const auto other{dynamic_cast<DescriptorScriptPubKeyMan*>(spk_man)};
+        if (!other || other == &spkm) continue;
+        if (auto res{DeriveMultipathDescriptor(spkm, *other)}) return *res;
+        if (as_change) {
+            if (auto res{DeriveMultipathDescriptor(*other, spkm)}) return *res;
+        }
+    }
+    return std::nullopt;
+}
+
 ScriptPubKeyMan* CWallet::GetScriptPubKeyMan(const OutputType& type, bool internal) const
 {
     const std::map<OutputType, ScriptPubKeyMan*>& spk_managers = internal ? m_internal_spk_managers : m_external_spk_managers;

@@ -964,6 +964,12 @@ public:
     //! Returns all unique ScriptPubKeyMans
     std::set<ScriptPubKeyMan*> GetAllScriptPubKeyMans() const;
 
+    //! Reconstruct the multipath descriptor that the given SPKM and its
+    //! counterpart in this wallet were derived from, or std::nullopt if no
+    //! such counterpart exists. The SPKM is treated as the receive half of
+    //! the pair; pass as_change to also try it as the change half.
+    std::optional<std::string> GetMultipathDescriptor(const DescriptorScriptPubKeyMan& spkm, bool as_change) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
     //! Get the ScriptPubKeyMan for the given OutputType and internal/external chain.
     ScriptPubKeyMan* GetScriptPubKeyMan(const OutputType& type, bool internal) const;
 

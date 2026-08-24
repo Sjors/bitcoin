@@ -19,6 +19,7 @@ util::Expected<std::vector<WalletDescInfo>, std::string> ExportDescriptors(const
 {
     AssertLockHeld(wallet.cs_wallet);
     std::vector<WalletDescInfo> wallet_descriptors;
+    std::vector<DescriptorScriptPubKeyMan*> desc_spk_mans;
     for (const auto& spk_man : wallet.GetAllScriptPubKeyMans()) {
         const auto desc_spk_man = dynamic_cast<DescriptorScriptPubKeyMan*>(spk_man);
         if (!desc_spk_man) {
@@ -39,6 +40,12 @@ util::Expected<std::vector<WalletDescInfo>, std::string> ExportDescriptors(const
             is_range ? std::optional(std::make_pair(wallet_descriptor.GetStart(), wallet_descriptor.GetEnd())) : std::nullopt,
             wallet_descriptor.GetNext()
         );
+        desc_spk_mans.push_back(desc_spk_man);
+    }
+    // Look up multipath counterparts in a second pass, since pairing locks
+    // two cs_desc_man at a time.
+    for (size_t i{0}; i < desc_spk_mans.size(); ++i) {
+        wallet_descriptors[i].multipath = wallet.GetMultipathDescriptor(*desc_spk_mans[i], /*as_change=*/false);
     }
     return wallet_descriptors;
 }
