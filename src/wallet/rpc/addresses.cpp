@@ -429,6 +429,7 @@ RPCMethod getaddressinfo()
                         {RPCResult::Type::BOOL, "solvable", "If we know how to spend coins sent to this address, ignoring the possible lack of private keys."},
                         {RPCResult::Type::STR, "desc", /*optional=*/true, "A descriptor for spending coins sent to this address (only when solvable)."},
                         {RPCResult::Type::STR, "parent_desc", /*optional=*/true, "The descriptor used to derive this address if this is a descriptor wallet"},
+                        {RPCResult::Type::STR, "parent_multipath", /*optional=*/true, "The multipath descriptor that the parent descriptor and its receive or change counterpart were derived from; only present when the wallet contains such a counterpart"},
                         {RPCResult::Type::BOOL, "isscript", /*optional=*/true, "If the key is a script."},
                         {RPCResult::Type::BOOL, "ischange", "If the address was used for change output."},
                         {RPCResult::Type::BOOL, "iswitness", "If the address is a witness address."},
@@ -519,6 +520,9 @@ RPCMethod getaddressinfo()
         std::string desc_str;
         if (desc_spk_man->GetDescriptorString(desc_str, /*priv=*/false)) {
             ret.pushKV("parent_desc", desc_str);
+        }
+        if (const auto multipath{pwallet->GetMultipathDescriptor(*desc_spk_man, /*as_change=*/true)}) {
+            ret.pushKV("parent_multipath", *multipath);
         }
     }
 

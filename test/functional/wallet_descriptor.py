@@ -60,6 +60,15 @@ class WalletDescriptorTest(BitcoinTestFramework):
         assert_equal(found_hardened_in_origin, True)
         assert_equal(found_hardened_after_origin, False)
 
+        self.log.info("Check that parent_multipath combines the receive and change descriptor pair")
+        parent_multipath = wallet.getaddressinfo(addr)["parent_multipath"]
+        assert_equal(parent_multipath, parent_desc.split("#")[0].replace("/0/*", "/<0;1>/*"))
+
+        # A change address reports the same multipath descriptor
+        change_info = wallet.getaddressinfo(wallet.getrawchangeaddress())
+        assert_equal(change_info["parent_multipath"], parent_multipath)
+        assert_equal(change_info["parent_desc"].split("#")[0].replace("/1/*", "/<0;1>/*"), parent_multipath)
+
         # Send some coins so we can check listunspent, listtransactions, listunspent, and gettransaction
         since_block = self.nodes[0].getbestblockhash()
         txid = default_wallet.sendtoaddress(addr, 1)
