@@ -3819,7 +3819,7 @@ util::Result<std::reference_wrapper<DescriptorScriptPubKeyMan>> CWallet::AddWall
 
         // Write the existing cache to disk
         WalletBatch batch(GetDatabase());
-        if (!batch.WriteDescriptorCacheItems(id, desc.cache)) {
+        if (!batch.WriteDescriptorCacheItems(id, desc.CacheAt())) {
             return util::Error{_("Unable to write descriptor cache")};
         }
     }

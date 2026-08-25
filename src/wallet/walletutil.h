@@ -62,39 +62,50 @@ fs::path GetWalletDir();
 /** Descriptor with some wallet metadata */
 class WalletDescriptor
 {
+public:
+    //! Address generation state, kept per derivation path of a multipath descriptor
+    struct PathState {
+        int32_t next_index = 0; // Position of the next item to generate
+        int32_t range_end = 0; // Item after the last; end of range, exclusive, i.e. [range_start, range_end). This will increment with each TopUp()
+        DescriptorCache cache;
+    };
+
 private:
-    int32_t range_start = 0; // First item in range; start of range, inclusive, i.e. [range_start, range_end). This never changes.
-    int32_t next_index = 0; // Position of the next item to generate
-    int32_t range_end = 0; // Item after the last; end of range, exclusive, i.e. [range_start, range_end). This will increment with each TopUp()
+    int32_t range_start = 0; // First item in range; start of range, inclusive, i.e. [range_start, range_end). Shared by all paths and never changes.
+    std::vector<PathState> m_paths{PathState{}}; // One entry per derivation path; size 1 for single path descriptors
 public:
     std::shared_ptr<Descriptor> descriptor;
     uint256 id; // Descriptor ID (calculated once at descriptor initialization/deserialization)
     uint64_t creation_time = 0;
-    DescriptorCache cache;
+
+    size_t NumPaths() const { return m_paths.size(); }
+
+    DescriptorCache& CacheAt(size_t path = 0) { return m_paths.at(path).cache; }
+    const DescriptorCache& CacheAt(size_t path = 0) const { return m_paths.at(path).cache; }
 
     int32_t GetStart() const { return range_start; }
-    int32_t GetNext() const { return next_index; }
-    int32_t GetEnd() const { return range_end; }
+    int32_t GetNext(size_t path = 0) const { return m_paths.at(path).next_index; }
+    int32_t GetEnd(size_t path = 0) const { return m_paths.at(path).range_end; }
 
     //! Increments the next_index of the descriptor.
-    void IncNext()
+    void IncNext(size_t path = 0)
     {
-        next_index++;
+        m_paths.at(path).next_index++;
     }
 
     //! Increments the next_index of the descriptor.
-    void DecNext()
+    void DecNext(size_t path = 0)
     {
-        next_index--;
+        m_paths.at(path).next_index--;
     }
 
     //! Sets the range_end of the descriptor.
-    void SetEnd(int32_t end)
+    void SetEnd(size_t path, int32_t end)
     {
         if (!descriptor->IsRange()) {
             CHECK_NONFATAL(end == 1);
         }
-        range_end = end;
+        m_paths.at(path).range_end = end;
     }
 
     void DeserializeDescriptor(const std::string& str)
@@ -116,15 +127,16 @@ public:
     {
         std::string descriptor_str;
         SER_WRITE(obj, descriptor_str = obj.descriptor->ToString());
-        READWRITE(descriptor_str, obj.creation_time, obj.next_index, obj.range_start, obj.range_end);
+        READWRITE(descriptor_str, obj.creation_time, obj.m_paths.at(0).next_index, obj.range_start, obj.m_paths.at(0).range_end);
         SER_READ(obj, obj.DeserializeDescriptor(descriptor_str));
     }
 
     WalletDescriptor() = default;
     WalletDescriptor(std::shared_ptr<Descriptor> descriptor, uint64_t creation_time, int32_t range_start, int32_t range_end, int32_t next_index)
     : range_start(descriptor->IsRange() ? range_start : 0),
-      next_index(next_index),
-      range_end(descriptor->IsRange() ? range_end : 1),
+      m_paths{{next_index,
+               descriptor->IsRange() ? range_end : 1,
+               DescriptorCache{}}},
       descriptor(descriptor),
       id(DescriptorID(*descriptor)),
       creation_time(creation_time) {}

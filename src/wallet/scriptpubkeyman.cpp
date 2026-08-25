@@ -900,7 +900,7 @@ void DescriptorScriptPubKeyMan::SetRangeEnd(int32_t end)
     AssertLockHeld(cs_desc_man);
 
     const auto old_can = CanGetAddresses();
-    m_wallet_descriptor.SetEnd(end);
+    m_wallet_descriptor.SetEnd(/*path=*/0, end);
     const auto new_can = CanGetAddresses();
     if (old_can != new_can) {
         NotifyCanGetAddressesChanged();
@@ -931,7 +931,7 @@ util::Result<CTxDestination> DescriptorScriptPubKeyMan::GetNewDestination(const 
             // We can't generate anymore keys
             return util::Error{_("Error: Keypool ran out, please call keypoolrefill first")};
         }
-        if (!m_wallet_descriptor.descriptor->ExpandFromCache(m_wallet_descriptor.GetNext(), m_wallet_descriptor.cache, scripts_temp, out_keys)) {
+        if (!m_wallet_descriptor.descriptor->ExpandFromCache(m_wallet_descriptor.GetNext(), m_wallet_descriptor.CacheAt(), scripts_temp, out_keys)) {
             // We can't generate anymore keys
             return util::Error{_("Error: Keypool ran out, please call keypoolrefill first")};
         }
@@ -1111,7 +1111,7 @@ bool DescriptorScriptPubKeyMan::TopUpWithDB(WalletBatch& batch, unsigned int siz
         std::vector<CScript> scripts_temp;
         DescriptorCache temp_cache;
         // Maybe we have a cached xpub and we can expand from the cache first
-        if (!m_wallet_descriptor.descriptor->ExpandFromCache(i, m_wallet_descriptor.cache, scripts_temp, out_keys)) {
+        if (!m_wallet_descriptor.descriptor->ExpandFromCache(i, m_wallet_descriptor.CacheAt(), scripts_temp, out_keys)) {
             if (!m_wallet_descriptor.descriptor->Expand(i, provider, scripts_temp, out_keys, &temp_cache)) return false;
         }
         // Add all of the scriptPubKeys to the scriptPubKey set
@@ -1129,7 +1129,7 @@ bool DescriptorScriptPubKeyMan::TopUpWithDB(WalletBatch& batch, unsigned int siz
             m_map_pubkeys[pubkey] = i;
         }
         // Merge and write the cache
-        DescriptorCache new_items = m_wallet_descriptor.cache.MergeAndDiff(temp_cache);
+        DescriptorCache new_items = m_wallet_descriptor.CacheAt().MergeAndDiff(temp_cache);
         if (!batch.WriteDescriptorCacheItems(id, new_items)) {
             throw std::runtime_error(std::string(__func__) + ": writing cache items failed");
         }
@@ -1156,7 +1156,7 @@ std::vector<WalletDestination> DescriptorScriptPubKeyMan::MarkUnusedAddresses(co
             auto out_keys = std::make_unique<FlatSigningProvider>();
             std::vector<CScript> scripts_temp;
             while (index >= m_wallet_descriptor.GetNext()) {
-                if (!m_wallet_descriptor.descriptor->ExpandFromCache(m_wallet_descriptor.GetNext(), m_wallet_descriptor.cache, scripts_temp, *out_keys)) {
+                if (!m_wallet_descriptor.descriptor->ExpandFromCache(m_wallet_descriptor.GetNext(), m_wallet_descriptor.CacheAt(), scripts_temp, *out_keys)) {
                     throw std::runtime_error(std::string(__func__) + ": Unable to expand descriptor from cache");
                 }
                 CTxDestination dest;
@@ -1327,7 +1327,7 @@ std::unique_ptr<FlatSigningProvider> DescriptorScriptPubKeyMan::GetSigningProvid
     } else {
         // Get the scripts, keys, and key origins for this script
         std::vector<CScript> scripts_temp;
-        if (!m_wallet_descriptor.descriptor->ExpandFromCache(index, m_wallet_descriptor.cache, scripts_temp, *out_keys)) return nullptr;
+        if (!m_wallet_descriptor.descriptor->ExpandFromCache(index, m_wallet_descriptor.CacheAt(), scripts_temp, *out_keys)) return nullptr;
 
         // Cache SigningProvider so we don't need to re-derive if we need this SigningProvider again
         m_map_signing_providers[index] = *out_keys;
@@ -1514,7 +1514,7 @@ void DescriptorScriptPubKeyMan::Load()
     for (int32_t i = m_wallet_descriptor.GetStart(); i < m_wallet_descriptor.GetEnd(); ++i) {
         FlatSigningProvider out_keys;
         std::vector<CScript> scripts_temp;
-        if (!m_wallet_descriptor.descriptor->ExpandFromCache(i, m_wallet_descriptor.cache, scripts_temp, out_keys)) {
+        if (!m_wallet_descriptor.descriptor->ExpandFromCache(i, m_wallet_descriptor.CacheAt(), scripts_temp, out_keys)) {
             throw std::runtime_error("Error: Unable to expand wallet descriptor from cache");
         }
         // Add all of the scriptPubKeys to the scriptPubKey set
@@ -1596,7 +1596,7 @@ bool DescriptorScriptPubKeyMan::GetDescriptorString(std::string& out, const bool
         return m_wallet_descriptor.descriptor->ToPrivateString(provider, out);
     }
 
-    return m_wallet_descriptor.descriptor->ToNormalizedString(provider, out, &m_wallet_descriptor.cache);
+    return m_wallet_descriptor.descriptor->ToNormalizedString(provider, out, &m_wallet_descriptor.CacheAt());
 }
 
 void DescriptorScriptPubKeyMan::UpgradeDescriptorCache()
@@ -1607,7 +1607,7 @@ void DescriptorScriptPubKeyMan::UpgradeDescriptorCache()
     }
 
     // Skip if we have the last hardened xpub cache
-    if (m_wallet_descriptor.cache.GetCachedLastHardenedExtPubKeys().size() > 0) {
+    if (m_wallet_descriptor.CacheAt().GetCachedLastHardenedExtPubKeys().size() > 0) {
         return;
     }
 
@@ -1622,7 +1622,7 @@ void DescriptorScriptPubKeyMan::UpgradeDescriptorCache()
     }
 
     // Cache the last hardened xpubs
-    DescriptorCache diff = m_wallet_descriptor.cache.MergeAndDiff(temp_cache);
+    DescriptorCache diff = m_wallet_descriptor.CacheAt().MergeAndDiff(temp_cache);
     if (!WalletBatch(m_storage.GetDatabase()).WriteDescriptorCacheItems(GetID(), diff)) {
         throw std::runtime_error(std::string(__func__) + ": writing cache items failed");
     }

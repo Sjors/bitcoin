@@ -837,7 +837,7 @@ static DBErrors LoadDescriptorWalletRecords(CWallet* pwallet, DatabaseBatch& bat
         result = std::max(result, lh_cache_res.m_result);
 
         // Set the cache to the WalletDescriptor
-        desc.cache = cache;
+        desc.CacheAt() = cache;
 
         // Get unencrypted keys
         KeyMap keys;

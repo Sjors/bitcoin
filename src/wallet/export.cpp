@@ -109,7 +109,8 @@ util::Result<std::string> ExportWatchOnlyWallet(const CWallet& wallet, const fs:
             uint256 desc_id = w_desc.id;
             if (!w_desc.descriptor->CanSelfExpand()) {
                 DescriptorScriptPubKeyMan* desc_spkm = dynamic_cast<DescriptorScriptPubKeyMan*>(wallet.GetScriptPubKeyMan(desc_id));
-                w_desc.cache = WITH_LOCK(desc_spkm->cs_desc_man, return desc_spkm->GetWalletDescriptor().cache);
+                LOCK(desc_spkm->cs_desc_man);
+                w_desc.CacheAt() = desc_spkm->GetWalletDescriptor().CacheAt();
             }
 
             // Add to the watchonly wallet
