@@ -1068,7 +1068,13 @@ class ImportDescriptorsTest(BitcoinTestFramework):
         for _ in range(0, 10):
             assert_equal(w_multipath.getnewaddress(address_type="bech32"), w_multisplit.getnewaddress(address_type="bech32"))
             assert_equal(w_multipath.getrawchangeaddress(address_type="bech32"), w_multisplit.getrawchangeaddress(address_type="bech32"))
-        assert_equal(sorted(w_multipath.listdescriptors()["descriptors"], key=lambda x: x["desc"]), sorted(w_multisplit.listdescriptors()["descriptors"], key=lambda x: x["desc"]))
+        multipath_descs = sorted(w_multipath.listdescriptors()["descriptors"], key=lambda x: x["desc"])
+        multisplit_descs = sorted(w_multisplit.listdescriptors()["descriptors"], key=lambda x: x["desc"])
+        # The multipath_split wallet does not have a multipath field
+        assert all("multipath" not in desc for desc in multisplit_descs)
+        for desc in multipath_descs:
+            desc.pop("multipath")
+        assert_equal(multipath_descs, multisplit_descs)
 
         self.log.info("Test older() safety")
 
