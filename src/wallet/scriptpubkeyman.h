@@ -285,6 +285,8 @@ private:
     //! Highest cached descriptor range index, per derivation path
     std::vector<int32_t> m_max_cached_index;
 
+    //! Map the wallet's internal (change) flag to the descriptor path index
+    size_t PathOf(bool internal) const EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man) { return m_wallet_descriptor.IsMultipath() && internal ? 1 : 0; }
     //! Ensure m_max_cached_index has one entry per descriptor path
     void InitMaxCachedIndex() EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man) { m_max_cached_index.resize(m_wallet_descriptor.NumPaths(), -1); }
 
@@ -387,6 +389,11 @@ public:
     bool HaveCryptedKeys() const override;
 
     unsigned int GetKeyPoolSize() const override;
+    //! Get the keypool size for a single chain of a multipath descriptor
+    unsigned int GetKeyPoolSize(bool internal) const;
+
+    //! Whether this manages a multipath descriptor, covering both the receive and change chain
+    bool IsMultipathDescriptor() const;
 
     int64_t GetTimeFirstKey() const override;
 

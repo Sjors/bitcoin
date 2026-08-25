@@ -910,11 +910,12 @@ void DescriptorScriptPubKeyMan::SetRangeEnd(size_t path, int32_t end)
 util::Result<CTxDestination> DescriptorScriptPubKeyMan::GetNewDestination(const OutputType type, bool internal)
 {
     // Returns true if this descriptor supports getting new addresses. Conditions where we may be unable to fetch them (e.g. locked) are caught later
-    if (!CanGetAddresses()) {
+    if (!CanGetAddresses(internal)) {
         return util::Error{_("No addresses available")};
     }
     {
         LOCK(cs_desc_man);
+        const size_t path = PathOf(internal);
         assert(m_wallet_descriptor.descriptor->IsSingleType()); // This is a combo descriptor which should not be an active descriptor
         std::optional<OutputType> desc_addr_type = m_wallet_descriptor.descriptor->GetOutputType();
         assert(desc_addr_type);
@@ -927,11 +928,11 @@ util::Result<CTxDestination> DescriptorScriptPubKeyMan::GetNewDestination(const 
         // Get the scriptPubKey from the descriptor
         FlatSigningProvider out_keys;
         std::vector<CScript> scripts_temp;
-        if (m_wallet_descriptor.GetEnd() <= m_max_cached_index.at(0) && !TopUp(1)) {
+        if (m_wallet_descriptor.GetEnd(path) <= m_max_cached_index.at(path) && !TopUp(1)) {
             // We can't generate anymore keys
             return util::Error{_("Error: Keypool ran out, please call keypoolrefill first")};
         }
-        if (!m_wallet_descriptor.DescAt().ExpandFromCache(m_wallet_descriptor.GetNext(), m_wallet_descriptor.CacheAt(), scripts_temp, out_keys)) {
+        if (!m_wallet_descriptor.DescAt(path).ExpandFromCache(m_wallet_descriptor.GetNext(path), m_wallet_descriptor.CacheAt(path), scripts_temp, out_keys)) {
             // We can't generate anymore keys
             return util::Error{_("Error: Keypool ran out, please call keypoolrefill first")};
         }
@@ -940,7 +941,7 @@ util::Result<CTxDestination> DescriptorScriptPubKeyMan::GetNewDestination(const 
         if (!ExtractDestination(scripts_temp[0], dest)) {
             return util::Error{_("Error: Cannot extract destination from the generated scriptpubkey")}; // shouldn't happen
         }
-        IncIndex(/*path=*/0);
+        IncIndex(path);
         WalletBatch(m_storage.GetDatabase()).WriteDescriptor(GetID(), m_wallet_descriptor);
         return dest;
     }
@@ -1011,16 +1012,17 @@ util::Result<CTxDestination> DescriptorScriptPubKeyMan::GetReservedDestination(c
 {
     LOCK(cs_desc_man);
     auto op_dest = GetNewDestination(type, internal);
-    index = m_wallet_descriptor.GetNext() - 1;
+    index = m_wallet_descriptor.GetNext(PathOf(internal)) - 1;
     return op_dest;
 }
 
 void DescriptorScriptPubKeyMan::ReturnDestination(int64_t index, bool internal, const CTxDestination& addr)
 {
     LOCK(cs_desc_man);
+    const size_t path = PathOf(internal);
     // Only return when the index was the most recent
-    if (m_wallet_descriptor.GetNext() - 1 == index) {
-        DecIndex(/*path=*/0);
+    if (m_wallet_descriptor.GetNext(path) - 1 == index) {
+        DecIndex(path);
     }
     WalletBatch(m_storage.GetDatabase()).WriteDescriptor(GetID(), m_wallet_descriptor);
 }
@@ -1157,6 +1159,8 @@ std::vector<WalletDestination> DescriptorScriptPubKeyMan::MarkUnusedAddresses(co
     std::vector<WalletDestination> result;
     if (IsMine(script)) {
         const auto [index, path] = m_map_script_pub_keys[script];
+        // For a multipath descriptor, report which chain the address belongs to
+        const std::optional<bool> internal = m_wallet_descriptor.IsMultipath() ? std::optional<bool>(path == 1) : std::nullopt;
         if (index >= m_wallet_descriptor.GetNext(path)) {
             WalletLogPrintf("%s: Detected a used keypool item at index %d, mark all keypool items up to this item as used\n", __func__, index);
             auto out_keys = std::make_unique<FlatSigningProvider>();
@@ -1167,7 +1171,7 @@ std::vector<WalletDestination> DescriptorScriptPubKeyMan::MarkUnusedAddresses(co
                 }
                 CTxDestination dest;
                 ExtractDestination(scripts_temp[0], dest);
-                result.push_back({dest, std::nullopt});
+                result.push_back({dest, internal});
                 IncIndex(path);
             }
         }
@@ -1258,9 +1262,10 @@ bool DescriptorScriptPubKeyMan::CanGetAddresses(bool internal) const
     // We can only give out addresses from descriptors that are single type (not combo), ranged,
     // and either have cached keys or can generate more keys (ignoring encryption)
     LOCK(cs_desc_man);
+    const size_t path = PathOf(internal);
     return m_wallet_descriptor.descriptor->IsSingleType() &&
            m_wallet_descriptor.descriptor->IsRange() &&
-           (HavePrivateKeys() || m_wallet_descriptor.GetNext() < m_wallet_descriptor.GetEnd() || m_wallet_descriptor.descriptor->CanSelfExpand());
+           (HavePrivateKeys() || m_wallet_descriptor.GetNext(path) < m_wallet_descriptor.GetEnd(path) || m_wallet_descriptor.descriptor->CanSelfExpand());
 }
 
 bool DescriptorScriptPubKeyMan::HavePrivateKeys() const
@@ -1278,7 +1283,24 @@ bool DescriptorScriptPubKeyMan::HaveCryptedKeys() const
 unsigned int DescriptorScriptPubKeyMan::GetKeyPoolSize() const
 {
     LOCK(cs_desc_man);
-    return m_wallet_descriptor.GetEnd() - m_wallet_descriptor.GetNext();
+    unsigned int size{0};
+    for (size_t path = 0; path < m_wallet_descriptor.NumPaths(); ++path) {
+        size += m_wallet_descriptor.GetEnd(path) - m_wallet_descriptor.GetNext(path);
+    }
+    return size;
+}
+
+unsigned int DescriptorScriptPubKeyMan::GetKeyPoolSize(bool internal) const
+{
+    LOCK(cs_desc_man);
+    const size_t path = PathOf(internal);
+    return m_wallet_descriptor.GetEnd(path) - m_wallet_descriptor.GetNext(path);
+}
+
+bool DescriptorScriptPubKeyMan::IsMultipathDescriptor() const
+{
+    LOCK(cs_desc_man);
+    return m_wallet_descriptor.IsMultipath();
 }
 
 int64_t DescriptorScriptPubKeyMan::GetTimeFirstKey() const
@@ -1603,9 +1625,14 @@ bool DescriptorScriptPubKeyMan::GetDescriptorString(std::string& out, const bool
         // For the private version, always return the master key to avoid
         // exposing child private keys. The risk implications of exposing child
         // private keys together with the parent xpub may be non-obvious for users.
+        if (m_wallet_descriptor.IsMultipath()) return m_wallet_descriptor.multipath->ToPrivateString(provider, out);
         return m_wallet_descriptor.descriptor->ToPrivateString(provider, out);
     }
 
+    // For a multipath descriptor the last hardened xpubs are identical across
+    // paths (hardened multipath specifiers are rejected), so the first path's
+    // cache suffices for normalization.
+    if (m_wallet_descriptor.IsMultipath()) return m_wallet_descriptor.multipath->ToNormalizedString(provider, out, &m_wallet_descriptor.CacheAt(0));
     return m_wallet_descriptor.descriptor->ToNormalizedString(provider, out, &m_wallet_descriptor.CacheAt());
 }
 
@@ -1615,6 +1642,9 @@ void DescriptorScriptPubKeyMan::UpgradeDescriptorCache()
     if (m_storage.IsLocked() || m_storage.IsWalletFlagSet(WALLET_FLAG_LAST_HARDENED_XPUB_CACHED)) {
         return;
     }
+    // Multipath descriptors postdate the last hardened xpub cache upgrade, so they never need it
+    if (m_wallet_descriptor.IsMultipath()) return;
+
     // Skip if we have the last hardened xpub cache
     if (m_wallet_descriptor.CacheAt().GetCachedLastHardenedExtPubKeys().size() > 0) {
         return;
