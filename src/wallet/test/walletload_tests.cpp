@@ -92,5 +92,56 @@ BOOST_FIXTURE_TEST_CASE(wallet_load_descriptors, TestingSetup)
     }
 }
 
+BOOST_FIXTURE_TEST_CASE(wallet_load_multipath_descriptors, TestingSetup)
+{
+    bilingual_str error;
+    std::vector<bilingual_str> warnings;
+    std::unique_ptr<WalletDatabase> database = CreateMockableWalletDatabase();
+
+    const std::string desc_str{"wpkh(03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd)"};
+    FlatSigningProvider keys;
+    std::string parse_error;
+    auto parsed_descs = Parse(desc_str, keys, parse_error, /*require_checksum=*/false);
+    BOOST_REQUIRE_EQUAL(parsed_descs.size(), 1);
+    WalletDescriptor wallet_descriptor(std::move(parsed_descs[0]), 0, 0, 0, 0);
+    const uint256 desc_id{DescriptorID(*wallet_descriptor.descriptor)};
+
+    // A record referencing only known descriptors is loaded
+    const MultipathDescriptorRecord record("wpkh(record/<0;1>/*)", {desc_id});
+    {
+        WalletBatch batch(*database);
+        BOOST_CHECK(batch.WriteDescriptor(desc_id, wallet_descriptor));
+        BOOST_CHECK(batch.WriteMultipathDescriptor(record));
+    }
+    {
+        const std::shared_ptr<CWallet> wallet(new CWallet(m_node.chain.get(), "", std::move(database)));
+        BOOST_CHECK_EQUAL(wallet->PopulateWalletFromDB(error, warnings), DBErrors::LOAD_OK);
+        LOCK(wallet->cs_wallet);
+        const auto& multipath_descs = wallet->GetMultipathDescriptors();
+        BOOST_CHECK_EQUAL(multipath_descs.size(), 1);
+        BOOST_REQUIRE(multipath_descs.count(record.GetID()));
+        BOOST_CHECK_EQUAL(multipath_descs.at(record.GetID()).descriptor, record.descriptor);
+    }
+
+    // Wallet descriptors cannot be deleted, so a record referencing an
+    // unknown descriptor means the database is corrupted
+    database = CreateMockableWalletDatabase();
+    {
+        WalletBatch batch(*database);
+        BOOST_CHECK(batch.WriteDescriptor(desc_id, wallet_descriptor));
+        BOOST_CHECK(batch.WriteMultipathDescriptor(MultipathDescriptorRecord("wpkh(bad/<0;1>/*)", {desc_id, uint256::ONE})));
+    }
+    {
+        bool found = false;
+        DebugLogHelper log_helper("references unknown descriptor id", [&](const std::string* s) {
+            found = true;
+            return false;
+        });
+        const std::shared_ptr<CWallet> wallet(new CWallet(m_node.chain.get(), "", std::move(database)));
+        BOOST_CHECK_EQUAL(wallet->PopulateWalletFromDB(error, warnings), DBErrors::CORRUPT);
+        BOOST_CHECK(found); // The error must be logged
+    }
+}
+
 BOOST_AUTO_TEST_SUITE_END()
 } // namespace wallet

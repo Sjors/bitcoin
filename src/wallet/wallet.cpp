@@ -3851,6 +3851,24 @@ util::Result<std::reference_wrapper<DescriptorScriptPubKeyMan>> CWallet::AddWall
     return std::reference_wrapper(*spk_man);
 }
 
+void CWallet::LoadMultipathDescriptor(MultipathDescriptorRecord multipath_desc)
+{
+    AssertLockHeld(cs_wallet);
+    uint256 id = multipath_desc.GetID();
+    m_multipath_descriptors[id] = std::move(multipath_desc);
+}
+
+bool CWallet::AddMultipathDescriptor(WalletBatch& batch, MultipathDescriptorRecord multipath_desc)
+{
+    AssertLockHeld(cs_wallet);
+    for (const uint256& desc_id : multipath_desc.desc_ids) {
+        if (!GetScriptPubKeyMan(desc_id)) return false;
+    }
+    if (!batch.WriteMultipathDescriptor(multipath_desc)) return false;
+    LoadMultipathDescriptor(std::move(multipath_desc));
+    return true;
+}
+
 bool CWallet::MigrateToSQLite(bilingual_str& error)
 {
     AssertLockHeld(cs_wallet);
