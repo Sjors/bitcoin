@@ -7,6 +7,8 @@
 import os.path
 
 from test_framework.blocktools import COINBASE_MATURITY
+from test_framework.descriptors import descsum_create
+from test_framework.extendedkey import ExtendedPrivateKey
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal,
@@ -134,6 +136,84 @@ class WalletMultipathTest(BitcoinTestFramework):
         assert_equal(restored.getbalance(), balance)
         restored.unloadwallet()
 
+    def test_import_roundtrip(self):
+        self.log.info("Test importing exported multipath descriptors into a fresh multipath wallet")
+        node = self.nodes[0]
+
+        # An unused wallet's descriptors hand out identical addresses after a round trip
+        source = self.create_multipath_wallet("mp_source")
+        imported = self.create_multipath_wallet("mp_source_imported", blank=True)
+        result = imported.importdescriptors([{
+            "desc": item["desc"],
+            "timestamp": "now",
+            "active": True,
+        } for item in source.listdescriptors(True)["descriptors"]])
+        assert all(r["success"] for r in result)
+        assert_equal(sorted(d["desc"] for d in imported.listdescriptors()["descriptors"]),
+                     sorted(d["desc"] for d in source.listdescriptors()["descriptors"]))
+        for address_type in ("legacy", "p2sh-segwit", "bech32", "bech32m"):
+            assert_equal(imported.getnewaddress(address_type=address_type),
+                         source.getnewaddress(address_type=address_type))
+            assert_equal(imported.getrawchangeaddress(address_type=address_type),
+                         source.getrawchangeaddress(address_type=address_type))
+        source.unloadwallet()
+        imported.unloadwallet()
+
+        # A used wallet's funds, on both chains, are found by a rescan
+        wallet = node.get_wallet_rpc("mp")
+        with WalletUnlock(wallet, "pass"):
+            private_descriptors = wallet.listdescriptors(True)["descriptors"]
+        rescanned = self.create_multipath_wallet("mp_imported", blank=True)
+        result = rescanned.importdescriptors([{
+            "desc": item["desc"],
+            "timestamp": 0,
+            "active": True,
+        } for item in private_descriptors])
+        assert all(r["success"] for r in result)
+        assert_equal(rescanned.getbalance(), wallet.getbalance())
+        rescanned.unloadwallet()
+
+    def test_import_rejections(self):
+        self.log.info("Test that a multipath wallet rejects unsupported imports")
+        wallet = self.create_multipath_wallet("mp_strict", blank=True, disable_private_keys=True)
+        source = self.nodes[0].get_wallet_rpc("mp")
+        multipath_desc = next(d["desc"] for d in source.listdescriptors()["descriptors"] if d["desc"].startswith("wpkh("))
+
+        def import_desc(desc, **kwargs):
+            return wallet.importdescriptors([{"desc": desc, "timestamp": 0, **kwargs}])[0]
+
+        # Only multipath descriptors with exactly two paths are supported
+        single_path = descsum_create(multipath_desc.split("#")[0].replace("/<0;1>/", "/0/"))
+        result = import_desc(single_path)
+        assert_equal(result["success"], False)
+        assert "only supports multipath descriptors with exactly two derivation paths" in result["error"]["message"]
+
+        three_paths = descsum_create(multipath_desc.split("#")[0].replace("/<0;1>/", "/<0;1;2>/"))
+        result = import_desc(three_paths)
+        assert_equal(result["success"], False)
+        assert "only supports multipath descriptors with exactly two derivation paths" in result["error"]["message"]
+
+        # The internal option cannot be combined with a multipath descriptor
+        result = import_desc(multipath_desc, internal=True)
+        assert_equal(result["success"], False)
+        assert "Cannot have multipath descriptor while also specifying 'internal'" in result["error"]["message"]
+
+        # A valid multipath descriptor imports fine
+        result = import_desc(multipath_desc, active=True)
+        assert_equal(result["success"], True)
+        assert_equal(len(wallet.listdescriptors()["descriptors"]), 1)
+        wallet.unloadwallet()
+
+    def test_hardened_multipath(self):
+        self.log.info("Test that hardened multipath specifiers are rejected")
+        wallet = self.create_multipath_wallet("mp_hardened", blank=True)
+        xprv = ExtendedPrivateKey.generate().to_string()
+        hardened_desc = descsum_create(f"wpkh({xprv}/84h/1h/0h/<0h;1h>/*)")
+        result = wallet.importdescriptors([{"desc": hardened_desc, "timestamp": 0}])[0]
+        assert_equal(result["success"], False)
+        assert "Multipath specifiers with hardened derivation are not supported" in result["error"]["message"]
+        wallet.unloadwallet()
+
     def run_test(self):
         self.test_creation()
         self.test_addresses()
@@ -141,5 +221,8 @@ class WalletMultipathTest(BitcoinTestFramework):
         self.test_reload()
         self.test_encryption()
         self.test_backup_restore()
+        self.test_import_roundtrip()
+        self.test_import_rejections()
+        self.test_hardened_multipath()
 if __name__ == '__main__':
     WalletMultipathTest(__file__).main()

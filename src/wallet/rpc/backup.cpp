@@ -231,6 +231,74 @@ static UniValue ProcessDescriptorImport(CWallet& wallet, const UniValue& data, c
             throw JSONRPCError(RPC_WALLET_ERROR, "Cannot import private keys to a wallet with private keys disabled");
         }
 
+        // A multipath wallet imports the multipath descriptor as a single record
+        // covering both the receive and change chain, and supports nothing else.
+        if (wallet.IsWalletFlagSet(WALLET_FLAG_MULTIPATH_DESCRIPTORS)) {
+            if (parsed_descs.size() != 2) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "This wallet only supports multipath descriptors with exactly two derivation paths (e.g. /<0;1>)");
+            }
+            if (!parsed_descs.at(0)->HasScripts()) {
+                throw JSONRPCError(RPC_WALLET_ERROR, "Cannot import unused() to a multipath descriptors wallet");
+            }
+
+            // Expand each path to check whether the descriptor can be derived at the first index.
+            for (const auto& parsed_desc : parsed_descs) {
+                FlatSigningProvider expand_keys;
+                std::vector<CScript> scripts;
+                if (!parsed_desc->Expand(0, keys, scripts, expand_keys)) {
+                    throw JSONRPCError(RPC_WALLET_ERROR, "Cannot expand descriptor. Probably because of hardened derivations without private keys provided");
+                }
+            }
+            for (const auto& w : parsed_descs.at(0)->Warnings()) {
+                warnings.push_back(w);
+            }
+
+            // If private keys are enabled, check some things.
+            if (!wallet.IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
+                if (keys.keys.empty()) {
+                    throw JSONRPCError(RPC_WALLET_ERROR, "Cannot import descriptor without private keys to a wallet with private keys enabled");
+                }
+                if (!parsed_descs.at(0)->HavePrivateKeys(keys)) {
+                    warnings.push_back("Not all private keys provided. Some wallet functionality may return unexpected errors");
+                }
+            }
+
+            auto multipath_desc = std::make_shared<MultipathDescriptor>(std::move(parsed_descs));
+            // The wallet relies on the normalized multipath form, which does not
+            // exist for hardened multipath specifiers, since each path then
+            // normalizes to a different last hardened xpub.
+            std::string normalized;
+            if (!multipath_desc->ToNormalizedString(keys, normalized)) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "Multipath specifiers with hardened derivation are not supported");
+            }
+
+            WalletDescriptor w_desc(std::move(multipath_desc), timestamp, range_start, range_end, next_index);
+
+            // Add descriptor to the wallet
+            auto spk_manager_res = wallet.AddWalletDescriptor(w_desc, keys, label, /*internal=*/false);
+            if (!spk_manager_res) {
+                throw JSONRPCError(RPC_WALLET_ERROR, strprintf("Could not add descriptor '%s': %s", descriptor, util::ErrorString(spk_manager_res).original));
+            }
+            auto& spk_manager = spk_manager_res.value().get();
+
+            // The descriptor covers both chains, so (de)activate it for both
+            if (!w_desc.descriptor->GetOutputType()) {
+                if (active) warnings.push_back("Unknown output type, cannot set descriptor to active.");
+            } else {
+                for (const bool desc_internal : {false, true}) {
+                    if (active) {
+                        wallet.AddActiveScriptPubKeyMan(spk_manager.GetID(), *w_desc.descriptor->GetOutputType(), desc_internal);
+                    } else {
+                        wallet.DeactivateScriptPubKeyMan(spk_manager.GetID(), *w_desc.descriptor->GetOutputType(), desc_internal);
+                    }
+                }
+            }
+
+            result.pushKV("success", UniValue(true));
+            PushWarnings(warnings, result);
+            return result;
+        }
+
         for (size_t j = 0; j < parsed_descs.size(); ++j) {
             auto parsed_desc = std::move(parsed_descs[j]);
             if (parsed_descs.size() == 2) {
@@ -319,6 +387,7 @@ RPCMethod importdescriptors()
         "importdescriptors",
         "Import descriptors. This will trigger a rescan of the blockchain based on the earliest timestamp of all descriptors being imported. Requires a new wallet backup.\n"
         "When importing descriptors with multipath key expressions, if the multipath specifier contains exactly two elements, the descriptor produced from the second element will be imported as an internal descriptor.\n"
+        "A wallet created with the multipath option instead imports such a descriptor as a single record covering both the receive and change chain, and only accepts multipath descriptors with exactly two derivation paths.\n"
             "\nNote: This call can take over an hour to complete if using an early timestamp; during that time, other rpc calls\n"
             "may report that the imported keys, addresses or scripts exist but related transactions are still missing.\n"
             "The rescan is significantly faster if block filters are available (using startup option \"-blockfilterindex=1\").\n",
