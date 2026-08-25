@@ -216,6 +216,64 @@ class WalletMultipathTest(BitcoinTestFramework):
         assert "Multipath specifiers with hardened derivation are not supported" in result["error"]["message"]
         wallet.unloadwallet()
 
+    def test_createwalletdescriptor(self):
+        self.log.info("Test createwalletdescriptor on a multipath wallet")
+        wallet = self.create_multipath_wallet("mp_manual", blank=True)
+        hdkey = wallet.addhdkey()["xpub"]
+
+        assert_raises_rpc_error(-8, "Cannot specify 'internal' for a multipath descriptors wallet",
+                                wallet.createwalletdescriptor, type="bech32m", internal=True, hdkey=hdkey)
+
+        result = wallet.createwalletdescriptor(type="bech32m", hdkey=hdkey)
+        assert_equal(len(result["descs"]), 1)
+        assert "/<0;1>/*" in result["descs"][0]
+
+        # The wallet has the new multipath descriptor plus the single path
+        # unused() container holding the HD key
+        descriptors = wallet.listdescriptors()["descriptors"]
+        assert_equal(len(descriptors), 2)
+        multipath_descs = [d for d in descriptors if "/<0;1>/*" in d["desc"]]
+        assert_equal(len(multipath_descs), 1)
+        assert_equal(multipath_descs[0]["active"], True)
+        assert "internal" not in multipath_descs[0]
+        # Both chains can produce addresses
+        wallet.getnewaddress(address_type="bech32m")
+        wallet.getrawchangeaddress(address_type="bech32m")
+
+        # The mix of a multipath descriptor and an unused() key container survives a reload
+        wallet.unloadwallet()
+        self.nodes[0].loadwallet("mp_manual")
+        assert_equal(len(wallet.listdescriptors()["descriptors"]), 2)
+        wallet.unloadwallet()
+
+    def test_watchonly_export(self):
+        self.log.info("Test exportwatchonlywallet for a multipath wallet")
+        node = self.nodes[0]
+        wallet = node.get_wallet_rpc("mp")
+
+        export_path = os.path.join(self.nodes[0].datadir_path, "mp_watchonly.dat")
+        wallet.exportwatchonlywallet(export_path)
+        node.restorewallet("mp_watch", export_path)
+        watch = node.get_wallet_rpc("mp_watch")
+
+        info = watch.getwalletinfo()
+        assert "multipath_descriptors" in info["flags"]
+        assert_equal(info["private_keys_enabled"], False)
+        assert_equal(watch.getbalances()["mine"]["trusted"], wallet.getbalance())
+
+        # The watchonly wallet hands out the same receive and change addresses
+        assert_equal(watch.getnewaddress(address_type="bech32"), wallet.getnewaddress(address_type="bech32"))
+        assert_equal(watch.getrawchangeaddress(address_type="bech32"), wallet.getrawchangeaddress(address_type="bech32"))
+
+        # And can produce a PSBT that the full wallet signs
+        psbt = watch.walletcreatefundedpsbt([], [{wallet.getnewaddress(): 1}])["psbt"]
+        with WalletUnlock(wallet, "pass"):
+            signed = wallet.walletprocesspsbt(psbt)
+        assert_equal(signed["complete"], True)
+        node.sendrawtransaction(signed["hex"])
+        self.generate(node, 1)
+        watch.unloadwallet()
+
     def run_test(self):
         self.test_creation()
         self.test_addresses()
@@ -226,5 +284,9 @@ class WalletMultipathTest(BitcoinTestFramework):
         self.test_import_roundtrip()
         self.test_import_rejections()
         self.test_hardened_multipath()
+        self.test_createwalletdescriptor()
+        self.test_watchonly_export()
+
+
 if __name__ == '__main__':
     WalletMultipathTest(__file__).main()

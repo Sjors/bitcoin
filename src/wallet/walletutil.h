@@ -112,6 +112,12 @@ public:
         m_paths.at(path).next_index--;
     }
 
+    //! Sets the next_index of the descriptor, e.g. when reconstructing one from exported state.
+    void SetNext(size_t path, int32_t next)
+    {
+        m_paths.at(path).next_index = next;
+    }
+
     //! Sets the range_end of the descriptor.
     void SetEnd(size_t path, int32_t end)
     {

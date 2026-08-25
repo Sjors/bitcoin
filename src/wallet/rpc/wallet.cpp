@@ -781,10 +781,15 @@ static RPCMethod createwalletdescriptor()
             UniValue internal_only{options["internal"]};
             UniValue hdkey{options["hdkey"]};
 
+            const bool multipath_wallet = pwallet->IsWalletFlagSet(WALLET_FLAG_MULTIPATH_DESCRIPTORS);
+            if (multipath_wallet && !internal_only.isNull()) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "Cannot specify 'internal' for a multipath descriptors wallet, its descriptors always cover both chains");
+            }
+
             std::vector<bool> internals;
             if (internal_only.isNull()) {
                 internals.push_back(false);
-                internals.push_back(true);
+                if (!multipath_wallet) internals.push_back(true);
             } else {
                 internals.push_back(internal_only.get_bool());
             }
@@ -815,9 +820,9 @@ static RPCMethod createwalletdescriptor()
             std::vector<std::reference_wrapper<DescriptorScriptPubKeyMan>> spkms;
             WalletBatch batch{pwallet->GetDatabase()};
             for (bool internal : internals) {
-                WalletDescriptor w_desc = GenerateWalletDescriptor(xpub, *output_type, internal);
-                uint256 w_id = DescriptorID(*w_desc.descriptor);
-                if (!pwallet->GetScriptPubKeyMan(w_id)) {
+                WalletDescriptor w_desc = multipath_wallet ? GenerateMultipathWalletDescriptor(xpub, *output_type)
+                                                           : GenerateWalletDescriptor(xpub, *output_type, internal);
+                if (!pwallet->GetScriptPubKeyMan(w_desc.id)) {
                     spkms.emplace_back(pwallet->SetupDescriptorScriptPubKeyMan(batch, active_hdkey, *output_type, internal));
                 }
             }

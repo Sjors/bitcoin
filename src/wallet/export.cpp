@@ -100,7 +100,9 @@ util::Result<std::string> ExportWatchOnlyWallet(const CWallet& wallet, const fs:
             FlatSigningProvider dummy_keys;
             std::string dummy_err;
             std::vector<std::unique_ptr<Descriptor>> descs = Parse(desc_info.descriptor, dummy_keys, dummy_err, /*require_checksum=*/true);
-            CHECK_NONFATAL(descs.size() == 1); // All of our descriptors should be valid, and not multipath
+            CHECK_NONFATAL(!descs.empty()); // All of our descriptors should be valid
+            // Only multipath wallets export multipath descriptors, and vice versa
+            CHECK_NONFATAL((descs.size() > 1) == wallet.IsWalletFlagSet(WALLET_FLAG_MULTIPATH_DESCRIPTORS));
             CHECK_NONFATAL(dummy_keys.keys.size() == 0); // No private keys should be present in our exported descriptors
 
             // Get the range if there is one
@@ -111,30 +113,45 @@ util::Result<std::string> ExportWatchOnlyWallet(const CWallet& wallet, const fs:
                 range_end = desc_info.range->second;
             }
 
-            WalletDescriptor w_desc(std::move(descs.at(0)), desc_info.creation_time, range_start, range_end, desc_info.next_index);
+            std::optional<WalletDescriptor> w_desc;
+            if (descs.size() > 1) {
+                w_desc.emplace(std::make_shared<MultipathDescriptor>(std::move(descs)), desc_info.creation_time, range_start, range_end, desc_info.next_index);
+                if (desc_info.next_index_internal) w_desc->SetNext(/*path=*/1, *desc_info.next_index_internal);
+            } else {
+                w_desc.emplace(std::move(descs.at(0)), desc_info.creation_time, range_start, range_end, desc_info.next_index);
+            }
 
             // For descriptors that cannot self expand (i.e. needs private keys or cache), retrieve the cache
-            uint256 desc_id = w_desc.id;
-            if (!w_desc.descriptor->CanSelfExpand()) {
+            uint256 desc_id = w_desc->id;
+            if (!w_desc->descriptor->CanSelfExpand()) {
                 DescriptorScriptPubKeyMan* desc_spkm = dynamic_cast<DescriptorScriptPubKeyMan*>(wallet.GetScriptPubKeyMan(desc_id));
                 LOCK(desc_spkm->cs_desc_man);
-                w_desc.CacheAt() = desc_spkm->GetWalletDescriptor().CacheAt();
+                for (size_t path = 0; path < w_desc->NumPaths(); ++path) {
+                    w_desc->CacheAt(path) = desc_spkm->GetWalletDescriptor().CacheAt(path);
+                }
             }
 
             // Add to the watchonly wallet
-            if (auto spkm_res = watchonly_wallet->AddWalletDescriptor(w_desc, dummy_keys, /*label=*/"", /*internal=*/false); !spkm_res) {
+            if (auto spkm_res = watchonly_wallet->AddWalletDescriptor(*w_desc, dummy_keys, /*label=*/"", /*internal=*/false); !spkm_res) {
                 return util::Error{util::ErrorString(spkm_res)};
             }
 
             // Set active spkms as active
             if (desc_info.active) {
-                // Determine whether this descriptor is internal
-                // This is only set for active spkms
-                bool internal = false;
-                if (desc_info.internal) {
-                    internal = *desc_info.internal;
+                const OutputType output_type = *Assert(w_desc->descriptor->GetOutputType());
+                if (w_desc->IsMultipath()) {
+                    // A multipath descriptor covers both chains
+                    watchonly_wallet->AddActiveScriptPubKeyMan(desc_id, output_type, /*internal=*/false);
+                    watchonly_wallet->AddActiveScriptPubKeyMan(desc_id, output_type, /*internal=*/true);
+                } else {
+                    // Determine whether this descriptor is internal
+                    // This is only set for active spkms
+                    bool internal = false;
+                    if (desc_info.internal) {
+                        internal = *desc_info.internal;
+                    }
+                    watchonly_wallet->AddActiveScriptPubKeyMan(desc_id, output_type, internal);
                 }
-                watchonly_wallet->AddActiveScriptPubKeyMan(desc_id, *Assert(w_desc.descriptor->GetOutputType()), internal);
             }
         }
 
