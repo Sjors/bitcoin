@@ -57,6 +57,8 @@ const std::string VERSION{"version"};
 const std::string WALLETDESCRIPTOR{"walletdescriptor"};
 const std::string WALLETDESCRIPTORCACHE{"walletdescriptorcache"};
 const std::string WALLETDESCRIPTORLHCACHE{"walletdescriptorlhcache"};
+const std::string WALLETDESCRIPTORMPCACHE{"walletdescriptormpcache"};
+const std::string WALLETDESCRIPTORMPLHCACHE{"walletdescriptormplhcache"};
 const std::string WALLETDESCRIPTORCKEY{"walletdescriptorckey"};
 const std::string WALLETDESCRIPTORKEY{"walletdescriptorkey"};
 const std::string WATCHMETA{"watchmeta"};
@@ -278,6 +280,49 @@ bool WalletBatch::WriteDescriptorCacheItems(const uint256& desc_id, const Descri
     }
     for (const auto& lh_xpub_pair : cache.GetCachedLastHardenedExtPubKeys()) {
         if (!WriteDescriptorLastHardenedCache(lh_xpub_pair.second, desc_id, lh_xpub_pair.first)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool WalletBatch::WriteMultipathDescriptorDerivedCache(const CExtPubKey& xpub, const uint256& desc_id, uint32_t path, uint32_t key_exp_index, uint32_t der_index)
+{
+    std::vector<unsigned char> ser_xpub(BIP32_EXTKEY_SIZE);
+    xpub.Encode(ser_xpub.data());
+    return WriteIC(std::make_pair(std::make_pair(DBKeys::WALLETDESCRIPTORMPCACHE, desc_id), std::make_pair(path, std::make_pair(key_exp_index, der_index))), ser_xpub);
+}
+
+bool WalletBatch::WriteMultipathDescriptorParentCache(const CExtPubKey& xpub, const uint256& desc_id, uint32_t path, uint32_t key_exp_index)
+{
+    std::vector<unsigned char> ser_xpub(BIP32_EXTKEY_SIZE);
+    xpub.Encode(ser_xpub.data());
+    return WriteIC(std::make_pair(std::make_pair(DBKeys::WALLETDESCRIPTORMPCACHE, desc_id), std::make_pair(path, key_exp_index)), ser_xpub);
+}
+
+bool WalletBatch::WriteMultipathDescriptorLastHardenedCache(const CExtPubKey& xpub, const uint256& desc_id, uint32_t path, uint32_t key_exp_index)
+{
+    std::vector<unsigned char> ser_xpub(BIP32_EXTKEY_SIZE);
+    xpub.Encode(ser_xpub.data());
+    return WriteIC(std::make_pair(std::make_pair(DBKeys::WALLETDESCRIPTORMPLHCACHE, desc_id), std::make_pair(path, key_exp_index)), ser_xpub);
+}
+
+bool WalletBatch::WriteMultipathDescriptorCacheItems(const uint256& desc_id, uint32_t path, const DescriptorCache& cache)
+{
+    for (const auto& parent_xpub_pair : cache.GetCachedParentExtPubKeys()) {
+        if (!WriteMultipathDescriptorParentCache(parent_xpub_pair.second, desc_id, path, parent_xpub_pair.first)) {
+            return false;
+        }
+    }
+    for (const auto& derived_xpub_map_pair : cache.GetCachedDerivedExtPubKeys()) {
+        for (const auto& derived_xpub_pair : derived_xpub_map_pair.second) {
+            if (!WriteMultipathDescriptorDerivedCache(derived_xpub_pair.second, desc_id, path, derived_xpub_map_pair.first, derived_xpub_pair.first)) {
+                return false;
+            }
+        }
+    }
+    for (const auto& lh_xpub_pair : cache.GetCachedLastHardenedExtPubKeys()) {
+        if (!WriteMultipathDescriptorLastHardenedCache(lh_xpub_pair.second, desc_id, path, lh_xpub_pair.first)) {
             return false;
         }
     }
@@ -856,6 +901,72 @@ static DBErrors LoadDescriptorWalletRecords(CWallet* pwallet, DatabaseBatch& bat
 
         // Set the cache to the WalletDescriptor
         desc.CacheAt() = cache;
+
+        // Get per-path key caches for a multipath descriptor
+        prefix = PrefixStream(DBKeys::WALLETDESCRIPTORMPCACHE, id);
+        LoadResult mp_cache_res = LoadRecords(pwallet, batch, DBKeys::WALLETDESCRIPTORMPCACHE, prefix,
+            [&id, &desc] (CWallet* pwallet, DataStream& key, DataStream& value, std::string& err) {
+            bool parent = true;
+            uint256 desc_id;
+            uint32_t path;
+            uint32_t key_exp_index;
+            uint32_t der_index;
+            key >> desc_id;
+            assert(desc_id == id);
+            key >> path;
+            key >> key_exp_index;
+
+            // if the der_index exists, it's a derived xpub
+            try
+            {
+                key >> der_index;
+                parent = false;
+            }
+            catch (...) {}
+
+            if (path >= desc.NumPaths()) {
+                err = "Error reading wallet database: descriptor cache path index out of range";
+                return DBErrors::CORRUPT;
+            }
+
+            std::vector<unsigned char> ser_xpub(BIP32_EXTKEY_SIZE);
+            value >> ser_xpub;
+            CExtPubKey xpub;
+            xpub.Decode(ser_xpub.data());
+            if (parent) {
+                desc.CacheAt(path).CacheParentExtPubKey(key_exp_index, xpub);
+            } else {
+                desc.CacheAt(path).CacheDerivedExtPubKey(key_exp_index, der_index, xpub);
+            }
+            return DBErrors::LOAD_OK;
+        });
+        result = std::max(result, mp_cache_res.m_result);
+
+        // Get per-path last hardened caches for a multipath descriptor
+        prefix = PrefixStream(DBKeys::WALLETDESCRIPTORMPLHCACHE, id);
+        LoadResult mp_lh_cache_res = LoadRecords(pwallet, batch, DBKeys::WALLETDESCRIPTORMPLHCACHE, prefix,
+            [&id, &desc] (CWallet* pwallet, DataStream& key, DataStream& value, std::string& err) {
+            uint256 desc_id;
+            uint32_t path;
+            uint32_t key_exp_index;
+            key >> desc_id;
+            assert(desc_id == id);
+            key >> path;
+            key >> key_exp_index;
+
+            if (path >= desc.NumPaths()) {
+                err = "Error reading wallet database: descriptor cache path index out of range";
+                return DBErrors::CORRUPT;
+            }
+
+            std::vector<unsigned char> ser_xpub(BIP32_EXTKEY_SIZE);
+            value >> ser_xpub;
+            CExtPubKey xpub;
+            xpub.Decode(ser_xpub.data());
+            desc.CacheAt(path).CacheLastHardenedExtPubKey(key_exp_index, xpub);
+            return DBErrors::LOAD_OK;
+        });
+        result = std::max(result, mp_lh_cache_res.m_result);
 
         // Get unencrypted keys
         KeyMap keys;

@@ -257,6 +257,10 @@ public:
     bool WriteDescriptorParentCache(const CExtPubKey& xpub, const uint256& desc_id, uint32_t key_exp_index);
     bool WriteDescriptorLastHardenedCache(const CExtPubKey& xpub, const uint256& desc_id, uint32_t key_exp_index);
     bool WriteDescriptorCacheItems(const uint256& desc_id, const DescriptorCache& cache);
+    bool WriteMultipathDescriptorDerivedCache(const CExtPubKey& xpub, const uint256& desc_id, uint32_t path, uint32_t key_exp_index, uint32_t der_index);
+    bool WriteMultipathDescriptorParentCache(const CExtPubKey& xpub, const uint256& desc_id, uint32_t path, uint32_t key_exp_index);
+    bool WriteMultipathDescriptorLastHardenedCache(const CExtPubKey& xpub, const uint256& desc_id, uint32_t path, uint32_t key_exp_index);
+    bool WriteMultipathDescriptorCacheItems(const uint256& desc_id, uint32_t path, const DescriptorCache& cache);
 
     bool WriteLockedUTXO(const COutPoint& output);
     bool EraseLockedUTXO(const COutPoint& output);
