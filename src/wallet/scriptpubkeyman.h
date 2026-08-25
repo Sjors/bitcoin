@@ -272,12 +272,21 @@ public:
 class DescriptorScriptPubKeyMan : public ScriptPubKeyMan
 {
 private:
-    using ScriptPubKeyMap = std::map<CScript, int32_t>; // Map of scripts to descriptor range index
-    using PubKeyMap = std::map<CPubKey, int32_t>; // Map of pubkeys involved in scripts to descriptor range index
+    //! Position of a script within a (possibly multipath) wallet descriptor
+    struct DescriptorPosition {
+        int32_t index; // Descriptor range index
+        uint8_t path;  // Derivation path of a multipath descriptor; 0 for single path descriptors
+    };
+    using ScriptPubKeyMap = std::map<CScript, DescriptorPosition>; // Map of scripts to descriptor position
+    using PubKeyMap = std::map<CPubKey, DescriptorPosition>; // Map of pubkeys involved in scripts to descriptor position
 
     ScriptPubKeyMap m_map_script_pub_keys GUARDED_BY(cs_desc_man);
     PubKeyMap m_map_pubkeys GUARDED_BY(cs_desc_man);
-    int32_t m_max_cached_index = -1;
+    //! Highest cached descriptor range index, per derivation path
+    std::vector<int32_t> m_max_cached_index;
+
+    //! Ensure m_max_cached_index has one entry per descriptor path
+    void InitMaxCachedIndex() EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man) { m_max_cached_index.resize(m_wallet_descriptor.NumPaths(), -1); }
 
     KeyMap m_map_keys GUARDED_BY(cs_desc_man);
     CryptedKeyMap m_map_crypted_keys GUARDED_BY(cs_desc_man);
@@ -313,11 +322,11 @@ private:
     KeyMap GetKeys() const EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man);
 
     // Cached FlatSigningProviders to avoid regenerating them each time they are needed.
-    mutable std::map<int32_t, FlatSigningProvider> m_map_signing_providers;
+    mutable std::map<std::pair<uint8_t, int32_t>, FlatSigningProvider> m_map_signing_providers;
     // Fetch the SigningProvider for the given script and optionally include private keys
     std::unique_ptr<FlatSigningProvider> GetSigningProvider(const CScript& script, bool include_private = false) const;
-    // Fetch the SigningProvider for a given index and optionally include private keys. Called by the above functions.
-    std::unique_ptr<FlatSigningProvider> GetSigningProvider(int32_t index, bool include_private = false) const EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man);
+    // Fetch the SigningProvider for a given position and optionally include private keys. Called by the above functions.
+    std::unique_ptr<FlatSigningProvider> GetSigningProvider(DescriptorPosition pos, bool include_private = false) const EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man);
 
     void Load();
 
@@ -337,9 +346,9 @@ protected:
     {}
 
     WalletDescriptor m_wallet_descriptor GUARDED_BY(cs_desc_man);
-    void IncIndex() EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man);
-    void DecIndex() EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man);
-    void SetRangeEnd(int32_t end) EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man);
+    void IncIndex(size_t path) EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man);
+    void DecIndex(size_t path) EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man);
+    void SetRangeEnd(size_t path, int32_t end) EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man);
 
     //! Same as 'TopUp' but designed for use within a batch transaction context
     bool TopUpWithDB(WalletBatch& batch, unsigned int size = 0);
