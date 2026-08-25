@@ -366,6 +366,7 @@ static RPCMethod createwallet()
             {"descriptors", RPCArg::Type::BOOL, RPCArg::Default{true}, "If set, must be \"true\""},
             {"load_on_startup", RPCArg::Type::BOOL, RPCArg::Optional::OMITTED, "Save wallet name to persistent settings and load on startup. True to add wallet to startup list, false to remove, null to leave unchanged."},
             {"external_signer", RPCArg::Type::BOOL, RPCArg::Default{false}, "Use an external signer such as a hardware wallet. Requires -signer to be configured. Wallet creation will fail if keys cannot be fetched. Requires disable_private_keys and descriptors set to true."},
+            {"multipath", RPCArg::Type::BOOL, RPCArg::Default{false}, "Store descriptors in multipath form. The wallet keeps one BIP 389 multipath descriptor per output type, covering both the receive and change chain, and only supports such descriptors. Not yet supported in combination with external_signer."},
         },
         RPCResult{
             RPCResult::Type::OBJ, "", "",
@@ -418,6 +419,12 @@ static RPCMethod createwallet()
 #else
         throw JSONRPCError(RPC_WALLET_ERROR, "Compiled without external signing support (required for external signing)");
 #endif
+    }
+    if (!request.params[8].isNull() && request.params[8].get_bool()) {
+        if (flags & WALLET_FLAG_EXTERNAL_SIGNER) {
+            throw JSONRPCError(RPC_WALLET_ERROR, "Multipath descriptors are not yet supported for external signer wallets");
+        }
+        flags |= WALLET_FLAG_MULTIPATH_DESCRIPTORS;
     }
 
     DatabaseOptions options;
