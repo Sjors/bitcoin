@@ -23,6 +23,9 @@ struct WalletDescInfo {
     std::optional<bool> internal;
     std::optional<std::pair<int64_t,int64_t>> range;
     int64_t next_index;
+    //! The next index of the change chain; only set for multipath descriptors,
+    //! whose next_index refers to the receive chain
+    std::optional<int64_t> next_index_internal;
 };
 
 //! Export the descriptors from a wallet so that they can be imported elsewhere

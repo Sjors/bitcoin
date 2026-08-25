@@ -31,13 +31,21 @@ util::Expected<std::vector<WalletDescInfo>, std::string> ExportDescriptors(const
             return util::Unexpected{"Can't get descriptor string."};
         }
         const bool is_range = wallet_descriptor.descriptor->IsRange();
+        const bool is_multipath = wallet_descriptor.IsMultipath();
+        // For a multipath descriptor, report the range up to the furthest path
+        // end and the next index of each chain.
+        int64_t range_end = wallet_descriptor.GetEnd();
+        for (size_t path = 1; path < wallet_descriptor.NumPaths(); ++path) {
+            range_end = std::max<int64_t>(range_end, wallet_descriptor.GetEnd(path));
+        }
         wallet_descriptors.emplace_back(
             descriptor,
             wallet_descriptor.creation_time,
             wallet.IsActiveScriptPubKeyMan(*desc_spk_man),
             wallet.IsInternalScriptPubKeyMan(desc_spk_man),
-            is_range ? std::optional(std::make_pair(wallet_descriptor.GetStart(), wallet_descriptor.GetEnd())) : std::nullopt,
-            wallet_descriptor.GetNext()
+            is_range ? std::optional(std::pair<int64_t, int64_t>(wallet_descriptor.GetStart(), range_end)) : std::nullopt,
+            wallet_descriptor.GetNext(),
+            is_multipath ? std::optional<int64_t>(wallet_descriptor.GetNext(1)) : std::nullopt
         );
     }
     return wallet_descriptors;

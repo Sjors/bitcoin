@@ -45,6 +45,7 @@ class WalletMultipathTest(BitcoinTestFramework):
             assert_equal(item["active"], True)
             assert "internal" not in item
             assert_equal(item["next_index"], 0)
+            assert_equal(item["next_index_internal"], 0)
 
         # Both chains have their own keypool of equal size
         info = wallet.getwalletinfo()
@@ -73,6 +74,7 @@ class WalletMultipathTest(BitcoinTestFramework):
         wallet.getnewaddress(address_type="bech32")
         wpkh_desc = next(d for d in wallet.listdescriptors()["descriptors"] if d["desc"].startswith("wpkh("))
         assert_equal(wpkh_desc["next_index"], 2)
+        assert_equal(wpkh_desc["next_index_internal"], 1)
 
     def test_spending(self):
         self.log.info("Test funding, spending, and change detection")

@@ -567,7 +567,8 @@ RPCMethod listdescriptors()
                         {RPCResult::Type::NUM, "", "Range end inclusive"},
                     }},
                     {RPCResult::Type::NUM, "next", /*optional=*/true, "Same as next_index field. Kept for compatibility reason."},
-                    {RPCResult::Type::NUM, "next_index", /*optional=*/true, "The next index to generate addresses from; defined only for ranged descriptors"},
+                    {RPCResult::Type::NUM, "next_index", /*optional=*/true, "The next index to generate addresses from; defined only for ranged descriptors. For multipath descriptors this refers to the receive chain"},
+                    {RPCResult::Type::NUM, "next_index_internal", /*optional=*/true, "The next index of the change chain; defined only for multipath descriptors"},
                 }},
             }}
         }},
@@ -615,6 +616,9 @@ RPCMethod listdescriptors()
             spk.pushKV("range", std::move(range));
             spk.pushKV("next", info.next_index);
             spk.pushKV("next_index", info.next_index);
+            if (info.next_index_internal.has_value()) {
+                spk.pushKV("next_index_internal", info.next_index_internal.value());
+            }
         }
         descriptors.push_back(std::move(spk));
     }
