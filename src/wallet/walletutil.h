@@ -181,6 +181,9 @@ public:
 
 WalletDescriptor GenerateWalletDescriptor(const CExtPubKey& master_key, const OutputType& output_type, bool internal);
 
+//! Generate the multipath (receive and change) variant of GenerateWalletDescriptor,
+//! with a /<0;1> element in place of the /0 or /1 chain element.
+WalletDescriptor GenerateMultipathWalletDescriptor(const CExtPubKey& master_key, const OutputType& output_type);
 } // namespace wallet
 
 #endif // BITCOIN_WALLET_WALLETUTIL_H

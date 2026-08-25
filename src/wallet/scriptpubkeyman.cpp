@@ -1230,7 +1230,11 @@ void DescriptorScriptPubKeyMan::SetupDescriptorGeneration(WalletBatch& batch, co
     Assert(m_storage.IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
     Assert(!m_wallet_descriptor.descriptor);
 
-    m_wallet_descriptor = GenerateWalletDescriptor(master_key.Neuter(), addr_type, internal);
+    if (m_storage.IsWalletFlagSet(WALLET_FLAG_MULTIPATH_DESCRIPTORS)) {
+        m_wallet_descriptor = GenerateMultipathWalletDescriptor(master_key.Neuter(), addr_type);
+    } else {
+        m_wallet_descriptor = GenerateWalletDescriptor(master_key.Neuter(), addr_type, internal);
+    }
 
     // Store the master private key, and descriptor
     if (!AddDescriptorKeyWithDB(batch, master_key.key, master_key.key.GetPubKey())) {

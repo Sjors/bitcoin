@@ -32,10 +32,11 @@ fs::path GetWalletDir()
     return path;
 }
 
-WalletDescriptor GenerateWalletDescriptor(const CExtPubKey& master_key, const OutputType& addr_type, bool internal)
+//! Build the descriptor string for a generated wallet descriptor, with the
+//! given path element (e.g. "/0", "/1" or "/<0;1>") for the final derivation
+//! step before the wildcard.
+static std::string GenerateWalletDescriptorString(const CExtPubKey& master_key, const OutputType& addr_type, const std::string& chain_path)
 {
-    int64_t creation_time = GetTime();
-
     std::string xpub = EncodeExtPubKey(master_key);
 
     // Build descriptor string
@@ -74,14 +75,33 @@ WalletDescriptor GenerateWalletDescriptor(const CExtPubKey& master_key, const Ou
         desc_prefix += "/0h";
     }
 
-    std::string internal_path = internal ? "/1" : "/0";
-    std::string desc_str = desc_prefix + "/0h" + internal_path + desc_suffix;
+    return desc_prefix + "/0h" + chain_path + desc_suffix;
+}
+
+WalletDescriptor GenerateWalletDescriptor(const CExtPubKey& master_key, const OutputType& addr_type, bool internal)
+{
+    int64_t creation_time = GetTime();
+    std::string desc_str = GenerateWalletDescriptorString(master_key, addr_type, internal ? "/1" : "/0");
 
     // Make the descriptor
     FlatSigningProvider keys;
     std::string error;
     std::vector<std::unique_ptr<Descriptor>> desc = Parse(desc_str, keys, error, false);
     WalletDescriptor w_desc(std::move(desc.at(0)), creation_time, 0, 0, 0);
+    return w_desc;
+}
+
+WalletDescriptor GenerateMultipathWalletDescriptor(const CExtPubKey& master_key, const OutputType& addr_type)
+{
+    int64_t creation_time = GetTime();
+    std::string desc_str = GenerateWalletDescriptorString(master_key, addr_type, "/<0;1>");
+
+    // Make the multipath descriptor covering both the receive and change chain
+    FlatSigningProvider keys;
+    std::string error;
+    std::vector<std::unique_ptr<Descriptor>> descs = Parse(desc_str, keys, error, false);
+    assert(descs.size() == 2);
+    WalletDescriptor w_desc(std::make_shared<MultipathDescriptor>(std::move(descs)), creation_time, 0, 0, 0);
     return w_desc;
 }
 

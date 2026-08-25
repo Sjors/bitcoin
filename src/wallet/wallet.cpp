@@ -2587,7 +2587,12 @@ size_t CWallet::KeypoolCountExternalKeys() const
 
     unsigned int count = 0;
     for (auto spk_man : m_external_spk_managers) {
-        count += spk_man.second->GetKeyPoolSize();
+        // A multipath SPKM covers both chains; only count its external keys here
+        if (auto desc_spk_man = dynamic_cast<DescriptorScriptPubKeyMan*>(spk_man.second); desc_spk_man && desc_spk_man->IsMultipathDescriptor()) {
+            count += desc_spk_man->GetKeyPoolSize(/*internal=*/false);
+        } else {
+            count += spk_man.second->GetKeyPoolSize();
+        }
     }
 
     return count;
@@ -3129,6 +3134,14 @@ std::shared_ptr<CWallet> CWallet::CreateNew(WalletContext& context, const std::s
         error = strprintf(_("Error creating %s: Could not write version metadata."), walletFile);
         return nullptr;
     }
+    // TODO: support multipath descriptors for external signer wallets. That is
+    // in fact their main use case, since HWI's upcoming registerdescriptors
+    // command takes the multipath descriptor form, but the external signer
+    // protocol currently returns separate receive and change descriptors.
+    if ((wallet_creation_flags & WALLET_FLAG_MULTIPATH_DESCRIPTORS) && (wallet_creation_flags & WALLET_FLAG_EXTERNAL_SIGNER)) {
+        error = _("Error: Multipath descriptors are not yet supported for external signer wallets");
+        return nullptr;
+    }
     {
         LOCK(walletInstance->cs_wallet);
 
@@ -3623,16 +3636,29 @@ DescriptorScriptPubKeyMan& CWallet::SetupDescriptorScriptPubKeyMan(WalletBatch& 
     DescriptorScriptPubKeyMan* out = spk_manager.get();
     uint256 id = spk_manager->GetID();
     AddScriptPubKeyMan(id, std::move(spk_manager));
-    AddActiveScriptPubKeyManWithDb(batch, id, output_type, internal);
+    if (IsWalletFlagSet(WALLET_FLAG_MULTIPATH_DESCRIPTORS)) {
+        // A multipath descriptor covers both chains, so activate it for both
+        AddActiveScriptPubKeyManWithDb(batch, id, output_type, /*internal=*/false);
+        AddActiveScriptPubKeyManWithDb(batch, id, output_type, /*internal=*/true);
+    } else {
+        AddActiveScriptPubKeyManWithDb(batch, id, output_type, internal);
+    }
     return *out;
 }
 
 void CWallet::SetupDescriptorScriptPubKeyMans(WalletBatch& batch, const CExtKey& master_key)
 {
     AssertLockHeld(cs_wallet);
-    for (bool internal : {false, true}) {
+    if (IsWalletFlagSet(WALLET_FLAG_MULTIPATH_DESCRIPTORS)) {
+        // One multipath descriptor per output type covers both the receive and change chain
         for (OutputType t : OUTPUT_TYPES) {
-            SetupDescriptorScriptPubKeyMan(batch, master_key, t, internal);
+            SetupDescriptorScriptPubKeyMan(batch, master_key, t, /*internal=*/false);
+        }
+    } else {
+        for (bool internal : {false, true}) {
+            for (OutputType t : OUTPUT_TYPES) {
+                SetupDescriptorScriptPubKeyMan(batch, master_key, t, internal);
+            }
         }
     }
 }
@@ -3741,9 +3767,12 @@ void CWallet::LoadActiveScriptPubKeyMan(uint256 id, OutputType type, bool intern
     auto spk_man = m_spk_managers.at(id).get();
     spk_mans[type] = spk_man;
 
-    const auto it = spk_mans_other.find(type);
-    if (it != spk_mans_other.end() && it->second == spk_man) {
-        spk_mans_other.erase(type);
+    // A multipath SPKM covers both chains and stays registered in both maps
+    if (!IsWalletFlagSet(WALLET_FLAG_MULTIPATH_DESCRIPTORS)) {
+        const auto it = spk_mans_other.find(type);
+        if (it != spk_mans_other.end() && it->second == spk_man) {
+            spk_mans_other.erase(type);
+        }
     }
 
     NotifyCanGetAddressesChanged();
@@ -3791,6 +3820,11 @@ std::optional<bool> CWallet::IsInternalScriptPubKeyMan(ScriptPubKeyMan* spk_man)
     const auto desc_spk_man = dynamic_cast<DescriptorScriptPubKeyMan*>(spk_man);
     if (!desc_spk_man) {
         throw std::runtime_error(std::string(__func__) + ": unexpected ScriptPubKeyMan type.");
+    }
+
+    // A multipath SPKM covers both chains, so it is neither internal nor external
+    if (desc_spk_man->IsMultipathDescriptor()) {
+        return std::nullopt;
     }
 
     LOCK(desc_spk_man->cs_desc_man);
