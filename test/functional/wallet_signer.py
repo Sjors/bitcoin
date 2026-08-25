@@ -35,6 +35,10 @@ class WalletSignerTest(BitcoinTestFramework):
         path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'mocks', 'multi_signers.py')
         return sys.executable + " " + path
 
+    def mock_old_signer_path(self):
+        path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'mocks', 'old_signer.py')
+        return sys.executable + " " + path
+
     def set_test_params(self):
         self.num_nodes = 2
 
@@ -56,11 +60,67 @@ class WalletSignerTest(BitcoinTestFramework):
 
     def run_test(self):
         self.test_valid_signer()
+        self.test_multipath_signer()
         self.test_disconnected_signer()
+        self.restart_node(1, [f"-signer={self.mock_old_signer_path()}", "-keypool=10"])
+        self.test_old_signer()
         self.restart_node(1, [f"-signer={self.mock_invalid_signer_path()}", "-keypool=10"])
         self.test_invalid_signer()
         self.restart_node(1, [f"-signer={self.mock_multi_signers_path()}", "-keypool=10"])
         self.test_multiple_signers()
+
+    def test_multipath_signer(self):
+        self.log.info('Test multipath descriptors from an external signer')
+        self.nodes[1].createwallet(wallet_name='hww_multipath', disable_private_keys=True, external_signer=True, multipath=True)
+        hww = self.nodes[1].get_wallet_rpc('hww_multipath')
+        wallet_info = hww.getwalletinfo()
+        assert_equal(wallet_info["external_signer"], True)
+        assert "multipath_descriptors" in wallet_info["flags"]
+
+        # One multipath descriptor per output type, each active for both chains
+        descriptors = hww.listdescriptors()["descriptors"]
+        assert_equal(len(descriptors), 4)
+        for descriptor in descriptors:
+            assert "/<0;1>/*" in descriptor["desc"]
+            assert_equal(descriptor["active"], True)
+            assert "internal" not in descriptor
+        assert_equal(wallet_info["keypoolsize"], 40)
+        assert_equal(wallet_info["keypoolsize_hd_internal"], 40)
+
+        # The signer derives from the same keys as in test_valid_signer, so the
+        # receive addresses are the ones its single path descriptors produce
+        address1 = hww.getnewaddress(address_type="bech32")
+        assert_equal(address1, "bcrt1qm90ugl4d48jv8n6e5t9ln6t9zlpm5th68x4f8g")
+        assert_equal(hww.getaddressinfo(address1)['hdkeypath'], "m/84h/1h/0h/0/0")
+
+        # And change comes from the second path of the same descriptor
+        change1 = hww.getrawchangeaddress(address_type="bech32")
+        change_info = hww.getaddressinfo(change1)
+        assert_equal(change_info['hdkeypath'], "m/84h/1h/0h/1/0")
+        assert_equal(change_info['ismine'], True)
+        assert_equal(change_info['parent_desc'], hww.getaddressinfo(address1)['parent_desc'])
+
+        self.log.info('Test walletdisplayaddress for a multipath external signer wallet')
+        assert_equal(hww.walletdisplayaddress(address1), {"address": address1})
+
+        hww.unloadwallet()
+
+    def test_old_signer(self):
+        self.log.info('Test that a signer without --multipath support fails instead of falling back')
+        # An older signer exits with an error on the unrecognized argument, so
+        # the wallet is not silently created from single path descriptors
+        assert_raises_rpc_error(-1, 'The signer may not support the getdescriptors --multipath argument',
+            self.nodes[1].createwallet, wallet_name='hww_old_multipath', disable_private_keys=True, external_signer=True, multipath=True
+        )
+        assert 'hww_old_multipath' not in self.nodes[1].listwallets()
+
+        # Without the multipath option the same signer works as before
+        self.nodes[1].createwallet(wallet_name='hww_old', disable_private_keys=True, external_signer=True)
+        hww = self.nodes[1].get_wallet_rpc('hww_old')
+        descriptors = hww.listdescriptors()["descriptors"]
+        assert_equal(len(descriptors), 2)
+        assert_equal(sorted(d["internal"] for d in descriptors), [False, True])
+        hww.unloadwallet()
 
     def test_valid_signer(self):
         self.log.debug(f"-signer={self.mock_signer_path()}")

@@ -72,9 +72,14 @@ UniValue ExternalSigner::DisplayAddress(const std::string& descriptor) const
     return RunCommandParseJSON(Cat(m_command, Cat(Cat({"--fingerprint", m_fingerprint}, NetworkArg()), {"displayaddress", "--desc", descriptor})), "");
 }
 
-UniValue ExternalSigner::GetDescriptors(const int account)
+UniValue ExternalSigner::GetDescriptors(const int account, const bool multipath)
 {
-    return RunCommandParseJSON(Cat(m_command, Cat(Cat({"--fingerprint", m_fingerprint}, NetworkArg()), {"getdescriptors", "--account", strprintf("%d", account)})), "");
+    std::vector<std::string> args{"getdescriptors", "--account", strprintf("%d", account)};
+    // Signers that predate this argument exit with an error, which is what we
+    // want: silently falling back to single path descriptors would create a
+    // wallet that does not match what was asked for.
+    if (multipath) args.emplace_back("--multipath");
+    return RunCommandParseJSON(Cat(m_command, Cat(Cat({"--fingerprint", m_fingerprint}, NetworkArg()), args)), "");
 }
 
 bool ExternalSigner::SignTransaction(PartiallySignedTransaction& psbtx, std::string& error)

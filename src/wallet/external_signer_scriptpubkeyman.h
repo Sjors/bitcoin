@@ -25,9 +25,13 @@ private:
         : DescriptorScriptPubKeyMan(storage, keypool_size)
     {}
 
+    //! Create an ExternalSPKM holding the given descriptor, shared by the CreateNew overloads
+    static std::unique_ptr<ExternalSignerScriptPubKeyMan> CreateNew(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, WalletDescriptor&& w_desc);
+
 public:
     static std::unique_ptr<ExternalSignerScriptPubKeyMan> LoadFromStorage(WalletStorage& storage, WalletDescriptor& descriptor, int64_t keypool_size, const KeyMap& keys, const CryptedKeyMap& ckeys);
     static std::unique_ptr<ExternalSignerScriptPubKeyMan> CreateNew(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, std::unique_ptr<Descriptor> desc);
+    static std::unique_ptr<ExternalSignerScriptPubKeyMan> CreateNew(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, std::shared_ptr<MultipathDescriptor> desc);
 
   static util::Result<ExternalSigner> GetExternalSigner();
 

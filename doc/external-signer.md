@@ -159,7 +159,7 @@ The command MAY complain if `--chain` is set to a test-network, but any of the B
 Usage:
 
 ```sh
-<cmd> --fingerprint <fingerprint> --chain <name> getdescriptors --account <account>
+<cmd> --fingerprint <fingerprint> --chain <name> getdescriptors --account <account> [--multipath]
 ```
 
 Returns descriptors supported by the device. Example:
@@ -184,6 +184,29 @@ Returns descriptors supported by the device. Example:
   ]
 }
 ```
+
+#### Flag `--multipath` (optional)
+
+With `--multipath` the command MUST instead return a flat array of [BIP 389](https://github.com/bitcoin/bips/blob/master/bip-0389.mediawiki)
+multipath descriptors, each combining the receive and change chain in a single
+descriptor with a `<0;1>` element:
+
+```sh
+<cmd> --fingerprint 00000000 --chain main getdescriptors --account 0 --multipath
+```
+
+```
+[
+  "pkh([00000000/44h/0h/0h]xpub6C.../<0;1>/*)#tw6cmp0h",
+  "sh(wpkh([00000000/49h/0h/0h]xpub6B..../<0;1>/*))#tetlyt9c",
+  "wpkh([00000000/84h/0h/0h]xpub6C.../<0;1>/*)#3ryl7uz3",
+  "tr([00000000/86h/0h/0h]xpub6C.../<0;1>/*)#kpq6q00r"
+]
+```
+
+Bitcoin Core passes this flag when creating a wallet with the `multipath`
+option. A command that does not support the flag MUST fail rather than ignore
+it, so that the wallet is not silently created from single path descriptors.
 
 ### `displayaddress` (optional)
 

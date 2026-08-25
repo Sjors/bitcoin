@@ -54,10 +54,13 @@ public:
 
     //! Get receive and change Descriptor(s) from device for a given account.
     //! Calls `<command> --fingerprint <fingerprint> --chain <chain> getdescriptors
-    //! --account <account>`.
-    //! @param[in] account  which BIP32 account to use (e.g. `m/44'/0'/account'`)
+    //! --account <account> [--multipath]`.
+    //! @param[in] account    which BIP32 account to use (e.g. `m/44'/0'/account'`)
+    //! @param[in] multipath  ask for BIP 389 multipath descriptors, which combine the
+    //!                       receive and change chain. Signers that do not support this
+    //!                       are expected to fail rather than ignore the argument.
     //! @returns see doc/external-signer.md
-    UniValue GetDescriptors(int account);
+    UniValue GetDescriptors(int account, bool multipath = false);
 
     //! Sign PartiallySignedTransaction on the device.
     //! Calls `<command> --stdin --fingerprint <fingerprint> --chain <chain>` and passes the

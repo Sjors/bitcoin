@@ -23,6 +23,14 @@ def enumerate(args):
 def getdescriptors(args):
     xpub = "tpubD6NzVbkrYhZ4WaWSyoBvQwbpLkojyoTZPRsgXELWz3Popb3qkjcJyJUGLnL4qHHoQvao8ESaAstxYSnhyswJ76uZPStJRJCTKvosUCJZL5B"
 
+    if args.multipath:
+        return sys.stdout.write(json.dumps([
+            "pkh([00000001/44h/1h/" + args.account + "']" + xpub + "/<0;1>/*)#qs9e7vuv",
+            "sh(wpkh([00000001/49h/1h/" + args.account + "']" + xpub + "/<0;1>/*))#76yxuz07",
+            "wpkh([00000001/84h/1h/" + args.account + "']" + xpub + "/<0;1>/*)#kwy8pel5",
+            "tr([00000001/86h/1h/" + args.account + "']" + xpub + "/<0;1>/*)#ct0xvv39"
+        ]))
+
     sys.stdout.write(json.dumps({
         "receive": [
             "pkh([00000001/44h/1h/" + args.account + "']" + xpub + "/0/*)#aqllu46s",
@@ -85,6 +93,7 @@ parser_enumerate.set_defaults(func=enumerate)
 parser_getdescriptors = subparsers.add_parser('getdescriptors')
 parser_getdescriptors.set_defaults(func=getdescriptors)
 parser_getdescriptors.add_argument('--account', metavar='account')
+parser_getdescriptors.add_argument('--multipath', action='store_true')
 
 parser_displayaddress = subparsers.add_parser('displayaddress', help='display address on signer')
 parser_displayaddress.add_argument('--desc', metavar='desc')

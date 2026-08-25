@@ -31,7 +31,6 @@ class WalletMultipathTest(BitcoinTestFramework):
 
     def test_creation(self):
         self.log.info("Test multipath wallet creation")
-        node = self.nodes[0]
         wallet = self.create_multipath_wallet("mp")
 
         assert "multipath_descriptors" in wallet.getwalletinfo()["flags"]
@@ -54,11 +53,6 @@ class WalletMultipathTest(BitcoinTestFramework):
         for item in wallet.listdescriptors(True)["descriptors"]:
             assert "/<0;1>/*" in item["desc"]
             assert "tprv" in item["desc"]
-
-        self.log.info("Test that a multipath wallet does not yet support an external signer")
-        assert_raises_rpc_error(-4, "Multipath descriptors are not yet supported for external signer wallets",
-                                node.createwallet, wallet_name="mp_ext", disable_private_keys=True,
-                                external_signer=True, multipath=True)
 
     def test_addresses(self):
         self.log.info("Test receive and change addresses come from the same descriptor")

@@ -3134,14 +3134,6 @@ std::shared_ptr<CWallet> CWallet::CreateNew(WalletContext& context, const std::s
         error = strprintf(_("Error creating %s: Could not write version metadata."), walletFile);
         return nullptr;
     }
-    // TODO: support multipath descriptors for external signer wallets. That is
-    // in fact their main use case, since HWI's upcoming registerdescriptors
-    // command takes the multipath descriptor form, but the external signer
-    // protocol currently returns separate receive and change descriptors.
-    if ((wallet_creation_flags & WALLET_FLAG_MULTIPATH_DESCRIPTORS) && (wallet_creation_flags & WALLET_FLAG_EXTERNAL_SIGNER)) {
-        error = _("Error: Multipath descriptors are not yet supported for external signer wallets");
-        return nullptr;
-    }
     {
         LOCK(walletInstance->cs_wallet);
 
@@ -3694,33 +3686,74 @@ void CWallet::SetupDescriptorScriptPubKeyMans()
 
         // TODO: add account parameter
         int account = 0;
-        UniValue signer_res = signer->GetDescriptors(account);
-
-        if (!signer_res.isObject()) throw std::runtime_error(std::string(__func__) + ": Unexpected result");
+        const bool multipath{IsWalletFlagSet(WALLET_FLAG_MULTIPATH_DESCRIPTORS)};
+        UniValue signer_res;
+        try {
+            signer_res = signer->GetDescriptors(account, multipath);
+        } catch (const std::runtime_error& e) {
+            // A signer that predates the --multipath argument exits with an
+            // error. Only the first line of its stderr is reported, which for
+            // an argument parser is typically a usage message, so point at the
+            // likely cause.
+            if (multipath) {
+                throw std::runtime_error(strprintf("%s\nThe signer may not support the getdescriptors --multipath argument, which is required to create a wallet with the multipath option.", e.what()));
+            }
+            throw;
+        }
 
         WalletBatch batch(GetDatabase());
         if (!batch.TxnBegin()) throw std::runtime_error("Error: cannot create db transaction for descriptors import");
 
-        for (bool internal : {false, true}) {
-            const UniValue& descriptor_vals = signer_res.find_value(internal ? "internal" : "receive");
-            if (!descriptor_vals.isArray()) throw std::runtime_error(std::string(__func__) + ": Unexpected result");
-            for (const UniValue& desc_val : descriptor_vals.get_array().getValues()) {
+        //! Parse a descriptor string from the signer, or throw if it is invalid
+        const auto parse_descriptors{[func = __func__](const std::string& desc_str) {
+            FlatSigningProvider keys;
+            std::string desc_error;
+            auto descs = Parse(desc_str, keys, desc_error, false);
+            if (descs.empty()) {
+                throw std::runtime_error(std::string(func) + ": Invalid descriptor \"" + desc_str + "\" (" + desc_error + ")");
+            }
+            return descs;
+        }};
+
+        if (multipath) {
+            // A multipath capable signer returns an array of descriptors that
+            // each cover both the receive and change chain.
+            if (!signer_res.isArray()) throw std::runtime_error(std::string(__func__) + ": Unexpected result");
+            for (const UniValue& desc_val : signer_res.get_array().getValues()) {
                 const std::string& desc_str = desc_val.getValStr();
-                FlatSigningProvider keys;
-                std::string desc_error;
-                auto descs = Parse(desc_str, keys, desc_error, false);
-                if (descs.empty()) {
-                    throw std::runtime_error(std::string(__func__) + ": Invalid descriptor \"" + desc_str + "\" (" + desc_error + ")");
+                auto descs = parse_descriptors(desc_str);
+                if (descs.size() != 2) {
+                    throw std::runtime_error(strprintf("%s: Expected a multipath descriptor with two derivation paths, got %d: %s", __func__, descs.size(), desc_str));
                 }
-                auto& desc = descs.at(0);
-                if (!desc->GetOutputType()) {
+                if (!descs.at(0)->GetOutputType()) {
                     continue;
                 }
-                OutputType t =  *desc->GetOutputType();
-                auto spk_manager = ExternalSignerScriptPubKeyMan::CreateNew(*this, batch, m_keypool_size, std::move(desc));
+                OutputType t = *descs.at(0)->GetOutputType();
+                auto spk_manager = ExternalSignerScriptPubKeyMan::CreateNew(*this, batch, m_keypool_size, std::make_shared<MultipathDescriptor>(std::move(descs)));
                 uint256 id = spk_manager->GetID();
                 AddScriptPubKeyMan(id, std::move(spk_manager));
-                AddActiveScriptPubKeyManWithDb(batch, id, t, internal);
+                // The descriptor covers both chains, so activate it for both
+                AddActiveScriptPubKeyManWithDb(batch, id, t, /*internal=*/false);
+                AddActiveScriptPubKeyManWithDb(batch, id, t, /*internal=*/true);
+            }
+        } else {
+            if (!signer_res.isObject()) throw std::runtime_error(std::string(__func__) + ": Unexpected result");
+            for (bool internal : {false, true}) {
+                const UniValue& descriptor_vals = signer_res.find_value(internal ? "internal" : "receive");
+                if (!descriptor_vals.isArray()) throw std::runtime_error(std::string(__func__) + ": Unexpected result");
+                for (const UniValue& desc_val : descriptor_vals.get_array().getValues()) {
+                    const std::string& desc_str = desc_val.getValStr();
+                    auto descs = parse_descriptors(desc_str);
+                    auto& desc = descs.at(0);
+                    if (!desc->GetOutputType()) {
+                        continue;
+                    }
+                    OutputType t =  *desc->GetOutputType();
+                    auto spk_manager = ExternalSignerScriptPubKeyMan::CreateNew(*this, batch, m_keypool_size, std::move(desc));
+                    uint256 id = spk_manager->GetID();
+                    AddScriptPubKeyMan(id, std::move(spk_manager));
+                    AddActiveScriptPubKeyManWithDb(batch, id, t, internal);
+                }
             }
         }
 

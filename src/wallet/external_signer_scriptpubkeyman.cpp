@@ -26,7 +26,7 @@ std::unique_ptr<ExternalSignerScriptPubKeyMan> ExternalSignerScriptPubKeyMan::Lo
     return std::unique_ptr<ExternalSignerScriptPubKeyMan>(new ExternalSignerScriptPubKeyMan(storage, descriptor, keypool_size, keys, ckeys));
 }
 
-std::unique_ptr<ExternalSignerScriptPubKeyMan> ExternalSignerScriptPubKeyMan::CreateNew(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, std::unique_ptr<Descriptor> desc)
+std::unique_ptr<ExternalSignerScriptPubKeyMan> ExternalSignerScriptPubKeyMan::CreateNew(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, WalletDescriptor&& w_desc)
 {
     auto spkm = std::unique_ptr<ExternalSignerScriptPubKeyMan>(new ExternalSignerScriptPubKeyMan(storage, keypool_size));
 
@@ -34,11 +34,7 @@ std::unique_ptr<ExternalSignerScriptPubKeyMan> ExternalSignerScriptPubKeyMan::Cr
     assert(storage.IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
     assert(storage.IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER));
 
-    int64_t creation_time = GetTime();
-
-    // Make the descriptor
-    WalletDescriptor w_desc(std::move(desc), creation_time, 0, 0, 0);
-    spkm->m_wallet_descriptor = w_desc;
+    spkm->m_wallet_descriptor = std::move(w_desc);
 
     // Store the descriptor
     if (!batch.WriteDescriptor(spkm->GetID(), spkm->m_wallet_descriptor)) {
@@ -50,6 +46,16 @@ std::unique_ptr<ExternalSignerScriptPubKeyMan> ExternalSignerScriptPubKeyMan::Cr
 
     storage.UnsetBlankWalletFlag(batch);
     return spkm;
+}
+
+std::unique_ptr<ExternalSignerScriptPubKeyMan> ExternalSignerScriptPubKeyMan::CreateNew(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, std::unique_ptr<Descriptor> desc)
+{
+    return CreateNew(storage, batch, keypool_size, WalletDescriptor(std::move(desc), /*creation_time=*/GetTime(), 0, 0, 0));
+}
+
+std::unique_ptr<ExternalSignerScriptPubKeyMan> ExternalSignerScriptPubKeyMan::CreateNew(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, std::shared_ptr<MultipathDescriptor> desc)
+{
+    return CreateNew(storage, batch, keypool_size, WalletDescriptor(std::move(desc), /*creation_time=*/GetTime(), 0, 0, 0));
 }
 
  util::Result<ExternalSigner> ExternalSignerScriptPubKeyMan::GetExternalSigner() {
