@@ -162,7 +162,7 @@ FUZZ_TARGET(scriptpubkeyman, .init = initialize_spkm)
                 if (wallet_desc.descriptor->IsSingleType()) {
                     auto output_type{wallet_desc.descriptor->GetOutputType()};
                     if (output_type.has_value()) {
-                        auto dest{spk_manager->GetNewDestination(*output_type)};
+                        auto dest{spk_manager->GetNewDestination(*output_type, fuzzed_data_provider.ConsumeBool())};
                         if (dest) {
                             assert(IsValidDestination(*dest));
                             assert(spk_manager->IsHDEnabled());

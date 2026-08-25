@@ -84,7 +84,7 @@ protected:
 public:
     explicit ScriptPubKeyMan(WalletStorage& storage) : m_storage(storage) {}
     virtual ~ScriptPubKeyMan() = default;
-    virtual util::Result<CTxDestination> GetNewDestination(const OutputType type) { return util::Error{Untranslated("Not supported")}; }
+    virtual util::Result<CTxDestination> GetNewDestination(const OutputType type, bool internal) { return util::Error{Untranslated("Not supported")}; }
     virtual bool IsMine(const CScript& script) const { return false; }
 
     //! Check that the given decryption key is valid for this ScriptPubKeyMan, i.e. it decrypts all of the keys handled by it.
@@ -352,7 +352,7 @@ public:
 
     mutable RecursiveMutex cs_desc_man;
 
-    util::Result<CTxDestination> GetNewDestination(OutputType type) override;
+    util::Result<CTxDestination> GetNewDestination(OutputType type, bool internal) override;
     bool IsMine(const CScript& script) const override;
 
     bool CheckDecryptionKey(const CKeyingMaterial& master_key) override;

@@ -907,7 +907,7 @@ void DescriptorScriptPubKeyMan::SetRangeEnd(int32_t end)
     }
 }
 
-util::Result<CTxDestination> DescriptorScriptPubKeyMan::GetNewDestination(const OutputType type)
+util::Result<CTxDestination> DescriptorScriptPubKeyMan::GetNewDestination(const OutputType type, bool internal)
 {
     // Returns true if this descriptor supports getting new addresses. Conditions where we may be unable to fetch them (e.g. locked) are caught later
     if (!CanGetAddresses()) {
@@ -1010,7 +1010,7 @@ bool DescriptorScriptPubKeyMan::Encrypt(const CKeyingMaterial& master_key, Walle
 util::Result<CTxDestination> DescriptorScriptPubKeyMan::GetReservedDestination(const OutputType type, bool internal, int64_t& index)
 {
     LOCK(cs_desc_man);
-    auto op_dest = GetNewDestination(type);
+    auto op_dest = GetNewDestination(type, internal);
     index = m_wallet_descriptor.GetNext() - 1;
     return op_dest;
 }

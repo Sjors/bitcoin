@@ -2622,7 +2622,7 @@ util::Result<CTxDestination> CWallet::GetNewDestination(const OutputType type, c
         return util::Error{strprintf(_("Error: No %s addresses available."), FormatOutputType(type))};
     }
 
-    auto op_dest = spk_man->GetNewDestination(type);
+    auto op_dest = spk_man->GetNewDestination(type, /*internal=*/false);
     if (op_dest) {
         SetAddressBook(*op_dest, label, AddressPurpose::RECEIVE);
     }
@@ -2707,6 +2707,9 @@ util::Result<CTxDestination> ReserveDestination::GetReservedDestination(bool int
         if (!op_address) return op_address;
         nIndex = index;
         address = *op_address;
+        // Remember the chain so that ReturnDestination() releases the index on
+        // the correct path of a multipath descriptor.
+        fInternal = internal;
     }
     return address;
 }
