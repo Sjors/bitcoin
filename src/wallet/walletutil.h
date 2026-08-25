@@ -82,11 +82,16 @@ private:
     int32_t range_start = 0; // First item in range; start of range, inclusive, i.e. [range_start, range_end). Shared by all paths and never changes.
     std::vector<PathState> m_paths{PathState{}}; // One entry per derivation path; size 1 for single path descriptors
 public:
-    std::shared_ptr<Descriptor> descriptor;
+    std::shared_ptr<Descriptor> descriptor; // For a multipath descriptor, the expansion of the first path
+    std::shared_ptr<MultipathDescriptor> multipath; // Set if this is a multipath descriptor
     uint256 id; // Descriptor ID (calculated once at descriptor initialization/deserialization)
     uint64_t creation_time = 0;
 
+    bool IsMultipath() const { return multipath != nullptr; }
     size_t NumPaths() const { return m_paths.size(); }
+
+    //! The descriptor expansion for the given derivation path
+    const Descriptor& DescAt(size_t path = 0) const { return multipath ? *multipath->PathAt(path) : *descriptor; }
 
     DescriptorCache& CacheAt(size_t path = 0) { return m_paths.at(path).cache; }
     const DescriptorCache& CacheAt(size_t path = 0) const { return m_paths.at(path).cache; }
@@ -125,18 +130,31 @@ public:
             throw std::ios_base::failure("Invalid descriptor: " + error);
         }
         if (descs.size() > 1) {
-            throw std::ios_base::failure("Can't load a multipath descriptor from databases");
+            multipath = std::make_shared<MultipathDescriptor>(std::move(descs));
+            descriptor = multipath->PathAt(0);
+            id = DescriptorID(*multipath);
+            m_paths.resize(multipath->PathCount());
+        } else {
+            descriptor = std::move(descs.at(0));
+            id = DescriptorID(*descriptor);
+            m_paths.resize(1);
         }
-        descriptor = std::move(descs.at(0));
-        id = DescriptorID(*descriptor);
     }
 
     SERIALIZE_METHODS(WalletDescriptor, obj)
     {
         std::string descriptor_str;
-        SER_WRITE(obj, descriptor_str = obj.descriptor->ToString());
-        READWRITE(descriptor_str, obj.creation_time, obj.m_paths.at(0).next_index, obj.range_start, obj.m_paths.at(0).range_end);
+        SER_WRITE(obj, descriptor_str = obj.multipath ? obj.multipath->ToString() : obj.descriptor->ToString());
+        READWRITE(descriptor_str, obj.creation_time);
+        // Parsing the descriptor determines the number of per-path states that follow.
+        // The range start is shared by all paths and stored with the first one, so
+        // for single path descriptors the resulting layout is unchanged from when
+        // there was only a single such state.
         SER_READ(obj, obj.DeserializeDescriptor(descriptor_str));
+        READWRITE(obj.m_paths.at(0).next_index, obj.range_start, obj.m_paths.at(0).range_end);
+        for (size_t path = 1; path < obj.m_paths.size(); ++path) {
+            READWRITE(obj.m_paths.at(path).next_index, obj.m_paths.at(path).range_end);
+        }
     }
 
     WalletDescriptor() = default;
@@ -148,9 +166,21 @@ public:
       descriptor(descriptor),
       id(DescriptorID(*descriptor)),
       creation_time(creation_time) {}
+    //! Multipath descriptor constructor; all paths start with the same range and next index.
+    WalletDescriptor(std::shared_ptr<MultipathDescriptor> multipath, uint64_t creation_time, int32_t range_start, int32_t range_end, int32_t next_index)
+    : range_start(multipath->PathAt(0)->IsRange() ? range_start : 0),
+      m_paths(multipath->PathCount(),
+              {next_index,
+               multipath->PathAt(0)->IsRange() ? range_end : 1,
+               DescriptorCache{}}),
+      descriptor(multipath->PathAt(0)),
+      multipath(multipath),
+      id(DescriptorID(*multipath)),
+      creation_time(creation_time) {}
 };
 
 WalletDescriptor GenerateWalletDescriptor(const CExtPubKey& master_key, const OutputType& output_type, bool internal);
+
 } // namespace wallet
 
 #endif // BITCOIN_WALLET_WALLETUTIL_H

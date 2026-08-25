@@ -4,6 +4,8 @@
 
 #include <test/util/setup_common.h>
 #include <clientversion.h>
+#include <script/descriptor.h>
+#include <script/signingprovider.h>
 #include <streams.h>
 #include <uint256.h>
 #include <wallet/test/util.h>
@@ -27,6 +29,35 @@ BOOST_AUTO_TEST_CASE(walletdb_readkeyvalue)
     DataStream ssValue{};
     uint256 dummy;
     BOOST_CHECK_THROW(ssValue >> dummy, std::ios_base::failure);
+}
+
+BOOST_AUTO_TEST_CASE(walletdescriptor_multipath_roundtrip)
+{
+    const std::string xpub{"xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL"};
+    const std::string desc_str{"wpkh(" + xpub + "/<0;1>/*)"};
+
+    FlatSigningProvider keys;
+    std::string error;
+    auto descs = Parse(desc_str, keys, error);
+    BOOST_REQUIRE_EQUAL(descs.size(), 2U);
+    WalletDescriptor w_desc(std::make_shared<MultipathDescriptor>(std::move(descs)), /*creation_time=*/123, /*range_start=*/0, /*range_end=*/10, /*next_index=*/3);
+    // Make the per-path states differ
+    w_desc.IncNext(/*path=*/1);
+    w_desc.SetEnd(/*path=*/1, 20);
+
+    DataStream s{};
+    s << w_desc;
+    WalletDescriptor loaded;
+    s >> loaded;
+    BOOST_CHECK(loaded.IsMultipath());
+    BOOST_CHECK_EQUAL(loaded.NumPaths(), 2U);
+    BOOST_CHECK(loaded.id == w_desc.id);
+    BOOST_CHECK_EQUAL(loaded.creation_time, 123U);
+    BOOST_CHECK_EQUAL(loaded.GetNext(0), 3);
+    BOOST_CHECK_EQUAL(loaded.GetEnd(0), 10);
+    BOOST_CHECK_EQUAL(loaded.GetNext(1), 4);
+    BOOST_CHECK_EQUAL(loaded.GetEnd(1), 20);
+    BOOST_CHECK_EQUAL(loaded.multipath->ToString(), w_desc.multipath->ToString());
 }
 
 BOOST_AUTO_TEST_SUITE_END()

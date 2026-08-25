@@ -92,5 +92,47 @@ BOOST_FIXTURE_TEST_CASE(wallet_load_descriptors, TestingSetup)
     }
 }
 
+BOOST_FIXTURE_TEST_CASE(wallet_load_multipath, TestingSetup)
+{
+    bilingual_str error;
+    std::vector<bilingual_str> warnings;
+    const std::string xpub{"xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL"};
+
+    const auto make_desc{[](const std::string& desc_str) {
+        FlatSigningProvider keys;
+        std::string parse_error;
+        auto descs = Parse(desc_str, keys, parse_error);
+        BOOST_REQUIRE_MESSAGE(!descs.empty(), desc_str + ": " + parse_error);
+        // Use an empty range so that loading does not require cache records
+        if (descs.size() == 1) return WalletDescriptor(std::move(descs.at(0)), 0, 0, 0, 0);
+        return WalletDescriptor(std::make_shared<MultipathDescriptor>(std::move(descs)), 0, 0, 0, 0);
+    }};
+    const auto load_result{[&](uint64_t flags, const std::string& desc_str) {
+        std::unique_ptr<WalletDatabase> database = CreateMockableWalletDatabase();
+        {
+            WalletBatch batch(*database);
+            BOOST_CHECK(batch.WriteWalletFlags(flags));
+            WalletDescriptor desc = make_desc(desc_str);
+            BOOST_CHECK(batch.WriteDescriptor(desc.id, desc));
+        }
+        const std::shared_ptr<CWallet> wallet(new CWallet(m_node.chain.get(), "", std::move(database)));
+        return wallet->PopulateWalletFromDB(error, warnings);
+    }};
+
+    // A multipath record does not load in a wallet without the multipath flag
+    BOOST_CHECK_EQUAL(load_result(WALLET_FLAG_DESCRIPTORS, "wpkh(" + xpub + "/<0;1>/*)"), DBErrors::UNKNOWN_DESCRIPTOR);
+
+    // A single path record with scripts does not load in a multipath wallet
+    BOOST_CHECK_EQUAL(load_result(WALLET_FLAG_DESCRIPTORS | WALLET_FLAG_MULTIPATH_DESCRIPTORS, "wpkh(" + xpub + "/0/*)"), DBErrors::UNKNOWN_DESCRIPTOR);
+
+    // The record format supports any number of paths, but this version only
+    // loads a receive and change pair, so wallets written by a hypothetical
+    // future version with more paths are refused rather than misinterpreted
+    BOOST_CHECK_EQUAL(load_result(WALLET_FLAG_DESCRIPTORS | WALLET_FLAG_MULTIPATH_DESCRIPTORS, "wpkh(" + xpub + "/<0;1;2>/*)"), DBErrors::UNKNOWN_DESCRIPTOR);
+
+    // A receive and change pair loads in a multipath wallet
+    BOOST_CHECK_EQUAL(load_result(WALLET_FLAG_DESCRIPTORS | WALLET_FLAG_MULTIPATH_DESCRIPTORS, "wpkh(" + xpub + "/<0;1>/*)"), DBErrors::LOAD_OK);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
 } // namespace wallet

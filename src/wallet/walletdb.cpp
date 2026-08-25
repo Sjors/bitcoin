@@ -782,6 +782,24 @@ static DBErrors LoadDescriptorWalletRecords(CWallet* pwallet, DatabaseBatch& bat
             return DBErrors::CORRUPT;
         }
 
+        if (desc.IsMultipath() && !pwallet->IsWalletFlagSet(WALLET_FLAG_MULTIPATH_DESCRIPTORS)) {
+            strErr = "Error: Multipath descriptor record found in a wallet without the multipath_descriptors flag";
+            return DBErrors::UNKNOWN_DESCRIPTOR;
+        }
+        // Scriptless descriptors (unused() HD key containers) are single path even in multipath wallets
+        if (!desc.IsMultipath() && desc.descriptor->HasScripts() && pwallet->IsWalletFlagSet(WALLET_FLAG_MULTIPATH_DESCRIPTORS)) {
+            strErr = "Error: Single path descriptor record found in a wallet with the multipath_descriptors flag";
+            return DBErrors::UNKNOWN_DESCRIPTOR;
+        }
+        // The record and cache formats support any number of paths, but this
+        // version only handles a receive and change pair. Refusing anything
+        // else keeps the wallet safe against being opened by this version
+        // after a newer one starts storing more paths.
+        if (desc.IsMultipath() && desc.NumPaths() != 2) {
+            strErr = strprintf("Error: Multipath descriptor record with %u derivation paths found, only 2 are supported. The wallet might have been created on a newer version.", desc.NumPaths());
+            return DBErrors::UNKNOWN_DESCRIPTOR;
+        }
+
         DescriptorCache cache;
 
         // Get key cache for this descriptor
