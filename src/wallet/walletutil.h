@@ -54,6 +54,14 @@ enum WalletFlags : uint64_t {
 
     //! Indicates that the wallet needs an external signer
     WALLET_FLAG_EXTERNAL_SIGNER = (1ULL << 35),
+
+    //! Indicates that the wallet stores its descriptors in multipath form:
+    //! each descriptor record is a BIP 389 multipath descriptor with exactly
+    //! two derivation paths, covering both the receive and change chain, and
+    //! the wallet only supports such descriptors. Mandatory so that previous
+    //! versions, which can only load single path descriptor records, refuse
+    //! to open the wallet.
+    WALLET_FLAG_MULTIPATH_DESCRIPTORS = (1ULL << 36),
 };
 
 //! Get the path of the wallet directory.
