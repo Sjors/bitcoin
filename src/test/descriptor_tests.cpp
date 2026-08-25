@@ -533,6 +533,38 @@ void CheckMultipath(const std::string& prv,
               expanded_prvs.at(i), expanded_pubs.at(i), i);
     }
 
+    // Any single path can reproduce the multipath string forms, and all paths share one identifier.
+    const auto parse_multipath{[&](const std::string& desc_str, FlatSigningProvider& keys) {
+        std::string parse_error;
+        auto parsed{Parse(desc_str, keys, parse_error)};
+        BOOST_REQUIRE_MESSAGE(parsed.size() == expanded_pubs.size(), desc_str + ": " + parse_error);
+        return MultipathDescriptor{std::move(parsed)};
+    }};
+    FlatSigningProvider keys_prv, keys_pub;
+    const MultipathDescriptor multipath_prv{parse_multipath(prv, keys_prv)};
+    const MultipathDescriptor multipath_pub{parse_multipath(pub, keys_pub)};
+
+    BOOST_CHECK_MESSAGE(EqualDescriptor(multipath_prv.ToString(), pub), "Private ser: " + multipath_prv.ToString() + " Public desc: " + pub);
+    BOOST_CHECK_MESSAGE(EqualDescriptor(multipath_pub.ToString(), pub), "Public ser: " + multipath_pub.ToString() + " Public desc: " + pub);
+
+    std::string prv_ser;
+    BOOST_CHECK(multipath_prv.ToPrivateString(keys_prv, prv_ser));
+    BOOST_CHECK_MESSAGE(EqualDescriptor(prv_ser, prv), "Private ser: " + prv_ser + " Private desc: " + prv);
+    BOOST_CHECK(multipath_pub.ToPrivateString(keys_prv, prv_ser));
+    BOOST_CHECK_MESSAGE(EqualDescriptor(prv_ser, prv), "Private ser: " + prv_ser + " Private desc: " + prv);
+    BOOST_CHECK(!multipath_pub.ToPrivateString(keys_pub, prv_ser));
+
+    // The expanded descriptors keep emitting their own concrete path
+    BOOST_CHECK_EQUAL(multipath_pub.PathCount(), expanded_pubs.size());
+    for (size_t i = 0; i < expanded_pubs.size(); ++i) {
+        const std::string path_ser{multipath_pub.PathAt(i)->ToString()};
+        BOOST_CHECK_MESSAGE(EqualDescriptor(path_ser, expanded_pubs.at(i)), "Path ser: " + path_ser + " Path desc: " + expanded_pubs.at(i));
+    }
+
+    // All paths share one identifier, which is not the identifier of any single path
+    BOOST_CHECK(DescriptorID(multipath_prv) == DescriptorID(multipath_pub));
+    BOOST_CHECK(DescriptorID(multipath_pub) != DescriptorID(*multipath_pub.PathAt(0)));
+
     // The descriptor for each path must be standalone. They should not share common references. Test this
     // by parsing a multipath descriptor expression, deallocating all but one of the descriptors and making
     // sure we can perform operations on it.
@@ -1416,6 +1448,44 @@ BOOST_AUTO_TEST_CASE(unused_descriptor_test)
     CheckUnused("unused(xprvA1RpRA33e1JQ7ifknakTFpgNXPmW2YvmhqLQYMmrj4xJXXWYpDPS3xz7iAxn8L39njGVyuoseXzU6rcxFLJ8HFsTjSyQbLYnMpCqE2VbFWc)", "unused(xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL)");
     CheckUnused("unused(L4rK1yDtCWekvXuE6oXD9jCYfFNV2cWRpVuPLBcCU2z8TrisoyY1)", "unused(03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd)");
     CheckUnused("unused(xprvA1RpRA33e1JQ7ifknakTFpgNXPmW2YvmhqLQYMmrj4xJXXWYpDPS3xz7iAxn8L39njGVyuoseXzU6rcxFLJ8HFsTjSyQbLYnMpCqE2VbFWc/0h/0h/1)", "unused(xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0h/0h/1)");
+}
+
+BOOST_AUTO_TEST_CASE(multipath_descriptor_normalized_string)
+{
+    const std::string master_xprv{"xprv9s21ZrQH143K31xYSDQpPDxsXRTUcvj2iNHm5NUtrGiGG5e2DtALGdso3pGz6ssrdK4PFmM8NSpSBHNqPqm55Qn3LqFtT2emdEXVYsCzC2U"};
+    const std::string master_xpub{"xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"};
+    // The above, derived at 2147483647h
+    const std::string hardened_xpub{"xpub69H7F5dQzmVd3vPuLKtcXJziMEQByuDidnX3YdwgtNsecY5HRGtAAQC5mXTt4dsv9RzyjgDjAQs9VGVV6ydYCHnprc9vvaA5YtqWyL6hyds"};
+
+    // Normalized form of each multipath descriptor, or std::nullopt if it has none.
+    const std::vector<std::pair<std::string, std::optional<std::string>>> cases{
+        // Without hardened derivation the normalized form is the public form
+        {"pkh(" + master_xprv + "/<0;1>/0)", "pkh(" + master_xpub + "/<0;1>/0)"},
+        // A hardened step before the multipath element moves into the origin
+        {"pkh(" + master_xprv + "/2147483647h/<0;1>)", "pkh([bd16bee5/2147483647h]" + hardened_xpub + "/<0;1>)"},
+        // Each path of a hardened multipath specifier normalizes to a different last
+        // hardened xpub, so there is no single normalized multipath string
+        {"pkh(" + master_xprv + "/<2147483647h;0>/0)", std::nullopt},
+    };
+
+    for (const auto& [desc_str, norm] : cases) {
+        FlatSigningProvider keys;
+        std::string error;
+        auto parsed{Parse(desc_str, keys, error)};
+        BOOST_REQUIRE_MESSAGE(parsed.size() == 2, desc_str + ": " + error);
+        const MultipathDescriptor desc{std::move(parsed)};
+        std::string norm_ser;
+        BOOST_CHECK_EQUAL(desc.ToNormalizedString(keys, norm_ser), norm.has_value());
+        if (norm) BOOST_CHECK_MESSAGE(EqualDescriptor(norm_ser, *norm), "Normalized ser: " + norm_ser + " Norm. desc: " + *norm);
+    }
+
+    // The identifier is computed over the compat format, which always uses the
+    // apostrophe, so the hardened marker of the input does not affect it.
+    FlatSigningProvider keys_h, keys_apostrophe;
+    std::string error;
+    const MultipathDescriptor desc_h{Parse("pkh(" + master_xprv + "/<2147483647h;0>/0)", keys_h, error)};
+    const MultipathDescriptor desc_apostrophe{Parse("pkh(" + master_xprv + "/<2147483647\';0>/0)", keys_apostrophe, error)};
+    BOOST_CHECK(DescriptorID(desc_h) == DescriptorID(desc_apostrophe));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

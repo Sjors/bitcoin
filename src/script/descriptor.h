@@ -205,6 +205,36 @@ struct Descriptor {
     virtual size_t GetKeyCount() const = 0;
 };
 
+/** A parsed BIP 389 multipath descriptor.
+ *
+ * Holds the expanded single-path descriptors that Parse() produced for each
+ * element of the multipath specifier, while retaining the ability to emit the
+ * combined multipath string forms and a single descriptor identifier.
+ */
+class MultipathDescriptor
+{
+    //! The expanded per-path descriptors, in the order the multipath specifier lists them.
+    std::vector<std::shared_ptr<Descriptor>> m_descriptors;
+
+public:
+    //! descs must be the (at least two) sibling descriptors produced by a single Parse() call.
+    explicit MultipathDescriptor(std::vector<std::unique_ptr<Descriptor>> descs);
+
+    //! Number of paths in the multipath specifier.
+    size_t PathCount() const { return m_descriptors.size(); }
+    //! The expanded descriptor for the given path index.
+    const std::shared_ptr<Descriptor>& PathAt(size_t path) const { return m_descriptors.at(path); }
+
+    /** Convert back to the multipath descriptor string, with checksum. */
+    std::string ToString(bool compat_format = false) const;
+    /** Convert to the multipath private string, see Descriptor::ToPrivateString. */
+    bool ToPrivateString(const SigningProvider& provider, std::string& out) const;
+    /** Convert to the multipath normalized string, see Descriptor::ToNormalizedString.
+     *  Also fails when no single normalized multipath form exists, which is the
+     *  case for hardened multipath specifiers. */
+    bool ToNormalizedString(const SigningProvider& provider, std::string& out, const DescriptorCache* cache = nullptr) const;
+};
+
 /** Parse a `descriptor` string. Included private keys are put in `out`.
  *
  * If the descriptor has a checksum, it must be valid. If `require_checksum`
@@ -243,5 +273,9 @@ std::unique_ptr<Descriptor> InferDescriptor(const CScript& script, const Signing
 *   This is not part of BIP 380, not guaranteed to be interoperable and should not be exposed to the user.
 */
 uint256 DescriptorID(const Descriptor& desc);
+
+/** DescriptorID of a multipath descriptor, computed over its combined multipath string,
+ *  so that all paths share a single identifier. */
+uint256 DescriptorID(const MultipathDescriptor& desc);
 
 #endif // BITCOIN_SCRIPT_DESCRIPTOR_H
