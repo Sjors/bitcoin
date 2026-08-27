@@ -57,6 +57,7 @@ constexpr int MUSIG_DERIVATION = 1 << 10; // MuSig with BIP 328 derivation from 
 constexpr int MIXED_MUSIG = 1 << 11; // Both MuSig and normal key expressions are present
 constexpr int UNIQUE_XPUBS = 1 << 12; // Whether the xpub count should be of unique xpubs
 constexpr int MULTIPATH = 1 << 13; // The descriptor has multipath derivation
+constexpr int MULTIPATH_UNNORMALIZABLE = 1 << 14; // No publicly derivable multipath form exists
 
 /** Compare two descriptors. If only one of them has a checksum, the checksum is ignored. */
 bool EqualDescriptor(std::string a, std::string b)
@@ -196,10 +197,14 @@ void DoCheck(std::string prv, std::string pub, const std::string& norm_pub, int 
     parse_pubs = Parse(pub, keys_pub, error, /*require_checksum=*/false, &multipath_pub);
     BOOST_CHECK_MESSAGE(!parse_pubs.empty(), error);
 
-    BOOST_REQUIRE_EQUAL(parse_privs.size() > 1 && multipath_prv, (flags & MULTIPATH) != 0);
-    BOOST_REQUIRE_EQUAL(parse_pubs.size() > 1 && multipath_pub, (flags & MULTIPATH) != 0);
+    const bool is_multipath{(flags & MULTIPATH) != 0};
+    const bool expect_multipath{is_multipath && !(flags & MULTIPATH_UNNORMALIZABLE)};
+    BOOST_REQUIRE_EQUAL(parse_privs.size() > 1, is_multipath);
+    BOOST_REQUIRE_EQUAL(parse_pubs.size() > 1, is_multipath);
+    BOOST_REQUIRE_EQUAL(multipath_prv.has_value(), expect_multipath);
+    BOOST_REQUIRE_EQUAL(multipath_pub.has_value(), expect_multipath);
 
-    if (flags & MULTIPATH) {
+    if (expect_multipath) {
         const std::string expected{pub + "#" + GetDescriptorChecksum(pub)};
         BOOST_CHECK_EQUAL(*multipath_prv, expected);
         BOOST_CHECK_EQUAL(*multipath_pub, expected);
@@ -706,7 +711,7 @@ BOOST_AUTO_TEST_CASE(descriptor_test)
                 "pkh([bd16bee5/2147483647h]xpub69H7F5dQzmVd3vPuLKtcXJziMEQByuDidnX3YdwgtNsecY5HRGtAAQC5mXTt4dsv9RzyjgDjAQs9VGVV6ydYCHnprc9vvaA5YtqWyL6hyds/0)",
                 "pkh(xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB/0/0)",
             },
-            {HARDENED | MULTIPATH, DEFAULT | MULTIPATH},
+            {HARDENED | MULTIPATH | MULTIPATH_UNNORMALIZABLE, DEFAULT | MULTIPATH | MULTIPATH_UNNORMALIZABLE},
             {
                 {{"76a914ebdc90806a9c4356c1c88e42216611e1cb4c1c1788ac"}},
                 {{"76a914f103317b9f0b758a62cb3879281d23e3b1deb90d88ac"}},
@@ -756,7 +761,7 @@ BOOST_AUTO_TEST_CASE(descriptor_test)
                 "sh(wpkh(xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8/10/20/30/40/*h))",
                 "sh(wpkh(xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8/100h/20/30/40/*h))",
             },
-            {RANGE | HARDENED | DERIVE_HARDENED | MULTIPATH},
+            {RANGE | HARDENED | DERIVE_HARDENED | MULTIPATH | MULTIPATH_UNNORMALIZABLE},
             {
                 {{"a9149a4d9901d6af519b2a23d4a2f51650fcba87ce7b87"},{"a914bed59fc0024fae941d6e20a3b44a109ae740129287"},{"a9148483aa1116eb9c05c482a72bada4b1db24af654387"}},
                 {{"a91470192039cb9529aadf4e53e46d9ac6a13790865787"},{"a914855859faffabf1e4ed2bb7411ab66f4599b1abd287"},{"a9148f2cfd4b486de247c44684160da164617ccf2c2687"}},
@@ -1449,6 +1454,15 @@ BOOST_AUTO_TEST_CASE(parse_multipath_string_test)
     const std::string wif{"L4rK1yDtCWekvXuE6oXD9jCYfFNV2cWRpVuPLBcCU2z8TrisoyY1"};
     const CPubKey pubkey{DecodeSecret(wif).GetPubKey()};
 
+    // The fingerprint of xprv and its extended public keys at 84h/0h/0h and at 0h
+    const std::string fpr{HexStr(master.Neuter().id_key_fingerprint())};
+    CExtKey acc{master};
+    for (uint32_t i : {84, 0, 0}) BOOST_REQUIRE(acc.Derive(acc, i | 0x80000000));
+    const std::string acc_xpub{EncodeExtPubKey(acc.Neuter())};
+    CExtKey acc0{master};
+    BOOST_REQUIRE(acc0.Derive(acc0, 0 | 0x80000000));
+    const std::string acc0_xpub{EncodeExtPubKey(acc0.Neuter())};
+
     // Parse a descriptor and check the multipath string reported alongside the expansion
     const auto check{[](const std::string& desc_str, const std::string& expected_multipath, size_t num_descs) {
         FlatSigningProvider keys;
@@ -1460,11 +1474,14 @@ BOOST_AUTO_TEST_CASE(parse_multipath_string_test)
         BOOST_CHECK_EQUAL(*multipath, expected_multipath + "#" + GetDescriptorChecksum(expected_multipath));
     }};
 
-    // Private keys are replaced with their public form; the text around them,
-    // e.g. an origin with apostrophes, is unchanged
-    check("wpkh(" + xprv + "/84h/0h/0h/<0;1>/*)", "wpkh(" + xpub + "/84h/0h/0h/<0;1>/*)", 2);
-    check("wpkh(" + xprv + "/84h/0h/0h/2/<0;1>/*)", "wpkh(" + xpub + "/84h/0h/0h/2/<0;1>/*)", 2);
-    check("wpkh([deadbeef/49']" + xprv + "/0h/<0;1>/*)", "wpkh([deadbeef/49']" + xpub + "/0h/<0;1>/*)", 2);
+    // Private extended keys followed by hardened derivation steps are
+    // normalized: the key origin and the extended public key at the last
+    // hardened step, merging any explicit origin; unhardened suffixes are unchanged
+    check("wpkh(" + xprv + "/84h/0h/0h/<0;1>/*)", "wpkh([" + fpr + "/84h/0h/0h]" + acc_xpub + "/<0;1>/*)", 2);
+    check("wpkh(" + xprv + "/84h/0h/0h/2/<0;1>/*)", "wpkh([" + fpr + "/84h/0h/0h]" + acc_xpub + "/2/<0;1>/*)", 2);
+    check("wpkh([deadbeef/49']" + xprv + "/0h/<0;1>/*)", "wpkh([deadbeef/49h/0h]" + acc0_xpub + "/<0;1>/*)", 2);
+    // An explicit origin is normalized even when the key has no hardened suffix
+    check("wpkh([deadbeef/49']" + xprv + "/<0;1>/*)", "wpkh([deadbeef/49h]" + xpub + "/<0;1>/*)", 2);
     // An x-only key is replaced by its x-only public form
     check("tr(" + wif + ",pk(" + xprv + "/<0;1>/*))", "tr(" + HexStr(XOnlyPubKey{pubkey}) + ",pk(" + xpub + "/<0;1>/*))", 2);
     // Also within miniscript
