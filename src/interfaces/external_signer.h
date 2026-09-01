@@ -8,6 +8,7 @@
 #include <interfaces/types.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -52,5 +53,15 @@ public:
 };
 
 } // namespace interfaces
+
+//! Set, replace or (with nullptr) clear the process-wide external signer
+//! service registered over IPC. Thread safe. A registered service takes
+//! precedence over the -signer command. Defined in external_signer.cpp.
+void SetRegisteredSignerService(std::shared_ptr<interfaces::ExternalSignerService> service);
+
+//! Get the external signer service registered over IPC, or nullptr if there
+//! is none. Returns a copy so the service stays alive for the duration of a
+//! call even if it is concurrently replaced.
+std::shared_ptr<interfaces::ExternalSignerService> GetRegisteredSignerService();
 
 #endif // BITCOIN_INTERFACES_EXTERNAL_SIGNER_H

@@ -7,14 +7,32 @@
 #include <chainparams.h>
 #include <common/run_command.h>
 #include <core_io.h>
+#include <interfaces/external_signer.h>
 #include <psbt.h>
+#include <sync.h>
 #include <util/strencodings.h>
 #include <util/subprocess.h>
 
 #include <algorithm>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+static GlobalMutex g_signer_service_mutex;
+static std::shared_ptr<interfaces::ExternalSignerService> g_signer_service GUARDED_BY(g_signer_service_mutex);
+
+void SetRegisteredSignerService(std::shared_ptr<interfaces::ExternalSignerService> service)
+{
+    LOCK(g_signer_service_mutex);
+    g_signer_service = std::move(service);
+}
+
+std::shared_ptr<interfaces::ExternalSignerService> GetRegisteredSignerService()
+{
+    LOCK(g_signer_service_mutex);
+    return g_signer_service;
+}
 
 ExternalSigner::ExternalSigner(std::vector<std::string> command, std::string chain, std::string fingerprint, std::string name)
     : m_command{std::move(command)}, m_chain{std::move(chain)}, m_fingerprint{std::move(fingerprint)}, m_name{std::move(name)} {}

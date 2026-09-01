@@ -8,6 +8,7 @@
 #include <common/system.h>
 #include <univalue.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
