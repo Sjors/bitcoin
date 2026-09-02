@@ -14,11 +14,15 @@ ImportResult ImportDescriptor(CWallet& wallet, const ImportDescriptorRequest& re
 
     std::vector<std::string> warnings;
 
-    // Parse descriptor string
+    // Parse descriptor string, filling in the wallet's HD private keys
     FlatSigningProvider keys;
     std::string error;
     std::optional<std::string> multipath_normalized;
-    auto parsed_descs = Parse(request.descriptor, keys, error, /*require_checksum=*/true, &multipath_normalized);
+    std::map<CExtPubKey, CExtKey> known_xprvs;
+    for (const auto& [xpub, spkms] : wallet.GetHDPubKeys(CWallet::HDKeyFilter::All)) {
+        if (std::optional<CExtKey> xprv{wallet.GetExtKey(xpub)}) known_xprvs.emplace(xpub, *xprv);
+    }
+    auto parsed_descs = Parse(request.descriptor, keys, error, /*require_checksum=*/true, &multipath_normalized, &known_xprvs);
     if (parsed_descs.empty()) {
         return ImportResult(WalletErrorCode::InvalidDescriptor, error, warnings);
     }

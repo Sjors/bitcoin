@@ -186,7 +186,7 @@ RPCMethod importdescriptors()
                         {
                             {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",
                                 {
-                                    {"desc", RPCArg::Type::STR, RPCArg::Optional::NO, "Descriptor to import."},
+                                    {"desc", RPCArg::Type::STR, RPCArg::Optional::NO, "Descriptor to import. HD keys of the wallet, given as their extended public key or an origin from it, are imported with their private key."},
                                     {"active", RPCArg::Type::BOOL, RPCArg::Default{false}, "Set this descriptor to be the active descriptor for the corresponding output type/externality"},
                                     {"range", RPCArg::Type::RANGE, RPCArg::Optional::OMITTED, "If a ranged descriptor is used, this specifies the end or the range (in the form [begin,end]) to import"},
                                     {"next_index", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "If a ranged descriptor is set to active, this specifies the next index to generate addresses from"},
