@@ -2997,6 +2997,54 @@ std::vector<std::unique_ptr<Descriptor>> Parse(std::string_view descriptor, Flat
     return {};
 }
 
+std::optional<std::string> ToNormalizedMultipathString(std::span<const Descriptor* const> descriptors, const SigningProvider& provider)
+{
+    if (descriptors.size() < 2) return std::nullopt;
+
+    // Split each normalized descriptor into tokens: the delimiters of the
+    // descriptor language, and the runs of other characters between them.
+    constexpr std::string_view DELIMITERS{"()[]{},/"};
+    std::vector<std::vector<std::string>> tokens;
+    for (const Descriptor* desc : descriptors) {
+        std::string str;
+        if (!desc->ToNormalizedString(provider, str, /*cache=*/nullptr, /*require_derivable=*/true)) return std::nullopt;
+        str.erase(str.rfind('#')); // Drop the checksum
+        auto& toks{tokens.emplace_back()};
+        bool after_delimiter{true};
+        for (const char c : str) {
+            const bool delimiter{DELIMITERS.find(c) != std::string_view::npos};
+            if (delimiter || after_delimiter) {
+                toks.emplace_back(1, c);
+            } else {
+                toks.back() += c;
+            }
+            after_delimiter = delimiter;
+        }
+        if (toks.size() != tokens.front().size()) return std::nullopt;
+    }
+
+    // Walk the tokens in lockstep. Where they differ, they must all be
+    // derivation steps (a key path element following a '/'), which are merged
+    // into a multipath element. A key expression can have only one.
+    std::string ret;
+    bool multipath_in_expr{false};
+    for (size_t i = 0; i < tokens.front().size(); ++i) {
+        const std::string& first{tokens.front()[i]};
+        if (first != "/" && first.size() == 1 && DELIMITERS.find(first[0]) != std::string_view::npos) multipath_in_expr = false;
+        if (std::ranges::all_of(tokens, [&](const auto& toks) { return toks[i] == first; })) {
+            ret += first;
+            continue;
+        }
+        if (i == 0 || tokens.front()[i - 1] != "/" || multipath_in_expr) return std::nullopt;
+        for (const auto& toks : tokens) {
+            if (!ParseKeyPathElement(std::span<const char>{toks[i]})) return std::nullopt;
+        }
+        ret += "<" + util::Join(tokens, ";", [i](const auto& toks) { return toks[i]; }) + ">";
+        multipath_in_expr = true;
+    }
+    return AddChecksum(ret);
+}
+
 std::string GetDescriptorChecksum(const std::string& descriptor)
 {
     std::string ret;

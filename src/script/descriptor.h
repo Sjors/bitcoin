@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -216,6 +217,22 @@ struct Descriptor {
  * else is wrong, an empty vector is returned.
  */
 std::vector<std::unique_ptr<Descriptor>> Parse(std::string_view descriptor, FlatSigningProvider& out, std::string& error, bool require_checksum = false);
+
+/** Reconstruct the multipath descriptor that `descriptors` were expanded from by Parse(),
+ *  in normalized form (see Descriptor::ToNormalizedString).
+ *
+ * The normalized strings of the descriptors are walked in lockstep. They may only differ
+ * at derivation steps, one per key expression, which are written as a multipath element
+ * listing the steps in the order of `descriptors`.
+ *
+ * @param[in] descriptors The expanded descriptors, at least two, in multipath order.
+ * @param[in] provider Signing provider queried for the private keys needed to normalize.
+ * @return The normalized multipath descriptor string with checksum, or `std::nullopt` if
+ *         the descriptors differ in anything but a single derivation step per key
+ *         expression, or if a publicly derivable normalized form does not exist for one
+ *         of them.
+ */
+std::optional<std::string> ToNormalizedMultipathString(std::span<const Descriptor* const> descriptors, const SigningProvider& provider);
 
 /** Get the checksum for a `descriptor`.
  *

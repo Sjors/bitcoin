@@ -2,6 +2,8 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include <key.h>
+#include <key_io.h>
 #include <pubkey.h>
 #include <script/descriptor.h>
 #include <script/sign.h>
@@ -12,6 +14,7 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <initializer_list>
 #include <optional>
 #include <regex>
 #include <string>
@@ -56,6 +59,7 @@ constexpr int MUSIG_DERIVATION = 1 << 10; // MuSig with BIP 328 derivation from 
 constexpr int MIXED_MUSIG = 1 << 11; // Both MuSig and normal key expressions are present
 constexpr int UNIQUE_XPUBS = 1 << 12; // Whether the xpub count should be of unique xpubs
 constexpr int MULTIPATH = 1 << 13; // The descriptor has multipath derivation
+constexpr int MULTIPATH_UNNORMALIZABLE = 1 << 14; // No publicly derivable multipath form exists
 
 /** Compare two descriptors. If only one of them has a checksum, the checksum is ignored. */
 bool EqualDescriptor(std::string a, std::string b)
@@ -197,6 +201,28 @@ void DoCheck(std::string prv, std::string pub, const std::string& norm_pub, int 
     BOOST_REQUIRE_EQUAL(parse_privs.size() > 1, (flags & MULTIPATH) != 0);
     BOOST_REQUIRE_EQUAL(parse_pubs.size() > 1, (flags & MULTIPATH) != 0);
 
+    if (flags & MULTIPATH) {
+        // The normalized multipath descriptor can be reconstructed from the
+        // expansion. It has the keys at the last hardened step and 'h' as
+        // hardened marker, which for the test vectors is the pub descriptor
+        // with apostrophes replaced. A hardened multipath step or wildcard
+        // has no publicly derivable form.
+        std::vector<const Descriptor*> privs, pubs;
+        for (const auto& d : parse_privs) privs.push_back(d.get());
+        for (const auto& d : parse_pubs) pubs.push_back(d.get());
+        const auto recon_prv{ToNormalizedMultipathString(privs, keys_priv)};
+        const auto recon_pub{ToNormalizedMultipathString(pubs, keys_priv)};
+        if (flags & MULTIPATH_UNNORMALIZABLE) {
+            BOOST_CHECK(!recon_prv);
+            BOOST_CHECK(!recon_pub);
+        } else {
+            const std::string h_pub{UseHInsteadOfApostrophe(pub)};
+            const std::string expected{h_pub + "#" + GetDescriptorChecksum(h_pub)};
+            BOOST_CHECK_EQUAL(recon_prv.value_or("none"), expected);
+            BOOST_CHECK_EQUAL(recon_pub.value_or("none"), expected);
+        }
+    }
+
     auto& parse_priv = parse_privs.at(desc_index);
     auto& parse_pub = parse_pubs.at(desc_index);
 
@@ -274,8 +300,7 @@ void DoCheck(std::string prv, std::string pub, const std::string& norm_pub, int 
         // If there is at least one private key, ToPrivateString() should return true and include that key
         std::string prv_str;
         BOOST_CHECK(parse_priv->ToPrivateString(keys_priv, prv_str));
-        size_t checksum_len = 9; // Including the '#' character
-        BOOST_CHECK_MESSAGE(prv == prv_str.substr(0, prv_str.length() - checksum_len), prv);
+        BOOST_CHECK_MESSAGE(EqualDescriptor(expected_prv ? *expected_prv : prv, prv_str), prv_str);
     }
 
     // Check that private can produce the normalized descriptors
@@ -703,7 +728,7 @@ BOOST_AUTO_TEST_CASE(descriptor_test)
                 "pkh([bd16bee5/2147483647h]xpub69H7F5dQzmVd3vPuLKtcXJziMEQByuDidnX3YdwgtNsecY5HRGtAAQC5mXTt4dsv9RzyjgDjAQs9VGVV6ydYCHnprc9vvaA5YtqWyL6hyds/0)",
                 "pkh(xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB/0/0)",
             },
-            {HARDENED | MULTIPATH, DEFAULT | MULTIPATH},
+            {HARDENED | MULTIPATH | MULTIPATH_UNNORMALIZABLE, DEFAULT | MULTIPATH | MULTIPATH_UNNORMALIZABLE},
             {
                 {{"76a914ebdc90806a9c4356c1c88e42216611e1cb4c1c1788ac"}},
                 {{"76a914f103317b9f0b758a62cb3879281d23e3b1deb90d88ac"}},
@@ -716,7 +741,9 @@ BOOST_AUTO_TEST_CASE(descriptor_test)
     );
     // The multipath input is spelled with apostrophe hardened markers, while
     // the descriptors it expands to always use 'h'
-    CheckMultipath("wpkh([ffffffff/13']xprv9vHkqa6EV4sPZHYqZznhT2NPtPCjKuDKGY38FBWLvgaDx45zo9WQRUT3dKYnjwih2yJD9mkrocEZXo1ex8G81dwSM1fwqWpWkeS3v86pgKt/<1;3>/2/*)",
+    // The multipath input is spelled with apostrophe hardened markers and an
+    // uppercase fingerprint, which the expansion and reconstruction normalize
+    CheckMultipath("wpkh([FFFFFFFF/13']xprv9vHkqa6EV4sPZHYqZznhT2NPtPCjKuDKGY38FBWLvgaDx45zo9WQRUT3dKYnjwih2yJD9mkrocEZXo1ex8G81dwSM1fwqWpWkeS3v86pgKt/<1;3>/2/*)",
             "wpkh([ffffffff/13']xpub69H7F5d8KSRgmmdJg2KhpAK8SR3DjMwAdkxj3ZuxV27CprR9LgpeyGmXUbC6wb7ERfvrnKZjXoUmmDznezpbZb7ap6r1D3tgFxHmwMkQTPH/<1;3>/2/*)",
             {
                 "wpkh([ffffffff/13h]xprv9vHkqa6EV4sPZHYqZznhT2NPtPCjKuDKGY38FBWLvgaDx45zo9WQRUT3dKYnjwih2yJD9mkrocEZXo1ex8G81dwSM1fwqWpWkeS3v86pgKt/1/2/*)",
@@ -755,7 +782,7 @@ BOOST_AUTO_TEST_CASE(descriptor_test)
                 "sh(wpkh(xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8/10/20/30/40/*h))",
                 "sh(wpkh(xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8/100h/20/30/40/*h))",
             },
-            {RANGE | HARDENED | DERIVE_HARDENED | MULTIPATH},
+            {RANGE | HARDENED | DERIVE_HARDENED | MULTIPATH | MULTIPATH_UNNORMALIZABLE},
             {
                 {{"a9149a4d9901d6af519b2a23d4a2f51650fcba87ce7b87"},{"a914bed59fc0024fae941d6e20a3b44a109ae740129287"},{"a9148483aa1116eb9c05c482a72bada4b1db24af654387"}},
                 {{"a91470192039cb9529aadf4e53e46d9ac6a13790865787"},{"a914855859faffabf1e4ed2bb7411ab66f4599b1abd287"},{"a9148f2cfd4b486de247c44684160da164617ccf2c2687"}},
@@ -764,6 +791,33 @@ BOOST_AUTO_TEST_CASE(descriptor_test)
             {
                 {{10, 20, 30, 40, 0x80000000UL}, {10, 20, 30, 40, 0x80000001UL}, {10, 20, 30, 40, 0x80000002UL}},
                 {{0x80000064UL, 20, 30, 40, 0x80000000UL}, {0x80000064UL, 20, 30, 40, 0x80000001UL}, {0x80000064UL, 20, 30, 40, 0x80000002UL}},
+            }
+    );
+    // A hex key typed in uppercase is lowercased in the expanded descriptors
+    // and the reconstructed multipath descriptor
+    CheckMultipath("wsh(multi(1,xprv9s21ZrQH143K31xYSDQpPDxsXRTUcvj2iNHm5NUtrGiGG5e2DtALGdso3pGz6ssrdK4PFmM8NSpSBHNqPqm55Qn3LqFtT2emdEXVYsCzC2U/<0;1>,03A34B99F22C790C4E36B2B3C2C35A36DB06226E41C692FC82B8B56AC1C540C5BD))",
+            "wsh(multi(1,xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB/<0;1>,03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd))",
+            {
+                "wsh(multi(1,xprv9s21ZrQH143K31xYSDQpPDxsXRTUcvj2iNHm5NUtrGiGG5e2DtALGdso3pGz6ssrdK4PFmM8NSpSBHNqPqm55Qn3LqFtT2emdEXVYsCzC2U/0,03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd))",
+                "wsh(multi(1,xprv9s21ZrQH143K31xYSDQpPDxsXRTUcvj2iNHm5NUtrGiGG5e2DtALGdso3pGz6ssrdK4PFmM8NSpSBHNqPqm55Qn3LqFtT2emdEXVYsCzC2U/1,03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd))",
+            },
+            {
+                "wsh(multi(1,xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB/0,03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd))",
+                "wsh(multi(1,xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB/1,03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd))",
+            },
+            {
+                "wsh(multi(1,xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB/0,03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd))",
+                "wsh(multi(1,xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB/1,03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd))",
+            },
+            {MULTIPATH | MIXED_PUBKEYS | MISSING_PRIVKEYS},
+            {
+                {{"00204e9b38241c92a2d8605bdd19ac500cbab0970d60e3a9b4f02489263ca5c44b34"}},
+                {{"0020b2f34a669afd8c0ecd23357b7959be1870d2b5bfc8664efff7cdf97c46d0d037"}},
+            },
+            OutputType::BECH32,
+            {
+                {{0}, {}},
+                {{1}, {}},
             }
     );
     CheckMultipath("multi(2,xprvA1RpRA33e1JQ7ifknakTFpgNXPmW2YvmhqLQYMmrj4xJXXWYpDPS3xz7iAxn8L39njGVyuoseXzU6rcxFLJ8HFsTjSyQbLYnMpCqE2VbFWc/<1;2>/*,xprv9uPDJpEQgRQfDcW7BkF7eTya6RPxXeJCqCJGHuCJ4GiRVLzkTXBAJMu2qaMWPrS7AANYqdq6vcBcBUdJCVVFceUvJFjaPdGZ2y9WACViL4L/<3;4>/0/*)",
@@ -1430,6 +1484,81 @@ BOOST_AUTO_TEST_CASE(unused_descriptor_test)
     CheckUnused("unused(xprvA1RpRA33e1JQ7ifknakTFpgNXPmW2YvmhqLQYMmrj4xJXXWYpDPS3xz7iAxn8L39njGVyuoseXzU6rcxFLJ8HFsTjSyQbLYnMpCqE2VbFWc)", "unused(xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL)");
     CheckUnused("unused(L4rK1yDtCWekvXuE6oXD9jCYfFNV2cWRpVuPLBcCU2z8TrisoyY1)", "unused(03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd)");
     CheckUnused("unused(xprvA1RpRA33e1JQ7ifknakTFpgNXPmW2YvmhqLQYMmrj4xJXXWYpDPS3xz7iAxn8L39njGVyuoseXzU6rcxFLJ8HFsTjSyQbLYnMpCqE2VbFWc/0h/0h/1)", "unused(xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0h/0h/1)");
+}
+
+BOOST_AUTO_TEST_CASE(multipath_string_test)
+{
+    // Master extended key from BIP32 test vector 2
+    const std::string xprv{"xprv9s21ZrQH143K31xYSDQpPDxsXRTUcvj2iNHm5NUtrGiGG5e2DtALGdso3pGz6ssrdK4PFmM8NSpSBHNqPqm55Qn3LqFtT2emdEXVYsCzC2U"};
+    const CExtKey master{DecodeExtKey(xprv)};
+    const std::string xpub{EncodeExtPubKey(master.Neuter())};
+    const std::string wif{"L4rK1yDtCWekvXuE6oXD9jCYfFNV2cWRpVuPLBcCU2z8TrisoyY1"};
+    const CPubKey pubkey{DecodeSecret(wif).GetPubKey()};
+
+    // The fingerprint of xprv and its extended public keys at 84h/0h/0h and at 0h
+    const std::string fpr{HexStr(master.Neuter().id_key_fingerprint())};
+    CExtKey acc{master};
+    for (uint32_t i : {84, 0, 0}) BOOST_REQUIRE(acc.Derive(acc, i | 0x80000000));
+    const std::string acc_xpub{EncodeExtPubKey(acc.Neuter())};
+    CExtKey acc0{master};
+    BOOST_REQUIRE(acc0.Derive(acc0, 0 | 0x80000000));
+    const std::string acc0_xpub{EncodeExtPubKey(acc0.Neuter())};
+
+    // Parse a multipath descriptor and reconstruct it from the expansion
+    const auto reconstruct{[](const std::string& desc_str, size_t num_descs = 2) {
+        FlatSigningProvider keys;
+        std::string error;
+        auto parsed = Parse(desc_str, keys, error);
+        BOOST_REQUIRE_MESSAGE(parsed.size() == num_descs, desc_str + ": " + error);
+        std::vector<const Descriptor*> descs;
+        for (const auto& d : parsed) descs.push_back(d.get());
+        return ToNormalizedMultipathString(descs, keys).value_or("none");
+    }};
+    const auto with_checksum{[](const std::string& desc) { return desc + "#" + GetDescriptorChecksum(desc); }};
+
+    // Private extended keys followed by hardened derivation steps are
+    // normalized: the key origin and the extended public key at the last
+    // hardened step, merging any explicit origin; unhardened suffixes are unchanged
+    BOOST_CHECK_EQUAL(reconstruct("wpkh(" + xprv + "/84h/0h/0h/<0;1>/*)"), with_checksum("wpkh([" + fpr + "/84h/0h/0h]" + acc_xpub + "/<0;1>/*)"));
+    BOOST_CHECK_EQUAL(reconstruct("wpkh(" + xprv + "/84'/0'/0'/2/<0;1>/*)"), with_checksum("wpkh([" + fpr + "/84h/0h/0h]" + acc_xpub + "/2/<0;1>/*)"));
+    BOOST_CHECK_EQUAL(reconstruct("wpkh([deadbeef/49']" + xprv + "/0h/<0;1>/*)"), with_checksum("wpkh([deadbeef/49h/0h]" + acc0_xpub + "/<0;1>/*)"));
+    // An explicit origin is normalized even when the key has no hardened suffix
+    BOOST_CHECK_EQUAL(reconstruct("wpkh([deadbeef/49']" + xprv + "/<0;1>/*)"), with_checksum("wpkh([deadbeef/49h]" + xpub + "/<0;1>/*)"));
+    // An x-only key is replaced by its x-only public form
+    BOOST_CHECK_EQUAL(reconstruct("tr(" + wif + ",pk(" + xprv + "/<0;1>/*))"), with_checksum("tr(" + HexStr(XOnlyPubKey{pubkey}) + ",pk(" + xpub + "/<0;1>/*))"));
+    // Also within miniscript
+    BOOST_CHECK_EQUAL(reconstruct("wsh(or_b(pk(" + wif + "),s:pk(" + xprv + "/<0;1>/*)))"), with_checksum("wsh(or_b(pk(" + HexStr(pubkey) + "),s:pk(" + xpub + "/<0;1>/*)))"));
+    // Multipath elements can have more than two steps, in any order
+    BOOST_CHECK_EQUAL(reconstruct("pkh(" + xprv + "/<5;1;3>)", 3), with_checksum("pkh(" + xpub + "/<5;1;3>)"));
+    // A hardened multipath step or a hardened wildcard has no publicly derivable form
+    BOOST_CHECK_EQUAL(reconstruct("wpkh(" + xprv + "/<0h;1h>/*)"), "none");
+    BOOST_CHECK_EQUAL(reconstruct("wpkh(" + xprv + "/0h/<0;1>/*h)"), "none");
+    // An extended public key followed by hardened steps cannot be normalized
+    BOOST_CHECK_EQUAL(reconstruct("wpkh(" + xpub + "/0h/<0;1>/*)"), "none");
+
+    // Descriptors that were not expanded from one multipath descriptor cannot be merged
+    const auto parse_one{[](const std::string& desc_str) {
+        FlatSigningProvider keys;
+        std::string error;
+        auto parsed = Parse(desc_str, keys, error);
+        BOOST_REQUIRE_MESSAGE(parsed.size() == 1, desc_str + ": " + error);
+        return std::move(parsed.front());
+    }};
+    const auto merge{[](std::initializer_list<const Descriptor*> descs) {
+        const FlatSigningProvider no_keys;
+        return ToNormalizedMultipathString(std::vector<const Descriptor*>{descs}, no_keys).value_or("none");
+    }};
+    const auto pkh0{parse_one("pkh(" + xpub + "/0)")}, pkh1{parse_one("pkh(" + xpub + "/1)")};
+    const auto wpkh1{parse_one("wpkh(" + xpub + "/1)")}, pkh11{parse_one("pkh(" + xpub + "/1/1)")}, pkh00{parse_one("pkh(" + xpub + "/0/0)")};
+    const auto pkh_acc{parse_one("pkh(" + acc_xpub + "/1)")}, pkh_wif{parse_one("pkh(" + HexStr(pubkey) + ")")};
+    BOOST_CHECK_EQUAL(merge({pkh0.get(), pkh1.get()}), with_checksum("pkh(" + xpub + "/<0;1>)"));
+    BOOST_CHECK_EQUAL(merge({pkh1.get(), pkh0.get()}), with_checksum("pkh(" + xpub + "/<1;0>)"));
+    BOOST_CHECK_EQUAL(merge({pkh0.get()}), "none"); // at least two descriptors
+    BOOST_CHECK_EQUAL(merge({pkh0.get(), wpkh1.get()}), "none"); // different script
+    BOOST_CHECK_EQUAL(merge({pkh0.get(), pkh11.get()}), "none"); // different path length
+    BOOST_CHECK_EQUAL(merge({pkh00.get(), pkh11.get()}), "none"); // more than one differing step
+    BOOST_CHECK_EQUAL(merge({pkh0.get(), pkh_acc.get()}), "none"); // different key
+    BOOST_CHECK_EQUAL(merge({pkh0.get(), pkh_wif.get()}), "none"); // different key type
 }
 
 BOOST_AUTO_TEST_SUITE_END()
