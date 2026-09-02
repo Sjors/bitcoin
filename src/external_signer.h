@@ -6,8 +6,10 @@
 #define BITCOIN_EXTERNAL_SIGNER_H
 
 #include <common/system.h>
+#include <interfaces/external_signer.h>
 #include <univalue.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -19,7 +21,11 @@ class ExternalSigner
 {
 private:
     //! The command which handles interaction with the external signer.
+    //! Empty when the signer is backed by a service registered over IPC.
     std::vector<std::string> m_command;
+
+    //! Signer service registered over IPC, used instead of m_command when set.
+    std::shared_ptr<interfaces::ExternalSignerService> m_service;
 
     //! Bitcoin mainnet, testnet, etc
     std::string m_chain;
@@ -32,6 +38,10 @@ public:
     //! @param[in] chain        "main", "test", "signet", "regtest" or "testnet4"
     //! @param[in] name         device name
     ExternalSigner(std::vector<std::string> command, std::string chain, std::string fingerprint, std::string name);
+
+    //! Construct a signer backed by a service registered over IPC instead of
+    //! a command; see Init::registerExternalSigner.
+    ExternalSigner(std::shared_ptr<interfaces::ExternalSignerService> service, std::string chain, std::string fingerprint, std::string name);
 
     //! Master key fingerprint of the signer
     std::string m_fingerprint;

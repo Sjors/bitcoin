@@ -54,7 +54,7 @@ std::unique_ptr<ExternalSignerScriptPubKeyMan> ExternalSignerScriptPubKeyMan::Cr
 
  util::Result<ExternalSigner> ExternalSignerScriptPubKeyMan::GetExternalSigner() {
     const std::string command = gArgs.GetArg("-signer", "");
-    if (command == "") return util::Error{Untranslated("restart bitcoind with -signer=<cmd>")};
+    if (command == "" && !GetRegisteredSignerService()) return util::Error{Untranslated("restart bitcoind with -signer=<cmd>")};
     std::vector<ExternalSigner> signers;
     ExternalSigner::Enumerate(command, signers, Params().GetChainTypeString());
     if (signers.empty()) return util::Error{Untranslated("No external signers found")};
