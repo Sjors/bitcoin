@@ -218,8 +218,10 @@ public:
 
     /** Get the descriptor string form with the xpub at the last hardened derivation,
      *  and always use h for hardened derivation.
+     *  @param[in] require_derivable Fail if the result would still need private keys to
+     *             derive public keys, i.e. if it has a hardened wildcard.
      */
-    virtual bool ToNormalizedString(const SigningProvider& arg, std::string& out, const DescriptorCache* cache = nullptr) const = 0;
+    virtual bool ToNormalizedString(const SigningProvider& arg, std::string& out, const DescriptorCache* cache = nullptr, bool require_derivable = false) const = 0;
 
     /** Derive a private key, if private data is available in arg and put it into out. */
     virtual void GetPrivKey(int pos, const SigningProvider& arg, FlatSigningProvider& out) const = 0;
@@ -295,10 +297,10 @@ public:
         ret = "[" + OriginString(StringType::PUBLIC) + "]" + std::move(sub);
         return has_priv_key;
     }
-    bool ToNormalizedString(const SigningProvider& arg, std::string& ret, const DescriptorCache* cache) const override
+    bool ToNormalizedString(const SigningProvider& arg, std::string& ret, const DescriptorCache* cache, bool require_derivable) const override
     {
         std::string sub;
-        if (!m_provider->ToNormalizedString(arg, sub, cache)) return false;
+        if (!m_provider->ToNormalizedString(arg, sub, cache, require_derivable)) return false;
         // If m_provider is a BIP32PubkeyProvider, we may get a string formatted like a OriginPubkeyProvider
         // In that case, we need to strip out the leading square bracket and fingerprint from the substring,
         // and append that to our own origin string.
@@ -368,7 +370,7 @@ public:
         ret = EncodeSecret(*key);
         return true;
     }
-    bool ToNormalizedString(const SigningProvider& arg, std::string& ret, const DescriptorCache* cache) const override
+    bool ToNormalizedString(const SigningProvider& arg, std::string& ret, const DescriptorCache* cache, bool require_derivable) const override
     {
         ret = ToString(StringType::PUBLIC);
         return true;
@@ -535,9 +537,12 @@ public:
         }
         return true;
     }
-    bool ToNormalizedString(const SigningProvider& arg, std::string& out, const DescriptorCache* cache) const override
+    bool ToNormalizedString(const SigningProvider& arg, std::string& out, const DescriptorCache* cache, bool require_derivable) const override
     {
         if (m_derive == DeriveType::HARDENED_RANGED) {
+            // There is no extended public key that the hardened wildcard
+            // can be derived from, so fall back to the root key
+            if (require_derivable) return false;
             out = ToString(StringType::PUBLIC, /*normalized=*/true);
 
             return true;
@@ -754,14 +759,14 @@ public:
         }
         return any_privkeys;
     }
-    bool ToNormalizedString(const SigningProvider& arg, std::string& out, const DescriptorCache* cache = nullptr) const override
+    bool ToNormalizedString(const SigningProvider& arg, std::string& out, const DescriptorCache* cache = nullptr, bool require_derivable = false) const override
     {
         out = "musig(";
         for (size_t i = 0; i < m_participants.size(); ++i) {
             const auto& pubkey = m_participants.at(i);
             if (i) out += ",";
             std::string tmp;
-            if (!pubkey->ToNormalizedString(arg, tmp, cache)) {
+            if (!pubkey->ToNormalizedString(arg, tmp, cache, require_derivable)) {
                 return false;
             }
             out += tmp;
@@ -915,7 +920,7 @@ public:
     }
 
     // NOLINTNEXTLINE(misc-no-recursion)
-    virtual bool ToStringSubScriptHelper(const SigningProvider* arg, std::string& ret, const StringType type, const DescriptorCache* cache = nullptr) const
+    virtual bool ToStringSubScriptHelper(const SigningProvider* arg, std::string& ret, const StringType type, const DescriptorCache* cache = nullptr, bool require_derivable = false) const
     {
         size_t pos = 0;
         bool is_private{type == StringType::PRIVATE};
@@ -925,7 +930,7 @@ public:
         for (const auto& scriptarg : m_subdescriptor_args) {
             if (pos++) ret += ",";
             std::string tmp;
-            bool subscript_res{scriptarg->ToStringHelper(arg, tmp, type, cache)};
+            bool subscript_res{scriptarg->ToStringHelper(arg, tmp, type, cache, require_derivable)};
             if (!is_private && !subscript_res) return false;
             any_success = any_success || subscript_res;
             ret += tmp;
@@ -934,7 +939,9 @@ public:
     }
 
     // NOLINTNEXTLINE(misc-no-recursion)
-    virtual bool ToStringHelper(const SigningProvider* arg, std::string& out, const StringType type, const DescriptorCache* cache = nullptr) const
+    /** Produce the descriptor string. `require_derivable` applies to StringType::NORMALIZED,
+     *  see ToNormalizedString(). */
+    virtual bool ToStringHelper(const SigningProvider* arg, std::string& out, const StringType type, const DescriptorCache* cache = nullptr, bool require_derivable = false) const
     {
         std::string extra = ToStringExtra();
         size_t pos = extra.size() > 0 ? 1 : 0;
@@ -949,7 +956,7 @@ public:
             std::string tmp;
             switch (type) {
                 case StringType::NORMALIZED:
-                    if (!pubkey->ToNormalizedString(*arg, tmp, cache)) return false;
+                    if (!pubkey->ToNormalizedString(*arg, tmp, cache, require_derivable)) return false;
                     break;
                 case StringType::PRIVATE:
                     any_success = pubkey->ToPrivateString(*arg, tmp) || any_success;
@@ -964,7 +971,7 @@ public:
             ret += tmp;
         }
         std::string subscript;
-        bool subscript_res{ToStringSubScriptHelper(arg, subscript, type, cache)};
+        bool subscript_res{ToStringSubScriptHelper(arg, subscript, type, cache, require_derivable)};
         if (!is_private && !subscript_res) return false;
         any_success = any_success || subscript_res;
         if (pos && subscript.size()) ret += ',';
@@ -986,9 +993,9 @@ public:
         return has_priv_key;
     }
 
-    bool ToNormalizedString(const SigningProvider& arg, std::string& out, const DescriptorCache* cache) const override final
+    bool ToNormalizedString(const SigningProvider& arg, std::string& out, const DescriptorCache* cache, bool require_derivable) const override final
     {
-        bool ret = ToStringHelper(&arg, out, StringType::NORMALIZED, cache);
+        bool ret = ToStringHelper(&arg, out, StringType::NORMALIZED, cache, require_derivable);
         out = AddChecksum(out);
         return ret;
     }
@@ -1520,7 +1527,7 @@ protected:
         out.tr_trees[output] = builder;
         return Vector(GetScriptForDestination(output));
     }
-    bool ToStringSubScriptHelper(const SigningProvider* arg, std::string& ret, const StringType type, const DescriptorCache* cache = nullptr) const override
+    bool ToStringSubScriptHelper(const SigningProvider* arg, std::string& ret, const StringType type, const DescriptorCache* cache = nullptr, bool require_derivable = false) const override
     {
         if (m_depths.empty()) {
             // If there are no sub-descriptors and a PRIVATE string
@@ -1543,7 +1550,7 @@ protected:
                 path.push_back(false);
             }
             std::string tmp;
-            bool subscript_res{m_subdescriptor_args[pos]->ToStringHelper(arg, tmp, type, cache)};
+            bool subscript_res{m_subdescriptor_args[pos]->ToStringHelper(arg, tmp, type, cache, require_derivable)};
             if (!is_private && !subscript_res) return false;
             any_success = any_success || subscript_res;
             ret += tmp;
@@ -1638,13 +1645,16 @@ class StringMaker {
     //! StringType to serialize keys
     const DescriptorImpl::StringType m_type;
     const DescriptorCache* m_cache;
+    //! For normalized strings, see PubkeyProvider::ToNormalizedString()
+    const bool m_require_derivable;
 
 public:
     StringMaker(const SigningProvider* arg LIFETIMEBOUND,
                 const std::vector<std::unique_ptr<PubkeyProvider>>& pubkeys LIFETIMEBOUND,
                 DescriptorImpl::StringType type,
-                const DescriptorCache* cache LIFETIMEBOUND)
-        : m_arg(arg), m_pubkeys(pubkeys), m_type(type), m_cache(cache) {}
+                const DescriptorCache* cache LIFETIMEBOUND,
+                bool require_derivable)
+        : m_arg(arg), m_pubkeys(pubkeys), m_type(type), m_cache(cache), m_require_derivable(require_derivable) {}
 
     std::optional<std::string> ToString(uint32_t key, bool& has_priv_key) const
     {
@@ -1658,7 +1668,7 @@ public:
             has_priv_key = m_pubkeys[key]->ToPrivateString(*m_arg, ret);
             break;
         case DescriptorImpl::StringType::NORMALIZED:
-            if (!m_pubkeys[key]->ToNormalizedString(*m_arg, ret, m_cache)) return {};
+            if (!m_pubkeys[key]->ToNormalizedString(*m_arg, ret, m_cache, m_require_derivable)) return {};
             break;
         case DescriptorImpl::StringType::COMPAT:
             ret = m_pubkeys[key]->ToString(PubkeyProvider::StringType::COMPAT);
@@ -1710,10 +1720,10 @@ public:
     }
 
     bool ToStringHelper(const SigningProvider* arg, std::string& out, const StringType type,
-                        const DescriptorCache* cache = nullptr) const override
+                        const DescriptorCache* cache = nullptr, bool require_derivable = false) const override
     {
         bool has_priv_key{false};
-        auto res = m_node.ToString(StringMaker(arg, m_pubkey_args, type, cache), has_priv_key);
+        auto res = m_node.ToString(StringMaker(arg, m_pubkey_args, type, cache, require_derivable), has_priv_key);
         if (res) out = *res;
         if (type == StringType::PRIVATE) {
             Assume(res.has_value());

@@ -29,7 +29,7 @@ public:
     bool IsSingleType() const override { return true; }
     bool HavePrivateKeys(const SigningProvider&) const override { return false; }
     bool ToPrivateString(const SigningProvider& provider, std::string& out) const override { return false; }
-    bool ToNormalizedString(const SigningProvider& provider, std::string& out, const DescriptorCache* cache = nullptr) const override { return false; }
+    bool ToNormalizedString(const SigningProvider& provider, std::string& out, const DescriptorCache* cache = nullptr, bool require_derivable = false) const override { return false; }
     bool Expand(int pos, const SigningProvider& provider, std::vector<CScript>& output_scripts, FlatSigningProvider& out, DescriptorCache* write_cache = nullptr) const override { return false; };
     bool ExpandFromCache(int pos, const DescriptorCache& read_cache, std::vector<CScript>& output_scripts, FlatSigningProvider& out) const override { return false; }
     void ExpandPrivate(int pos, const SigningProvider& provider, FlatSigningProvider& out) const override {}

@@ -284,6 +284,11 @@ void DoCheck(std::string prv, std::string pub, const std::string& norm_pub, int 
     BOOST_CHECK_MESSAGE(EqualDescriptor(norm1, norm_pub), "priv->ToNormalizedString(): " + norm1 + " Norm. desc: " + norm_pub);
     BOOST_CHECK(parse_pub->ToNormalizedString(keys_priv, norm1));
     BOOST_CHECK_MESSAGE(EqualDescriptor(norm1, norm_pub), "pub->ToNormalizedString(): " + norm1 + " Norm. desc: " + norm_pub);
+    // A normalized descriptor with a hardened wildcard still needs private keys to derive addresses
+    const bool derivable{!(flags & DERIVE_HARDENED)};
+    BOOST_CHECK_EQUAL(parse_priv->ToNormalizedString(keys_priv, norm1, /*cache=*/nullptr, /*require_derivable=*/true), derivable);
+    BOOST_CHECK_EQUAL(parse_pub->ToNormalizedString(keys_priv, norm1, /*cache=*/nullptr, /*require_derivable=*/true), derivable);
+    if (derivable) BOOST_CHECK_MESSAGE(EqualDescriptor(norm1, norm_pub), "require_derivable: " + norm1 + " Norm. desc: " + norm_pub);
 
     // Check whether IsRange on both returns the expected result
     BOOST_CHECK_EQUAL(parse_pub->IsRange(), (flags & RANGE) != 0);

@@ -137,8 +137,10 @@ struct Descriptor {
      */
     virtual bool ToPrivateString(const SigningProvider& provider, std::string& out) const = 0;
 
-    /** Convert the descriptor to a normalized string. Normalized descriptors have the xpub at the last hardened step. This fails if the provided provider does not have the private keys to derive that xpub. */
-    virtual bool ToNormalizedString(const SigningProvider& provider, std::string& out, const DescriptorCache* cache = nullptr) const = 0;
+    /** Convert the descriptor to a normalized string. Normalized descriptors have the xpub at the last hardened step. This fails if the provided provider does not have the private keys to derive that xpub.
+     *  @param[in] require_derivable Also fail if the result would still need private keys to derive addresses, i.e. if it has a hardened wildcard.
+     */
+    virtual bool ToNormalizedString(const SigningProvider& provider, std::string& out, const DescriptorCache* cache = nullptr, bool require_derivable = false) const = 0;
 
     /** Whether the descriptor can be used to produce its address(es) without needing a cache or private keys. */
     virtual bool CanSelfExpand() const = 0;
