@@ -33,6 +33,7 @@
 #include <util/vector.h>
 
 #include <algorithm>
+#include <array>
 #include <compare>
 #include <iterator>
 #include <map>
@@ -215,6 +216,17 @@ static std::string MergeNormalizedOrigin(const std::string& origin_str, const st
     // A leading origin starts with '[' followed by an 8-character fingerprint
     if (key_str.starts_with('[')) return "[" + origin_str + key_str.substr(9);
     return "[" + origin_str + "]" + key_str;
+}
+
+/** Find the extended private key among xprvs from which xpub derives via origin. */
+static std::optional<CExtKey> FindOriginExtKey(const std::map<CExtPubKey, CExtKey>& xprvs, const KeyOriginInfo& origin, const CExtPubKey& xpub)
+{
+    for (const auto& [root_xpub, root_xprv] : xprvs) {
+        if (root_xpub.id_key_fingerprint() != origin.fingerprint) continue;
+        const auto derived{DeriveExtKey(root_xprv, origin.path)};
+        if (derived && derived->first.Neuter() == xpub) return root_xprv;
+    }
+    return std::nullopt;
 }
 
 /** A source-text replacement used by Parse() to construct the public form of a
@@ -2023,7 +2035,12 @@ static DeriveType ParseDeriveType(std::vector<std::span<const char>>& split, boo
 
 /** Parsed providers and an optional replacement for ParsePubkey to collect
  * after processing explicit key origin information. */
-using ParsePubkeyInnerResult = std::pair<std::vector<std::unique_ptr<PubkeyProvider>>, std::optional<KeyReplacement>>;
+struct ParsePubkeyInnerResult {
+    std::vector<std::unique_ptr<PubkeyProvider>> providers;
+    std::optional<KeyReplacement> key_replacement;
+    //! Whether a known extended private key replaced the explicit key origin
+    bool origin_absorbed{false};
+};
 using ParsePubkeyResult = std::vector<std::unique_ptr<PubkeyProvider>>;
 
 /** Mutable state shared by recursive descriptor parser calls. */
@@ -2031,10 +2048,14 @@ struct ParseState {
     uint32_t& key_exp_index;
     FlatSigningProvider& out;
     std::vector<KeyReplacement>* key_replacements{nullptr};
+    const std::map<CExtPubKey, CExtKey>* known_xprvs{nullptr};
 };
 
-/** Parse a public key that excludes origin information. */
-util::Expected<ParsePubkeyInnerResult, std::string> ParsePubkeyInner(ParseState& state, const std::span<const char>& sp, ParseScriptContext ctx, bool& apostrophe)
+/** Parse the key part of a key expression, after the caller split off any
+ *  origin information and parsed it into origin. The origin is only used to
+ *  match a known extended private key, which then replaces it by the full
+ *  derivation path in the providers. */
+util::Expected<ParsePubkeyInnerResult, std::string> ParsePubkeyInner(ParseState& state, const std::span<const char>& sp, ParseScriptContext ctx, bool& apostrophe, const KeyOriginInfo* origin)
 {
     std::vector<std::unique_ptr<PubkeyProvider>> ret;
     // Return the replacement separately so ParsePubkey can incorporate an explicit
@@ -2106,18 +2127,39 @@ util::Expected<ParsePubkeyInnerResult, std::string> ParsePubkeyInner(ParseState&
     std::string error;
     if (!ParseKeyPath(split, paths, apostrophe, error, /*allow_multipath=*/true, has_hardened_path)) return util::Unexpected{std::move(error)};
     const bool has_hardened_derivation{type == DeriveType::HARDENED_RANGED || has_hardened_path};
+    bool origin_absorbed{false};
     if (extkey.key.IsValid()) {
         extpubkey = extkey.Neuter();
         state.out.keys.emplace(extpubkey.pubkey.GetID(), extkey.key);
         if (state.key_replacements) key_replacement = NormalizedExtKeyReplacement(split, paths, type, extkey, extpubkey);
-    } else if (state.key_replacements && has_hardened_derivation) {
-        key_replacement = KeyReplacement{split[0], str, /*publicly_derivable=*/false};
+    } else {
+        if (state.key_replacements && has_hardened_derivation) {
+            key_replacement = KeyReplacement{split[0], str, /*publicly_derivable=*/false};
+        }
+        // Fill in a known private key. The multipath replacement above is
+        // left as is: known keys do not change the multipath descriptor.
+        if (state.known_xprvs) {
+            if (const auto it{state.known_xprvs->find(extpubkey)}; it != state.known_xprvs->end()) {
+                // The key expression names a known key directly. Keep the
+                // expression, and provide the private key as if the
+                // descriptor had contained it.
+                state.out.keys.emplace(extpubkey.pubkey.GetID(), it->second.key);
+            } else if (const auto root{origin ? FindOriginExtKey(*state.known_xprvs, *origin, extpubkey) : std::nullopt}) {
+                // The key expression names a child of a known key. Replace
+                // the origin and the child key by the known key and the full
+                // path, like a descriptor containing that key.
+                extpubkey = root->Neuter();
+                state.out.keys.emplace(extpubkey.pubkey.GetID(), root->key);
+                for (auto& path : paths) path.insert(path.begin(), origin->path.begin(), origin->path.end());
+                origin_absorbed = true;
+            }
+        }
     }
     for (auto& path : paths) {
         ret.emplace_back(std::make_unique<BIP32PubkeyProvider>(state.key_exp_index, extpubkey, std::move(path), type, apostrophe));
     }
     ++state.key_exp_index;
-    return ParsePubkeyInnerResult{std::move(ret), std::move(key_replacement)};
+    return ParsePubkeyInnerResult{std::move(ret), std::move(key_replacement), origin_absorbed};
 }
 
 /** Parse a public key including origin information (if enabled). */
@@ -2265,11 +2307,10 @@ util::Expected<ParsePubkeyResult, std::string> ParsePubkey(ParseState& state, co
     if (origin_split.size() == 1) {
         // With no closing ']', there is no complete origin to apply. Parse the
         // entire expression as a key and collect its replacement unchanged.
-        auto result = ParsePubkeyInner(state, origin_split[0], ctx, apostrophe);
+        auto result = ParsePubkeyInner(state, origin_split[0], ctx, apostrophe, /*origin=*/nullptr);
         if (!result) return util::Unexpected{std::move(result.error())};
-        auto [providers, key_replacement] = std::move(*result);
-        if (key_replacement) state.key_replacements->push_back(std::move(*key_replacement));
-        return std::move(providers);
+        if (result->key_replacement) state.key_replacements->push_back(std::move(*result->key_replacement));
+        return std::move(result->providers);
     }
     // The only remaining case has one closing ']', whose prefix must start with '['.
     Assume(origin_split.size() == 2);
@@ -2295,9 +2336,9 @@ util::Expected<ParsePubkeyResult, std::string> ParsePubkey(ParseState& state, co
     std::string error;
     if (!ParseKeyPath(slash_split, path, apostrophe, error, /*allow_multipath=*/false)) return util::Unexpected{std::move(error)};
     info.path = path.at(0);
-    auto result = ParsePubkeyInner(state, origin_split[1], ctx, apostrophe);
+    auto result = ParsePubkeyInner(state, origin_split[1], ctx, apostrophe, &info);
     if (!result) return util::Unexpected{std::move(result.error())};
-    auto [providers, key_replacement] = std::move(*result);
+    auto [providers, key_replacement, origin_absorbed] = std::move(*result);
     if (key_replacement) {
         // Include the explicit origin in the replacement, merging it with any
         // origin produced by normalization, like OriginPubkeyProvider does.
@@ -2311,6 +2352,8 @@ util::Expected<ParsePubkeyResult, std::string> ParsePubkey(ParseState& state, co
         const std::span<const char> origin_text{sp.data(), origin_split[0].size() + 1};
         state.key_replacements->push_back({origin_text, "[" + HexStr(info.fingerprint) + FormatHDKeypath(info.path) + "]"});
     }
+    // A known key already accounts for the origin in the providers' paths.
+    if (origin_absorbed) return std::move(providers);
     ret.reserve(providers.size());
     for (auto& prov : providers) {
         ret.emplace_back(std::make_unique<OriginPubkeyProvider>(prov->m_expr_index, info, std::move(prov), apostrophe));
@@ -2367,11 +2410,13 @@ struct KeyParser {
     uint32_t& m_expr_index;
     //! Source-text replacements collected while parsing Miniscript keys, if requested.
     std::vector<KeyReplacement>* m_key_replacements;
+    //! Extended private keys known to the caller, if any.
+    const std::map<CExtPubKey, CExtKey>* m_known_xprvs;
 
     KeyParser(FlatSigningProvider* out LIFETIMEBOUND, const SigningProvider* in LIFETIMEBOUND,
               miniscript::MiniscriptContext ctx, uint32_t& key_exp_index LIFETIMEBOUND,
-              std::vector<KeyReplacement>* key_replacements = nullptr)
-        : m_out(out), m_in(in), m_script_ctx(ctx), m_expr_index(key_exp_index), m_key_replacements(key_replacements) {}
+              std::vector<KeyReplacement>* key_replacements = nullptr, const std::map<CExtPubKey, CExtKey>* known_xprvs = nullptr)
+        : m_out(out), m_in(in), m_script_ctx(ctx), m_expr_index(key_exp_index), m_key_replacements(key_replacements), m_known_xprvs(known_xprvs) {}
 
     bool KeyCompare(const Key& a, const Key& b) const {
         // Deriving a hardened step needs the private key, so use the provider that was filled
@@ -2401,7 +2446,7 @@ struct KeyParser {
     {
         assert(m_out);
         Key key = m_keys.size();
-        ParseState state{m_expr_index, *m_out, m_key_replacements};
+        ParseState state{m_expr_index, *m_out, m_key_replacements, m_known_xprvs};
         auto result = ParsePubkey(state, in, ParseContext());
         if (!result) {
             m_key_parsing_error = std::move(result.error());
@@ -2769,7 +2814,7 @@ util::Expected<ParseScriptResult, std::string> ParseScript(ParseState& state, st
     // Process miniscript expressions.
     {
         const auto script_ctx{ctx == ParseScriptContext::P2WSH ? miniscript::MiniscriptContext::P2WSH : miniscript::MiniscriptContext::TAPSCRIPT};
-        KeyParser parser(/*out = */&state.out, /* in = */nullptr, /* ctx = */script_ctx, state.key_exp_index, state.key_replacements);
+        KeyParser parser(/*out = */&state.out, /* in = */nullptr, /* ctx = */script_ctx, state.key_exp_index, state.key_replacements, state.known_xprvs);
         auto node = miniscript::FromString(std::string_view{expr.data(), expr.size()}, parser);
         if (parser.m_key_parsing_error != "") {
             return util::Unexpected{std::move(parser.m_key_parsing_error)};
@@ -3040,7 +3085,7 @@ bool CheckChecksum(std::span<const char>& sp, bool require_checksum, std::string
     return true;
 }
 
-std::vector<std::unique_ptr<Descriptor>> Parse(std::string_view descriptor, FlatSigningProvider& out, std::string& error, bool require_checksum, std::optional<std::string>* multipath)
+std::vector<std::unique_ptr<Descriptor>> Parse(std::string_view descriptor, FlatSigningProvider& out, std::string& error, bool require_checksum, std::optional<std::string>* multipath, const std::map<CExtPubKey, CExtKey>* known_xprvs)
 {
     if (multipath) multipath->reset();
     std::span<const char> sp{descriptor};
@@ -3048,7 +3093,7 @@ std::vector<std::unique_ptr<Descriptor>> Parse(std::string_view descriptor, Flat
     const std::string_view no_checksum{sp.data(), sp.size()};
     uint32_t key_exp_index = 0;
     std::vector<KeyReplacement> key_replacements;
-    ParseState state{key_exp_index, out, multipath ? &key_replacements : nullptr};
+    ParseState state{key_exp_index, out, multipath ? &key_replacements : nullptr, known_xprvs};
     auto result = ParseScript(state, sp, ParseScriptContext::TOP);
     if (!result) {
         error = std::move(result.error());
@@ -3064,7 +3109,7 @@ std::vector<std::unique_ptr<Descriptor>> Parse(std::string_view descriptor, Flat
         std::ranges::replace(canonical, '\'', 'h');
         std::span<const char> sp_canonical{canonical};
         key_exp_index = 0;
-        ParseState canonical_state{key_exp_index, out};
+        ParseState canonical_state{key_exp_index, out, /*key_replacements=*/nullptr, known_xprvs};
         auto canonical_result = ParseScript(canonical_state, sp_canonical, ParseScriptContext::TOP);
         // Only the marker stored in the pubkey providers differs, so this
         // parse cannot fail.

@@ -158,11 +158,15 @@ static UniValue ProcessDescriptorImport(CWallet& wallet, const UniValue& data, c
         const bool active = data.exists("active") ? data["active"].get_bool() : false;
         const std::string label{LabelFromValue(data["label"])};
 
-        // Parse descriptor string
+        // Parse descriptor string, filling in the wallet's HD private keys
         FlatSigningProvider keys;
         std::string error;
         std::optional<std::string> multipath_normalized;
-        auto parsed_descs = Parse(descriptor, keys, error, /* require_checksum = */ true, &multipath_normalized);
+        std::map<CExtPubKey, CExtKey> known_xprvs;
+        for (const auto& [xpub, spkms] : wallet.GetHDPubKeys(CWallet::HDKeyFilter::All)) {
+            if (std::optional<CExtKey> xprv{wallet.GetExtKey(xpub)}) known_xprvs.emplace(xpub, *xprv);
+        }
+        auto parsed_descs = Parse(descriptor, keys, error, /* require_checksum = */ true, &multipath_normalized, &known_xprvs);
         if (parsed_descs.empty()) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, error);
         }
@@ -356,7 +360,7 @@ RPCMethod importdescriptors()
                         {
                             {"", RPCArg::Type::OBJ, RPCArg::Optional::OMITTED, "",
                                 {
-                                    {"desc", RPCArg::Type::STR, RPCArg::Optional::NO, "Descriptor to import."},
+                                    {"desc", RPCArg::Type::STR, RPCArg::Optional::NO, "Descriptor to import. HD keys of the wallet, given as their extended public key or an origin from it, are imported with their private key."},
                                     {"active", RPCArg::Type::BOOL, RPCArg::Default{false}, "Set this descriptor to be the active descriptor for the corresponding output type/externality"},
                                     {"range", RPCArg::Type::RANGE, RPCArg::Optional::OMITTED, "If a ranged descriptor is used, this specifies the end or the range (in the form [begin,end]) to import"},
                                     {"next_index", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "If a ranged descriptor is set to active, this specifies the next index to generate addresses from"},
