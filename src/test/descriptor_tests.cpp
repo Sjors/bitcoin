@@ -1524,4 +1524,63 @@ BOOST_AUTO_TEST_CASE(parse_multipath_string_test)
     check("wsh(or_b(pk(" + wif + "),s:pk(" + xprv + "/<0;1>/*)))", "wsh(or_b(pk(" + HexStr(pubkey) + "),s:pk(" + xpub + "/<0;1>/*)))", 2);
 }
 
+BOOST_AUTO_TEST_CASE(descriptor_known_keys)
+{
+    // BIP 32 test vector 1: master key with fingerprint 3442193e, and m/0h
+    const std::string xprv{"xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi"};
+    const std::string xpub{"xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8"};
+    const std::string xpub_0h{"xpub68Gmy5EdvgibQVfPdqkBBCHxA5htiqg55crXYuXoQRKfDBFA1WEjWgP6LHhwBZeNK1VTsfTFUHCdrfp1bgwQ9xv5ski8PX9rL2dZXvgGDnw"};
+
+    std::map<CExtPubKey, CExtKey> known;
+    const CExtKey ext_key{DecodeExtKey(xprv)};
+    known.emplace(ext_key.Neuter(), ext_key);
+
+    const auto with_checksum = [](const std::string& desc) { return desc + "#" + GetDescriptorChecksum(desc); };
+    // Parse desc with the known keys and check its public form, and its
+    // private form if expected.
+    const auto check = [&](const std::string& desc, const std::string& expected_pub, const std::string& expected_priv, const std::map<CExtPubKey, CExtKey>* known_xprvs) {
+        FlatSigningProvider keys;
+        std::string error;
+        const auto parsed{Parse(desc, keys, error, /*require_checksum=*/false, /*multipath=*/nullptr, known_xprvs)};
+        BOOST_REQUIRE_MESSAGE(parsed.size() == 1, error);
+        BOOST_CHECK_EQUAL(parsed[0]->ToString(), with_checksum(expected_pub));
+        std::string priv;
+        if (expected_priv.empty()) {
+            BOOST_CHECK(!parsed[0]->ToPrivateString(keys, priv));
+        } else {
+            BOOST_REQUIRE(parsed[0]->ToPrivateString(keys, priv));
+            BOOST_CHECK_EQUAL(priv, with_checksum(expected_priv));
+        }
+    };
+
+    // The origin and the key derived from it are replaced by the known key and the full path
+    check("pkh([3442193e/0h]" + xpub_0h + "/1/*)", "pkh(" + xpub + "/0h/1/*)", "pkh(" + xprv + "/0h/1/*)", &known);
+    // The hardened marker of the origin is kept
+    check("pkh([3442193e/0']" + xpub_0h + "/1/*)", "pkh(" + xpub + "/0'/1/*)", "pkh(" + xprv + "/0'/1/*)", &known);
+    // A known extended key is filled in as is
+    check("pkh(" + xpub + "/0h/1/*)", "pkh(" + xpub + "/0h/1/*)", "pkh(" + xprv + "/0h/1/*)", &known);
+    // Inside miniscript and musig
+    check("wsh(pk([3442193e/0h]" + xpub_0h + "/1/*))", "wsh(pk(" + xpub + "/0h/1/*))", "wsh(pk(" + xprv + "/0h/1/*))", &known);
+    check("tr(musig([3442193e/0h]" + xpub_0h + "," + xpub + ")/1/*)", "tr(musig(" + xpub + "/0h," + xpub + ")/1/*)", "tr(musig(" + xprv + "/0h," + xprv + ")/1/*)", &known);
+    // A mismatched fingerprint or path leaves the descriptor unchanged
+    check("pkh([deadbeef/0h]" + xpub_0h + "/1/*)", "pkh([deadbeef/0h]" + xpub_0h + "/1/*)", "", &known);
+    check("pkh([3442193e/1h]" + xpub_0h + "/1/*)", "pkh([3442193e/1h]" + xpub_0h + "/1/*)", "", &known);
+    // Without known keys, nothing is filled in
+    check("pkh([3442193e/0h]" + xpub_0h + "/1/*)", "pkh([3442193e/0h]" + xpub_0h + "/1/*)", "", nullptr);
+
+    // A multipath descriptor expands with the known key, including when its
+    // apostrophe hardened markers make it parse a second time
+    {
+        FlatSigningProvider keys;
+        std::string error;
+        const auto parsed{Parse("pkh([3442193e/0']" + xpub_0h + "/<0;1>/*)", keys, error, /*require_checksum=*/false, /*multipath=*/nullptr, &known)};
+        BOOST_REQUIRE_MESSAGE(parsed.size() == 2, error);
+        for (size_t i{0}; i < parsed.size(); ++i) {
+            std::string priv;
+            BOOST_REQUIRE(parsed[i]->ToPrivateString(keys, priv));
+            BOOST_CHECK_EQUAL(priv, with_checksum("pkh(" + xprv + "/0h/" + util::ToString(i) + "/*)"));
+        }
+    }
+}
+
 BOOST_AUTO_TEST_SUITE_END()

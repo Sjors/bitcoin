@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -21,6 +22,7 @@
 
 class CScript;
 class SigningProvider;
+struct CExtKey;
 struct FlatSigningProvider;
 
 using ExtPubKeyMap = std::unordered_map<uint32_t, CExtPubKey>;
@@ -221,9 +223,15 @@ struct Descriptor {
  * public forms. Private extended keys followed by a fixed hardened prefix are
  * normalized by replacing them with their key origin and the extended public
  * key at the last hardened step.
+ * @param[in] known_xprvs If provided, extended private keys known to the
+ * caller, by their public form, to fill in for the extended public keys of
+ * `descriptor` as if it contained them. A key expression with an explicit key
+ * origin that leads from one of these keys to its extended public key is
+ * replaced by that key and the full derivation path. The keys are put in
+ * `out`, and do not affect `multipath`.
  * @return Parsed descriptors, or an empty vector on error.
  */
-std::vector<std::unique_ptr<Descriptor>> Parse(std::string_view descriptor, FlatSigningProvider& out, std::string& error, bool require_checksum = false, std::optional<std::string>* multipath = nullptr);
+std::vector<std::unique_ptr<Descriptor>> Parse(std::string_view descriptor, FlatSigningProvider& out, std::string& error, bool require_checksum = false, std::optional<std::string>* multipath = nullptr, const std::map<CExtPubKey, CExtKey>* known_xprvs = nullptr);
 
 /** Get the checksum for a `descriptor`.
  *
