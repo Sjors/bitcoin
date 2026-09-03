@@ -233,7 +233,11 @@ class WalletSignerTest(BitcoinTestFramework):
         assert_equal(result[0]["success"], True)
 
         address = hww_import.getnewaddress(address_type="bech32")
+        display_path = os.path.join(self.nodes[1].cwd, "mock_displayaddress")
+        with open(display_path, "w") as f:
+            f.write(address)
         assert_equal(hww_import.walletdisplayaddress(address), {"address": address})
+        os.remove(display_path)
         self.nodes[1].unloadwallet('hww_import')
 
     def test_hot_key(self):

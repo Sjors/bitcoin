@@ -27,6 +27,15 @@ tprv = "tprv8ZgxMBicQKsPd7Uf69XL1XwhmjHopUGep8GuEiJDZmbQz6o58LninorQAfcKZWARbtRt
 
 MOCK_WALLET = "mock"
 
+
+def read_state(name):
+    path = os.path.join(os.getcwd(), name)
+    if not os.path.isfile(path):
+        return None
+    with open(path, "r", encoding="utf8") as f:
+        return f.read().strip()
+
+
 def perform_pre_checks():
     mock_result_path = os.path.join(os.getcwd(), "mock_result")
     if os.path.isfile(mock_result_path):
@@ -62,6 +71,10 @@ def getdescriptors(args):
 def displayaddress(args):
     if args.fingerprint != "00000001":
         return sys.stdout.write(json.dumps({"error": "Unexpected fingerprint", "fingerprint": args.fingerprint}))
+
+    address = read_state("mock_displayaddress")
+    if address is not None:
+        return sys.stdout.write(json.dumps({"address": address}))
 
     expected_desc = {
         "wpkh([00000001/84h/1h/0h/0/0]02c97dc3f4420402e01a113984311bf4a1b8de376cac0bdcfaf1b3ac81f13433c7)#3te6hhy7": "bcrt1qm90ugl4d48jv8n6e5t9ln6t9zlpm5th68x4f8g",
