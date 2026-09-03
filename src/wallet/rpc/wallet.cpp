@@ -15,6 +15,7 @@
 #include <rpc/util.h>
 #include <univalue.h>
 #include <util/bip32.h>
+#include <util/string.h>
 #include <util/translation.h>
 #include <wallet/context.h>
 #include <wallet/export.h>
@@ -24,6 +25,7 @@
 #include <wallet/walletutil.h>
 
 #include <algorithm>
+#include <memory>
 #include <optional>
 #include <string_view>
 
@@ -65,6 +67,14 @@ static RPCMethod getwalletinfo()
                         }, {.skip_type_check=true}, },
                         {RPCResult::Type::BOOL, "descriptors", "whether this wallet uses descriptors for output script management"},
                         {RPCResult::Type::BOOL, "external_signer", "whether this wallet is configured to use an external signer such as a hardware wallet"},
+                        {RPCResult::Type::ARR, "external_signer_registrations", /*optional=*/true, "Descriptor registrations provided by external signers",
+                        {
+                            {RPCResult::Type::OBJ, "registration", "A descriptor registration for an external signer",
+                            {
+                                {RPCResult::Type::STR, "fingerprint", "the fingerprint of the external signer"},
+                                {RPCResult::Type::STR, "registration", "the opaque registration returned by the external signer"},
+                            },
+                        }}},
                         {RPCResult::Type::BOOL, "blank", "Whether this wallet intentionally does not contain any keys, scripts, or descriptors"},
                         {RPCResult::Type::NUM_TIME, "birthtime", /*optional=*/true, "The start time for blocks scanning. It could be modified by (re)importing any descriptor with an earlier timestamp."},
                         {RPCResult::Type::ARR, "flags", "The flags currently set on the wallet",
@@ -116,6 +126,16 @@ static RPCMethod getwalletinfo()
     }
     obj.pushKV("descriptors", pwallet->IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
     obj.pushKV("external_signer", pwallet->IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER));
+    if (pwallet->IsWalletFlagSet(WALLET_FLAG_EXTERNAL_SIGNER)) {
+        UniValue registrations(UniValue::VARR);
+        for (const wallet::ExternalSignerRegistration& entry : pwallet->GetExternalSignerRegistrations()) {
+            UniValue registration(UniValue::VOBJ);
+            registration.pushKV("fingerprint", entry.fingerprint);
+            registration.pushKV("registration", entry.registration);
+            registrations.push_back(std::move(registration));
+        }
+        obj.pushKV("external_signer_registrations", registrations);
+    }
     obj.pushKV("blank", pwallet->IsWalletFlagSet(WALLET_FLAG_BLANK_WALLET));
     if (int64_t birthtime = pwallet->GetBirthTime(); birthtime != UNKNOWN_TIME) {
         obj.pushKV("birthtime", birthtime);
@@ -219,6 +239,62 @@ static RPCMethod listwallets()
     };
 }
 
+struct WalletLoadResult {
+    std::shared_ptr<CWallet> wallet;
+    std::vector<bilingual_str> warnings;
+};
+
+static WalletLoadResult LoadWalletForRPC(WalletContext& context, const std::string& name, std::optional<bool> load_on_start)
+{
+    DatabaseOptions options;
+    DatabaseStatus status;
+    ReadDatabaseArgs(*context.args, options);
+    options.require_existing = true;
+    bilingual_str error;
+    std::vector<bilingual_str> warnings;
+
+    {
+        LOCK(context.wallets_mutex);
+        if (std::any_of(context.wallets.begin(), context.wallets.end(), [&name](const auto& wallet) { return wallet->GetName() == name; })) {
+            throw JSONRPCError(RPC_WALLET_ALREADY_LOADED, "Wallet \"" + name + "\" is already loaded.");
+        }
+    }
+
+    std::shared_ptr<CWallet> wallet{LoadWallet(context, name, load_on_start, options, status, error, warnings)};
+    HandleWalletError(wallet, status, error);
+    return {std::move(wallet), std::move(warnings)};
+}
+
+static std::vector<bilingual_str> UnloadWallet(WalletContext& context, std::shared_ptr<CWallet> wallet, std::optional<bool> load_on_start, std::unique_ptr<WalletRescanReserver> reserver = nullptr)
+{
+    if (!reserver) {
+        reserver = std::make_unique<WalletRescanReserver>(*wallet);
+        if (!reserver->reserve()) {
+            throw JSONRPCError(RPC_WALLET_ERROR, "Wallet is currently rescanning. Abort existing rescan or wait.");
+        }
+    } else {
+        CHECK_NONFATAL(reserver->isReserved());
+    }
+
+    std::vector<bilingual_str> warnings;
+    if (!RemoveWallet(context, wallet, load_on_start, warnings)) {
+        throw JSONRPCError(RPC_MISC_ERROR, "Requested wallet already unloaded");
+    }
+
+    reserver.reset();
+    WaitForDeleteWallet(std::move(wallet));
+    return warnings;
+}
+
+static std::vector<bilingual_str> ReloadWallet(WalletContext& context, std::shared_ptr<CWallet> wallet, std::unique_ptr<WalletRescanReserver> reserver)
+{
+    const std::string wallet_name{wallet->GetName()};
+    std::vector<bilingual_str> warnings{UnloadWallet(context, std::move(wallet), /*load_on_start=*/std::nullopt, std::move(reserver))};
+    WalletLoadResult load_result{LoadWalletForRPC(context, wallet_name, /*load_on_start=*/std::nullopt)};
+    warnings.insert(warnings.end(), load_result.warnings.begin(), load_result.warnings.end());
+    return warnings;
+}
+
 static RPCMethod loadwallet()
 {
     return RPCMethod{
@@ -256,28 +332,12 @@ static RPCMethod loadwallet()
     WalletContext& context = EnsureWalletContext(request.context);
     const std::string name(request.params[0].get_str());
 
-    DatabaseOptions options;
-    DatabaseStatus status;
-    ReadDatabaseArgs(*context.args, options);
-    options.require_existing = true;
-    bilingual_str error;
-    std::vector<bilingual_str> warnings;
     std::optional<bool> load_on_start = request.params[1].isNull() ? std::nullopt : std::optional<bool>(request.params[1].get_bool());
-
-    {
-        LOCK(context.wallets_mutex);
-        if (std::any_of(context.wallets.begin(), context.wallets.end(), [&name](const auto& wallet) { return wallet->GetName() == name; })) {
-            throw JSONRPCError(RPC_WALLET_ALREADY_LOADED, "Wallet \"" + name + "\" is already loaded.");
-        }
-    }
-
-    std::shared_ptr<CWallet> const wallet = LoadWallet(context, name, load_on_start, options, status, error, warnings);
-
-    HandleWalletError(wallet, status, error);
+    WalletLoadResult load_result{LoadWalletForRPC(context, name, load_on_start)};
 
     UniValue obj(UniValue::VOBJ);
-    obj.pushKV("name", wallet->GetName());
-    PushWarnings(warnings, obj);
+    obj.pushKV("name", load_result.wallet->GetName());
+    PushWarnings(load_result.warnings, obj);
 
     return obj;
 },
@@ -291,9 +351,16 @@ static RPCMethod setwalletflag()
                 if (it.second & MUTABLE_WALLET_FLAGS)
                     flags += (flags == "" ? "" : ", ") + it.first;
 
+            std::string reload_flags;
+            for (auto& it : STRING_TO_WALLET_FLAG)
+                if (it.second & WALLET_FLAGS_REQUIRING_RELOAD)
+                    reload_flags += (reload_flags == "" ? "" : ", ") + it.first;
+
     return RPCMethod{
         "setwalletflag",
-        "Change the state of the given wallet flag for a wallet.\n",
+        "Change the state of the given wallet flag for a wallet.\n"
+        "The following flags trigger a wallet reload: " + reload_flags + ".\n"
+        "Make sure no other RPC clients are using the wallet when changing these flags.\n",
                 {
                     {"flag", RPCArg::Type::STR, RPCArg::Optional::NO, "The name of the flag to change. Current available flags: " + flags},
                     {"value", RPCArg::Type::BOOL, RPCArg::Default{true}, "The new state."},
@@ -312,7 +379,7 @@ static RPCMethod setwalletflag()
                 },
         [](const RPCMethod& self, const JSONRPCRequest& request) -> UniValue
 {
-    std::shared_ptr<CWallet> const pwallet = GetWalletForJSONRPCRequest(request);
+    std::shared_ptr<CWallet> pwallet = GetWalletForJSONRPCRequest(request);
     if (!pwallet) return UniValue::VNULL;
 
     std::string flag_str = request.params[0].get_str();
@@ -328,24 +395,47 @@ static RPCMethod setwalletflag()
         throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Wallet flag is immutable: %s", flag_str));
     }
 
+#ifndef ENABLE_EXTERNAL_SIGNER
+    if (flag == WALLET_FLAG_EXTERNAL_SIGNER && value) {
+        throw JSONRPCError(RPC_WALLET_ERROR, "Compiled without external signing support (required for external signing)");
+    }
+#endif
+
     UniValue res(UniValue::VOBJ);
 
     if (pwallet->IsWalletFlagSet(flag) == value) {
         throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("Wallet flag is already set to %s: %s", value ? "true" : "false", flag_str));
     }
 
+    std::unique_ptr<WalletRescanReserver> rescan_reserver;
+    if (flag & WALLET_FLAGS_REQUIRING_RELOAD) {
+        rescan_reserver = std::make_unique<WalletRescanReserver>(*pwallet);
+        if (!rescan_reserver->reserve()) {
+            throw JSONRPCError(RPC_WALLET_ERROR, "Wallet is currently rescanning. Abort existing rescan or wait.");
+        }
+    }
+
     res.pushKV("flag_name", flag_str);
     res.pushKV("flag_state", value);
 
+    bool reload_wallet;
     if (value) {
-        pwallet->SetWalletFlag(flag);
+        reload_wallet = pwallet->SetWalletFlag(flag);
     } else {
-        pwallet->UnsetWalletFlag(flag);
+        reload_wallet = pwallet->UnsetWalletFlag(flag);
     }
 
+    std::vector<std::string> warnings;
     if (flag && value && WALLET_FLAG_CAVEATS.contains(flag)) {
-        res.pushKV("warnings", WALLET_FLAG_CAVEATS.at(flag));
+        warnings.push_back(WALLET_FLAG_CAVEATS.at(flag));
     }
+    if (reload_wallet) {
+        WalletContext& context{EnsureWalletContext(request.context)};
+        for (const bilingual_str& reload_warning : ReloadWallet(context, std::move(pwallet), std::move(rescan_reserver))) {
+            warnings.push_back(reload_warning.original);
+        }
+    }
+    if (!warnings.empty()) res.pushKV("warnings", util::Join(warnings, "\n"));
 
     return res;
 },
@@ -359,13 +449,13 @@ static RPCMethod createwallet()
         "Creates and loads a new wallet.\n",
         {
             {"wallet_name", RPCArg::Type::STR, RPCArg::Optional::NO, "The name for the new wallet. If this is a path, the wallet will be created at the path location."},
-            {"disable_private_keys", RPCArg::Type::BOOL, RPCArg::Default{false}, "Disable the possibility of private keys (only watchonlys are possible in this mode)."},
+            {"disable_private_keys", RPCArg::Type::BOOL, RPCArg::DefaultHint{"false unless external_signer is set"}, "Disable the possibility of private keys (only watchonlys are possible in this mode)."},
             {"blank", RPCArg::Type::BOOL, RPCArg::Default{false}, "Create a blank wallet. A blank wallet has no keys."},
             {"passphrase", RPCArg::Type::STR, RPCArg::Optional::OMITTED, "Encrypt the wallet with this passphrase."},
             {"avoid_reuse", RPCArg::Type::BOOL, RPCArg::Default{false}, "Keep track of coin reuse, and treat dirty and clean coins differently with privacy considerations in mind."},
             {"descriptors", RPCArg::Type::BOOL, RPCArg::Default{true}, "If set, must be \"true\""},
             {"load_on_startup", RPCArg::Type::BOOL, RPCArg::Optional::OMITTED, "Save wallet name to persistent settings and load on startup. True to add wallet to startup list, false to remove, null to leave unchanged."},
-            {"external_signer", RPCArg::Type::BOOL, RPCArg::Default{false}, "Use an external signer such as a hardware wallet. Requires -signer to be configured. Wallet creation will fail if keys cannot be fetched. Requires disable_private_keys and descriptors set to true."},
+            {"external_signer", RPCArg::Type::BOOL, RPCArg::Default{false}, "Use an external signer such as a hardware wallet. Requires -signer to be configured. Wallet creation will fail if keys cannot be fetched."},
         },
         RPCResult{
             RPCResult::Type::OBJ, "", "",
@@ -387,9 +477,8 @@ static RPCMethod createwallet()
 {
     WalletContext& context = EnsureWalletContext(request.context);
     uint64_t flags = 0;
-    if (!request.params[1].isNull() && request.params[1].get_bool()) {
-        flags |= WALLET_FLAG_DISABLE_PRIVATE_KEYS;
-    }
+
+    std::optional<bool> disable_private_keys{self.MaybeArg<bool>("disable_private_keys")};
 
     if (!request.params[2].isNull() && request.params[2].get_bool()) {
         flags |= WALLET_FLAG_BLANK_WALLET;
@@ -415,9 +504,19 @@ static RPCMethod createwallet()
     if (!request.params[7].isNull() && request.params[7].get_bool()) {
 #ifdef ENABLE_EXTERNAL_SIGNER
         flags |= WALLET_FLAG_EXTERNAL_SIGNER;
+        if (!disable_private_keys.has_value()) {
+            // In the basic use case all keys will be on the external signer
+            // device and the wallet should be watch-only. Makes this the
+            // default.
+            disable_private_keys = true;
+        }
 #else
         throw JSONRPCError(RPC_WALLET_ERROR, "Compiled without external signing support (required for external signing)");
 #endif
+    }
+
+    if (disable_private_keys.value_or(false)) {
+        flags |= WALLET_FLAG_DISABLE_PRIVATE_KEYS;
     }
 
     DatabaseOptions options;
@@ -469,23 +568,11 @@ static RPCMethod unloadwallet()
         throw JSONRPCError(RPC_WALLET_NOT_FOUND, "Requested wallet does not exist or is not loaded");
     }
 
-    std::vector<bilingual_str> warnings;
-    {
-        WalletRescanReserver reserver(*wallet);
-        if (!reserver.reserve()) {
-            throw JSONRPCError(RPC_WALLET_ERROR, "Wallet is currently rescanning. Abort existing rescan or wait.");
-        }
-
-        // Release the "main" shared pointer and prevent further notifications.
-        // Note that any attempt to load the same wallet would fail until the wallet
-        // is destroyed (see CheckUniqueFileid).
-        std::optional<bool> load_on_start{self.MaybeArg<bool>("load_on_startup")};
-        if (!RemoveWallet(context, wallet, load_on_start, warnings)) {
-            throw JSONRPCError(RPC_MISC_ERROR, "Requested wallet already unloaded");
-        }
-    }
-
-    WaitForDeleteWallet(std::move(wallet));
+    // Release the "main" shared pointer and prevent further notifications.
+    // Note that any attempt to load the same wallet would fail until the wallet
+    // is destroyed (see CheckUniqueFileid).
+    std::optional<bool> load_on_start{self.MaybeArg<bool>("load_on_startup")};
+    std::vector<bilingual_str> warnings{UnloadWallet(context, std::move(wallet), load_on_start)};
 
     UniValue result(UniValue::VOBJ);
     PushWarnings(warnings, result);
@@ -748,7 +835,7 @@ static RPCMethod createwalletdescriptor()
             {"type", RPCArg::Type::STR, RPCArg::Optional::NO, "The address type the descriptor will produce. Options are " + FormatAllOutputTypes() + "."},
             {"options", RPCArg::Type::OBJ_NAMED_PARAMS, RPCArg::Optional::OMITTED, "", {
                 {"internal", RPCArg::Type::BOOL, RPCArg::DefaultHint{"Both external and internal will be generated unless this parameter is specified"}, "Whether to only make one descriptor that is internal (if parameter is true) or external (if parameter is false)"},
-                {"hdkey", RPCArg::Type::STR, RPCArg::DefaultHint{"The HD key used by all other active descriptors"}, "The HD key that the wallet knows the private key of, listed using 'gethdkeys', to use for this descriptor's key"},
+                {"hdkey", RPCArg::Type::STR, RPCArg::DefaultHint{"The HD key used by all other active descriptors, or, if there are none, the HD key of an unused(KEY) descriptor."}, "The HD key that the wallet knows the private key of, listed using 'gethdkeys', to use for this descriptor's key"},
             }},
         },
         RPCResult{
@@ -777,24 +864,29 @@ static RPCMethod createwalletdescriptor()
             UniValue internal_only{options["internal"]};
             UniValue hdkey{options["hdkey"]};
 
-            std::vector<bool> internals;
-            if (internal_only.isNull()) {
-                internals.push_back(false);
-                internals.push_back(true);
-            } else {
-                internals.push_back(internal_only.get_bool());
-            }
-
             LOCK(pwallet->cs_wallet);
             EnsureWalletIsUnlocked(*pwallet);
 
             CExtPubKey xpub;
             if (hdkey.isNull()) {
+                // First consider the HD key from active descriptors
                 HDPubKeyMap active_xpubs = pwallet->GetHDPubKeys(HDKeyFilter::Active);
-                if (active_xpubs.size() != 1) {
+                if (active_xpubs.size() == 1) {
+                    xpub = active_xpubs.begin()->first;
+                } else if (active_xpubs.size() > 1) {
                     throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Unable to determine which HD key to use from active descriptors. Please specify with 'hdkey'");
+                } else {
+                    // Look for an unused(KEY) descriptor
+                    HDPubKeyMap wallet_xpubs{pwallet->GetHDPubKeys(HDKeyFilter::UnusedKey)};
+
+                    if (wallet_xpubs.empty()) {
+                        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "No HD key found. Please generate one with 'addhdkey' or import an active descriptor.");
+                    } else if (wallet_xpubs.size() > 1) {
+                        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Unable to determine which HD key to use. Please specify with 'hdkey'");
+                    }
+
+                    xpub = wallet_xpubs.begin()->first;
                 }
-                xpub = active_xpubs.begin()->first;
             } else {
                 xpub = DecodeExtPubKey(hdkey.get_str());
                 if (!xpub.pubkey.IsValid()) {
@@ -808,26 +900,19 @@ static RPCMethod createwalletdescriptor()
             }
             CExtKey active_hdkey(xpub, *key);
 
-            std::vector<std::reference_wrapper<DescriptorScriptPubKeyMan>> spkms;
             WalletBatch batch{pwallet->GetDatabase()};
-            for (bool internal : internals) {
-                WalletDescriptor w_desc = GenerateWalletDescriptor(xpub, *output_type, internal);
-                uint256 w_id = DescriptorID(*w_desc.descriptor);
-                if (!pwallet->GetScriptPubKeyMan(w_id)) {
-                    spkms.emplace_back(pwallet->SetupDescriptorScriptPubKeyMan(batch, active_hdkey, *output_type, internal));
-                }
-            }
-            if (spkms.empty()) {
+            // Without the internal option, create both the receive and change
+            // descriptor; with it, only the requested one
+            const bool receive{internal_only.isNull() || !internal_only.get_bool()};
+            const bool change{internal_only.isNull() || internal_only.get_bool()};
+            auto new_descs{pwallet->SetupDescriptorScriptPubKeyManPair(batch, active_hdkey, *output_type, receive, change)};
+            if (new_descs.empty()) {
                 throw JSONRPCError(RPC_WALLET_ERROR, "Descriptor already exists");
             }
 
-            // Fetch each descspkm from the wallet in order to get the descriptor strings
             UniValue descs{UniValue::VARR};
-            for (const auto& spkm : spkms) {
-                std::string desc_str;
-                bool ok = spkm.get().GetDescriptorString(desc_str, false);
-                CHECK_NONFATAL(ok);
-                descs.push_back(desc_str);
+            for (const std::string& desc : new_descs) {
+                descs.push_back(desc);
             }
             UniValue out{UniValue::VOBJ};
             out.pushKV("descs", std::move(descs));
@@ -858,6 +943,7 @@ RPCMethod addhdkey()
             std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
             if (!wallet) return UniValue::VNULL;
 
+
             if (wallet->IsWalletFlagSet(WALLET_FLAG_DISABLE_PRIVATE_KEYS)) {
                 throw JSONRPCError(RPC_WALLET_ERROR, "addhdkey is not available for wallets without private keys");
             }
@@ -882,6 +968,10 @@ RPCMethod addhdkey()
             }
 
             LOCK(wallet->cs_wallet);
+            if (wallet->GetKey(hdkey.Neuter().pubkey.GetID())) {
+                throw JSONRPCError(RPC_WALLET_ERROR, "HD key already exists");
+            }
+
             std::string desc_str = "unused(" + EncodeExtKey(hdkey) + ")";
             FlatSigningProvider keys;
             std::string error;
@@ -1073,6 +1163,57 @@ RPCMethod derivehdkey()
     };
 }
 
+#ifdef ENABLE_EXTERNAL_SIGNER
+RPCMethod registerdescriptor()
+{
+    return RPCMethod{
+        "registerdescriptor",
+        "Register the wallet's multipath descriptor on all connected external signers and store the results.",
+        {
+            {"name", RPCArg::Type::STR, RPCArg::DefaultHint{"wallet name"}, "Descriptor name to display on the device"},
+        },
+        RPCResult{
+            RPCResult::Type::OBJ,"","",
+            {
+                {RPCResult::Type::ARR, "registrations", "Registrations stored in the wallet", {
+                    {RPCResult::Type::OBJ, "", "", {
+                        {RPCResult::Type::STR, "fingerprint", "The fingerprint of the external signer"},
+                        {RPCResult::Type::STR, "registration", "The opaque registration returned by the external signer"},
+                    }},
+                }},
+            }
+        },
+        RPCExamples{HelpExampleCli("registerdescriptor", "\"MuSig wallet\"")},
+        [&](const RPCMethod& self, const JSONRPCRequest& request) -> UniValue
+        {
+            std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+            if (!wallet) return UniValue::VNULL;
+            CWallet* const pwallet = wallet.get();
+
+            LOCK(pwallet->cs_wallet);
+
+            std::optional<std::string> descriptor_name;
+            if (!request.params[0].isNull()) {
+                descriptor_name = request.params[0].get_str();
+            }
+            util::Result<std::vector<ExternalSignerRegistration>> res = pwallet->RegisterDescriptor(descriptor_name);
+            if (!res) throw JSONRPCError(RPC_MISC_ERROR, util::ErrorString(res).original);
+
+            UniValue result(UniValue::VOBJ);
+            UniValue registrations(UniValue::VARR);
+            for (const auto& entry : *res) {
+                UniValue registration(UniValue::VOBJ);
+                registration.pushKV("fingerprint", entry.fingerprint);
+                registration.pushKV("registration", entry.registration);
+                registrations.push_back(std::move(registration));
+            }
+            result.pushKV("registrations", registrations);
+            return result;
+        }
+    };
+}
+#endif // ENABLE_EXTERNAL_SIGNER
+
 // addresses
 RPCMethod getaddressinfo();
 RPCMethod getnewaddress();
@@ -1192,6 +1333,7 @@ std::span<const CRPCCommand> GetWalletRPCCommands()
         {"wallet", &unloadwallet},
         {"wallet", &walletcreatefundedpsbt},
 #ifdef ENABLE_EXTERNAL_SIGNER
+        {"wallet", &registerdescriptor},
         {"wallet", &walletdisplayaddress},
 #endif // ENABLE_EXTERNAL_SIGNER
         {"wallet", &walletlock},

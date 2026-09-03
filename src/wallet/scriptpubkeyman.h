@@ -301,13 +301,6 @@ private:
      */
     mutable std::map<uint256, MuSig2SecNonce> m_musig2_secnonces;
 
-    //! Create a new DescriptorScriptPubKeyMan from an existing descriptor (i.e. from an import)
-    DescriptorScriptPubKeyMan(WalletStorage& storage, WalletDescriptor& descriptor, int64_t keypool_size)
-        : ScriptPubKeyMan(storage),
-        m_keypool_size(keypool_size),
-        m_wallet_descriptor(descriptor)
-    {}
-
     bool AddDescriptorKeyWithDB(WalletBatch& batch, const CKey& key, const CPubKey &pubkey) EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man);
 
     KeyMap GetKeys() const EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man);
@@ -324,10 +317,17 @@ private:
     void AddDescriptorKey(const CKey& key, const CPubKey &pubkey);
     void UpdateWithSigningProvider(WalletBatch& batch, const FlatSigningProvider& signing_provider) EXCLUSIVE_LOCKS_REQUIRED(cs_desc_man);
 
-    //! Setup descriptors based on the given CExtKey
-    void SetupDescriptorGeneration(WalletBatch& batch, const CExtKey& master_key, OutputType addr_type, bool internal);
+    //! Setup with the given descriptor, storing the given master key
+    void SetupDescriptorGeneration(WalletBatch& batch, const CExtKey& master_key, WalletDescriptor w_desc);
 
 protected:
+    //! Create a new DescriptorScriptPubKeyMan from an existing descriptor (i.e. from an import)
+    DescriptorScriptPubKeyMan(WalletStorage& storage, WalletDescriptor& descriptor, int64_t keypool_size)
+        : ScriptPubKeyMan(storage),
+        m_keypool_size(keypool_size),
+        m_wallet_descriptor(descriptor)
+    {}
+
     //! Create a DescriptorScriptPubKeyMan from existing data (i.e. during loading)
     DescriptorScriptPubKeyMan(WalletStorage& storage, WalletDescriptor& descriptor, int64_t keypool_size, const KeyMap& keys, const CryptedKeyMap& ckeys);
 
@@ -348,7 +348,7 @@ public:
     static std::unique_ptr<DescriptorScriptPubKeyMan> LoadFromStorage(WalletStorage& storage, WalletDescriptor& descriptor, int64_t keypool_size, const KeyMap& keys, const CryptedKeyMap& ckeys);
     static std::unique_ptr<DescriptorScriptPubKeyMan> CreateFromImport(WalletStorage& storage, WalletDescriptor& descriptor, int64_t keypool_size, const FlatSigningProvider& provider);
     static std::unique_ptr<DescriptorScriptPubKeyMan> CreateFromMigration(WalletStorage& storage, WalletBatch& batch, WalletDescriptor& descriptor, int64_t keypool_size, const FlatSigningProvider& provider);
-    static std::unique_ptr<DescriptorScriptPubKeyMan> GenerateNewSingleSig(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, const CExtKey& master_key, OutputType addr_type, bool internal);
+    static std::unique_ptr<DescriptorScriptPubKeyMan> GenerateNewSingleSig(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, const CExtKey& master_key, WalletDescriptor w_desc);
 
     mutable RecursiveMutex cs_desc_man;
 
@@ -407,6 +407,9 @@ public:
     std::unordered_set<CScript, SaltedSipHasher> GetScriptPubKeys() const override;
     std::unordered_set<CScript, SaltedSipHasher> GetScriptPubKeys(int32_t minimum_index) const;
     int32_t GetEndRange() const;
+
+    //! Look up the descriptor range index that produced `script`, if any.
+    std::optional<int32_t> GetScriptPubKeyIndex(const CScript& script) const;
 
     [[nodiscard]] bool GetDescriptorString(std::string& out, bool priv) const;
 

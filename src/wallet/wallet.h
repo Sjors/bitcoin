@@ -133,6 +133,7 @@ inline constexpr bool DEFAULT_WALLET_RBF = true;
 inline constexpr bool DEFAULT_WALLETBROADCAST = true;
 inline constexpr bool DEFAULT_DISABLE_WALLET = false;
 inline constexpr bool DEFAULT_WALLETCROSSCHAIN = false;
+inline constexpr bool DEFAULT_SIGN_TAPROOT_KEYPATH_ONLY{false};
 //! -maxtxfee default
 inline constexpr CAmount DEFAULT_TRANSACTION_MAXFEE{COIN / 10};
 //! Discourage users to set fees higher than this amount (in satoshis) per kB
@@ -157,7 +158,11 @@ inline constexpr uint64_t KNOWN_WALLET_FLAGS =
     |   WALLET_FLAG_EXTERNAL_SIGNER;
 
 inline constexpr uint64_t MUTABLE_WALLET_FLAGS =
-        WALLET_FLAG_AVOID_REUSE;
+        WALLET_FLAG_AVOID_REUSE
+    |   WALLET_FLAG_EXTERNAL_SIGNER;
+
+inline constexpr uint64_t WALLET_FLAGS_REQUIRING_RELOAD =
+        WALLET_FLAG_EXTERNAL_SIGNER;
 
 inline const std::map<WalletFlags, std::string> WALLET_FLAG_TO_STRING{
     {WALLET_FLAG_AVOID_REUSE, "avoid_reuse"},
@@ -302,6 +307,12 @@ struct CRecipient
     bool fSubtractFeeFromAmount;
 };
 
+/** Opaque descriptor registration returned by an external signer. */
+struct ExternalSignerRegistration {
+    std::string fingerprint;
+    std::string registration;
+};
+
 class WalletRescanReserver; //forward declarations for ScanForWalletTransactions/RescanFromTime
 /**
  * A CWallet maintains a set of transactions and balances, and provides the ability to create new transactions.
@@ -380,10 +391,12 @@ private:
     /** WalletFlags set on this wallet. */
     std::atomic<uint64_t> m_wallet_flags{0};
 
+    std::vector<ExternalSignerRegistration> m_external_signer_registrations;
+
     bool SetAddressBookWithDB(WalletBatch& batch, const CTxDestination& address, const std::string& strName, const std::optional<AddressPurpose>& strPurpose);
 
     //! Unsets a wallet flag and saves it to disk
-    void UnsetWalletFlagWithDB(WalletBatch& batch, uint64_t flag);
+    bool UnsetWalletFlagWithDB(WalletBatch& batch, uint64_t flag);
 
     //! Unset the blank wallet flag and saves it to disk
     void UnsetBlankWalletFlag(WalletBatch& batch) override;
@@ -420,6 +433,10 @@ private:
     // ScriptPubKeyMan::GetID. In many cases it will be the hash of an internal structure
     std::map<uint256, std::unique_ptr<ScriptPubKeyMan>> m_spk_managers;
 
+    // Records tying together the descriptors that were expanded from a
+    // multipath descriptor, indexed by MultipathDescriptorRecord::GetID.
+    std::map<uint256, MultipathDescriptorRecord> m_multipath_descriptors GUARDED_BY(cs_wallet);
+
     // Appends spk managers into the main 'm_spk_managers'.
     // Must be the only method adding data to it.
     void AddScriptPubKeyMan(const uint256& id, std::unique_ptr<ScriptPubKeyMan> spkm_man);
@@ -428,7 +445,7 @@ private:
     void AddActiveScriptPubKeyManWithDb(WalletBatch& batch, uint256 id, OutputType type, bool internal);
 
     /** Store wallet flags */
-    void SetWalletFlagWithDB(WalletBatch& batch, uint64_t flags);
+    bool SetWalletFlagWithDB(WalletBatch& batch, uint64_t flags);
 
     //! Cache of descriptor ScriptPubKeys used for IsMine. Maps ScriptPubKey to set of spkms
     std::unordered_map<CScript, std::vector<ScriptPubKeyMan*>, SaltedSipHasher> m_cached_spks;
@@ -569,6 +586,27 @@ public:
     /** Display address on an external signer. */
     util::Result<void> DisplayAddress(const CTxDestination& dest) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
+    /** Determine if the SPKM contains a descriptor that may need device registration. */
+    bool IsCandidateForDescriptorRegistration(DescriptorScriptPubKeyMan& spkm) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
+    /**
+     * Retrieve the stored multipath descriptor for a receive/change pair.
+     *
+     * Ignores trivial single sig policies: pkh(KEY), wpkh(KEY), sh(wpkh(KEY))
+     * and tr(KEY)
+     *
+     * If no SKPM pair is provided, look for the first suitable pair.
+     *
+     * @param[in] spk_pair The receive and change SKPM to use.
+     *
+     * @return the stored multipath descriptor, or an error if no suitable
+     *         descriptors or matching multipath record were found.
+     */
+    util::Result<std::string> GetRegistrationDescriptor(const std::optional<std::pair<DescriptorScriptPubKeyMan&, DescriptorScriptPubKeyMan&>>& spk_pair) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
+    /** Register a descriptor on all connected external signers and persist the results. */
+    util::Result<std::vector<ExternalSignerRegistration>> RegisterDescriptor(const std::optional<std::string>& name) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
     bool IsLockedCoin(const COutPoint& output) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     void LoadLockedCoin(const COutPoint& coin, bool persistent) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     bool LockCoin(const COutPoint& output, bool persist) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
@@ -683,7 +721,7 @@ public:
     std::optional<common::PSBTError> FillPSBT(PartiallySignedTransaction& psbtx,
                   const common::PSBTFillOptions& options,
                   bool& complete,
-                  size_t* n_signed = nullptr) const;
+                  size_t* n_signed = nullptr);
 
     /**
      * Submit the transaction to the node's mempool and then relay to peers.
@@ -910,11 +948,11 @@ public:
      */
     void BlockUntilSyncedToCurrentChain() const LOCKS_EXCLUDED(::cs_main) EXCLUSIVE_LOCKS_REQUIRED(!cs_wallet);
 
-    /** set a single wallet flag */
-    void SetWalletFlag(uint64_t flags);
+    /** Set wallet flags. Returns whether the wallet needs to be reloaded. */
+    bool SetWalletFlag(uint64_t flags);
 
-    /** Unsets a single wallet flag */
-    void UnsetWalletFlag(uint64_t flag);
+    /** Unset wallet flags. Returns whether the wallet needs to be reloaded. */
+    bool UnsetWalletFlag(uint64_t flag);
 
     /** check if a certain wallet flag is set */
     bool IsWalletFlagSet(uint64_t flag) const override;
@@ -927,6 +965,11 @@ public:
     bool LoadWalletFlags(uint64_t flags);
     //! Retrieve all of the wallet's flags
     uint64_t GetWalletFlags() const;
+
+    const std::vector<ExternalSignerRegistration>& GetExternalSignerRegistrations() const { return m_external_signer_registrations; }
+
+    //! Load an opaque descriptor registration returned by an external signer.
+    void LoadExternalSignerRegistration(const std::string& fingerprint, const std::string& registration);
 
     /** Return wallet name for use in logs, will return "default wallet" if the wallet has no name. */
     std::string LogName() const override
@@ -1033,8 +1076,16 @@ public:
     //! @param[in] internal Whether this ScriptPubKeyMan provides change addresses
     void DeactivateScriptPubKeyMan(uint256 id, OutputType type, bool internal);
 
-    //! Create new DescriptorScriptPubKeyMan and add it to the wallet
-    DescriptorScriptPubKeyMan& SetupDescriptorScriptPubKeyMan(WalletBatch& batch, const CExtKey& master_key, const OutputType& output_type, bool internal) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+    //! Create the receive and change DescriptorScriptPubKeyMan if they don't
+    //! exist yet. A record of the multipath descriptor is stored by the call
+    //! that completes the pair.
+    //! @param[in] batch Batch to write the new descriptors with
+    //! @param[in] master_key Master key to derive the descriptors from
+    //! @param[in] output_type The OutputType of the descriptor pair
+    //! @param[in] receive Whether to create the receive descriptor
+    //! @param[in] change Whether to create the change descriptor
+    //! @return The public descriptor strings of the newly created descriptors
+    std::vector<std::string> SetupDescriptorScriptPubKeyManPair(WalletBatch& batch, const CExtKey& master_key, OutputType output_type, bool receive = true, bool change = true) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     //! Create new DescriptorScriptPubKeyMans and add them to the wallet
     void SetupDescriptorScriptPubKeyMans(WalletBatch& batch, const CExtKey& master_key) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
     void SetupDescriptorScriptPubKeyMans() EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
@@ -1055,6 +1106,19 @@ public:
 
     //! Add a descriptor to the wallet, return a ScriptPubKeyMan & associated output type
     util::Result<std::reference_wrapper<DescriptorScriptPubKeyMan>> AddWalletDescriptor(WalletDescriptor& desc, const FlatSigningProvider& signing_provider, const std::string& label, bool internal) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
+    //! Load a multipath descriptor record into memory (used by LoadWallet)
+    void LoadMultipathDescriptor(MultipathDescriptorRecord multipath_desc) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
+    //! Add a multipath descriptor record to the wallet, and write it to the wallet database
+    [[nodiscard]] util::Result<void> AddMultipathDescriptor(WalletBatch& batch, MultipathDescriptorRecord multipath_desc) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
+    //! Get all multipath descriptor records, by record ID
+    const std::map<uint256, MultipathDescriptorRecord>& GetMultipathDescriptors() const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet) { return m_multipath_descriptors; }
+
+    //! Get the multipath descriptor that the given wallet descriptor was
+    //! expanded from, if any
+    std::optional<std::string> GetMultipathDescriptor(const uint256& desc_id) const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
     /** Move all records from the BDB database to a new SQLite database for storage.
      * The original BDB file will be deleted and replaced with a new SQLite file.

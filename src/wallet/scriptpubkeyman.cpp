@@ -864,10 +864,10 @@ std::unique_ptr<DescriptorScriptPubKeyMan> DescriptorScriptPubKeyMan::LoadFromSt
     return std::unique_ptr<DescriptorScriptPubKeyMan>(new DescriptorScriptPubKeyMan(storage, descriptor, keypool_size, keys, ckeys));
 }
 
-std::unique_ptr<DescriptorScriptPubKeyMan> DescriptorScriptPubKeyMan::GenerateNewSingleSig(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, const CExtKey& master_key, OutputType addr_type, bool internal)
+std::unique_ptr<DescriptorScriptPubKeyMan> DescriptorScriptPubKeyMan::GenerateNewSingleSig(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, const CExtKey& master_key, WalletDescriptor w_desc)
 {
     auto spkm = std::unique_ptr<DescriptorScriptPubKeyMan>(new DescriptorScriptPubKeyMan(storage, keypool_size));
-    spkm->SetupDescriptorGeneration(batch, master_key, addr_type, internal);
+    spkm->SetupDescriptorGeneration(batch, master_key, std::move(w_desc));
     return spkm;
 }
 
@@ -1214,13 +1214,13 @@ bool DescriptorScriptPubKeyMan::AddDescriptorKeyWithDB(WalletBatch& batch, const
     }
 }
 
-void DescriptorScriptPubKeyMan::SetupDescriptorGeneration(WalletBatch& batch, const CExtKey& master_key, OutputType addr_type, bool internal)
+void DescriptorScriptPubKeyMan::SetupDescriptorGeneration(WalletBatch& batch, const CExtKey& master_key, WalletDescriptor w_desc)
 {
     LOCK(cs_desc_man);
     Assert(m_storage.IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
     Assert(!m_wallet_descriptor.descriptor);
 
-    m_wallet_descriptor = GenerateWalletDescriptor(master_key.Neuter(), addr_type, internal);
+    m_wallet_descriptor = std::move(w_desc);
 
     // Store the master private key, and descriptor
     if (!AddDescriptorKeyWithDB(batch, master_key.key, master_key.key.GetPubKey())) {
@@ -1580,6 +1580,14 @@ std::unordered_set<CScript, SaltedSipHasher> DescriptorScriptPubKeyMan::GetScrip
 int32_t DescriptorScriptPubKeyMan::GetEndRange() const
 {
     return m_max_cached_index + 1;
+}
+
+std::optional<int32_t> DescriptorScriptPubKeyMan::GetScriptPubKeyIndex(const CScript& script) const
+{
+    LOCK(cs_desc_man);
+    auto it = m_map_script_pub_keys.find(script);
+    if (it == m_map_script_pub_keys.end()) return std::nullopt;
+    return it->second;
 }
 
 bool DescriptorScriptPubKeyMan::GetDescriptorString(std::string& out, const bool priv) const

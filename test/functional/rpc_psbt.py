@@ -557,6 +557,42 @@ class PSBTTest(BitcoinTestFramework):
 
         wallet.unloadwallet()
 
+    def test_combinepsbt_sighash_type(self):
+        self.log.info("Test that combining PSBTs preserves the sighash type field regardless of order")
+        node = self.nodes[0]
+        node.createwallet("combine_sighash")
+        wallet = node.get_wallet_rpc("combine_sighash")
+        def_wallet = node.get_wallet_rpc(self.default_wallet_name)
+
+        def_wallet.send([{wallet.getnewaddress(address_type="bech32"): 1}])
+        self.generate(node, 1)
+        psbt = wallet.walletcreatefundedpsbt(wallet.listunspent(), [{def_wallet.getnewaddress(): 0.5}])["psbt"]
+
+        signed = wallet.walletprocesspsbt(psbt=psbt, sighashtype="ALL|ANYONECANPAY", finalize=False)["psbt"]
+        assert_equal(node.decodepsbt(signed)["inputs"][0].get("sighash"), "ALL|ANYONECANPAY")
+        updated = wallet.walletprocesspsbt(psbt=psbt, sign=False)["psbt"]
+        assert "sighash" not in node.decodepsbt(updated)["inputs"][0]
+
+        finalized = []
+        for psbts in [[signed, updated], [updated, signed]]:
+            combined = node.combinepsbt(psbts)
+            assert_equal(node.decodepsbt(combined)["inputs"][0].get("sighash"), "ALL|ANYONECANPAY")
+            fin_res = node.finalizepsbt(combined)
+            assert_equal(fin_res["complete"], True)
+            assert_equal(node.testmempoolaccept([fin_res["hex"]])[0]["allowed"], True)
+            finalized.append(fin_res["hex"])
+        assert_equal(finalized[0], finalized[1])
+
+        wallet.unloadwallet()
+
+    def test_decodepsbt_long_sighash_type(self):
+        self.log.info("Test that decodepsbt rejects invalid trailing bytes in the sighash type field")
+        node = self.nodes[0]
+        psbt = PSBT.from_base64(node.createpsbt([{"txid": "00" * 32, "vout": 0}], [{"data": "00"}]))
+        # The first byte of this sighash type is ALL, but the type itself is not
+        psbt.i[0].map[PSBT_IN_SIGHASH_TYPE] = (0x101).to_bytes(4, "little")
+        assert_equal(node.decodepsbt(psbt.to_base64())["inputs"][0]["sighash"], "")
+
     def assert_change_type(self, psbtx, expected_type):
         """Assert that the given PSBT has a change output with the given type."""
 
@@ -1613,12 +1649,83 @@ class PSBTTest(BitcoinTestFramework):
         # Broadcast transaction
         self.nodes[2].sendrawtransaction(processed_psbt['hex'])
 
+        self.log.info("Test descriptorprocesspsbt keypath_only skips taproot script path signing")
+        taproot_key = get_generate_key()
+        taproot_descriptor = descsum_create(f"tr({H_POINT},pk({taproot_key.privkey}))")
+        taproot_public_descriptor = descsum_create(f"tr({H_POINT},pk({taproot_key.pubkey}))")
+        taproot_address = self.nodes[2].deriveaddresses(taproot_descriptor)[0]
+        taproot_utxo = self.create_outpoints(self.nodes[0], outputs=[{taproot_address: 1}])[0]
+        self.sync_all()
+
+        taproot_psbt = self.nodes[2].createpsbt([taproot_utxo], {self.nodes[0].getnewaddress(): 0.99999})
+        keypath_only_psbt = self.nodes[2].descriptorprocesspsbt(
+            psbt=taproot_psbt,
+            descriptors=[taproot_descriptor],
+            finalize=False,
+            keypath_only=True,
+        )
+        decoded = self.nodes[2].decodepsbt(keypath_only_psbt["psbt"])
+        assert "taproot_scripts" not in decoded["inputs"][0]
+        assert "taproot_key_path_sig" not in decoded["inputs"][0]
+        assert "taproot_script_path_sigs" not in decoded["inputs"][0]
+
+        prepopulated_psbt = self.nodes[2].descriptorprocesspsbt(
+            psbt=taproot_psbt,
+            descriptors=[taproot_public_descriptor],
+            finalize=False,
+        )
+        decoded = self.nodes[2].decodepsbt(prepopulated_psbt["psbt"])
+        assert "taproot_scripts" in decoded["inputs"][0]
+        assert "taproot_script_path_sigs" not in decoded["inputs"][0]
+
+        keypath_only_prepopulated_psbt = self.nodes[2].descriptorprocesspsbt(
+            psbt=prepopulated_psbt["psbt"],
+            descriptors=[taproot_descriptor],
+            finalize=False,
+            keypath_only=True,
+        )
+        decoded = self.nodes[2].decodepsbt(keypath_only_prepopulated_psbt["psbt"])
+        assert "taproot_scripts" in decoded["inputs"][0]
+        assert "taproot_key_path_sig" not in decoded["inputs"][0]
+        assert "taproot_script_path_sigs" not in decoded["inputs"][0]
+
+        signed_psbt = self.nodes[2].descriptorprocesspsbt(
+            psbt=taproot_psbt,
+            descriptors=[taproot_descriptor],
+            finalize=False,
+            keypath_only=False,
+        )
+        decoded = self.nodes[2].decodepsbt(signed_psbt["psbt"])
+        assert "taproot_script_path_sigs" in decoded["inputs"][0]
+
+        # Do not finalize an existing script-path signature when keypath_only is
+        # requested, since that would produce a broadcastable script-path spend.
+        keypath_only_signed_psbt = self.nodes[2].descriptorprocesspsbt(
+            psbt=signed_psbt["psbt"],
+            descriptors=[taproot_descriptor],
+            finalize=True,
+            keypath_only=True,
+        )
+        assert_equal(keypath_only_signed_psbt["complete"], False)
+        decoded = self.nodes[2].decodepsbt(keypath_only_signed_psbt["psbt"])
+        assert "taproot_script_path_sigs" in decoded["inputs"][0]
+        assert "final_scriptwitness" not in decoded["inputs"][0]
+
+        # The standalone finalizer has no key-path-only policy and can explicitly
+        # finalize the otherwise unchanged script-path signature.
+        finalized = self.nodes[2].finalizepsbt(keypath_only_signed_psbt["psbt"])
+        assert_equal(finalized["complete"], True)
+        rawtx = finalized["hex"]
+        assert self.nodes[2].testmempoolaccept([rawtx])[0]["allowed"]
+
         self.log.info("Test descriptorprocesspsbt raises if an invalid sighashtype is passed")
         assert_raises_rpc_error(-8, "'all' is not a valid sighash parameter.", self.nodes[2].descriptorprocesspsbt, psbt=psbt, descriptors=[descriptor], sighashtype="all")
 
         if not self.options.usecli:
             self.test_sighash_mismatch()
         self.test_sighash_adding()
+        self.test_combinepsbt_sighash_type()
+        self.test_decodepsbt_long_sighash_type()
         self.test_psbt_named_parameter_handling()
         self.test_psbt_roundtrip()
         self.test_psbt_version()
