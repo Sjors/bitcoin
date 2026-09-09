@@ -821,6 +821,11 @@ const RPCResult& DecodePSBTInputs()
                     {RPCResult::Type::STR, "pubkey", "The public key and signature that corresponds to it."},
                 }},
                 {RPCResult::Type::STR, "sighash", /*optional=*/true, "The sighash type to be used"},
+                {RPCResult::Type::OBJ, "block_reference", /*optional=*/true, "The block a witness v2 input references (see doc/block-reference.md)",
+                {
+                    {RPCResult::Type::NUM, "height", "The height of the referenced block"},
+                    {RPCResult::Type::STR_HEX, "hash", "The hash of the referenced block"},
+                }},
                 {RPCResult::Type::OBJ, "redeem_script", /*optional=*/true, "",
                 {
                     {RPCResult::Type::STR, "asm", "Disassembly of the redeem script"},
@@ -1227,6 +1232,14 @@ static RPCMethod decodepsbt()
         // Sighash
         if (input.sighash_type != std::nullopt) {
             in.pushKV("sighash", SighashToStr(*input.sighash_type));
+        }
+
+        // Block reference
+        if (input.m_block_reference) {
+            UniValue ref(UniValue::VOBJ);
+            ref.pushKV("height", input.m_block_reference->first);
+            ref.pushKV("hash", input.m_block_reference->second.GetHex());
+            in.pushKV("block_reference", std::move(ref));
         }
 
         // Redeem script and witness script
@@ -2117,7 +2130,8 @@ RPCMethod descriptorprocesspsbt()
     // Check whether or not all of the inputs are now correctly signed
     bool complete = true;
     const std::optional<PrecomputedTransactionData> txdata_opt{PrecomputePSBTData(psbtx)};
-    const PrecomputedTransactionData txdata{*CHECK_NONFATAL(txdata_opt)};
+    if (!txdata_opt) throw JSONRPCPSBTError(common::PSBTError::INVALID_TX);
+    const PrecomputedTransactionData& txdata{*txdata_opt};
     for (unsigned int i = 0; i < psbtx.inputs.size(); ++i) {
         complete = complete && PSBTInputSignedAndVerified(psbtx, i, &txdata);
     }

@@ -31,8 +31,14 @@ PSBTAnalysis AnalyzePSBT(PartiallySignedTransaction psbtx)
 
     result.inputs.resize(psbtx.inputs.size());
 
-    // PrecomputePSBTData calls GetUnsignedTx() which we checked already works
-    const PrecomputedTransactionData txdata = *PrecomputePSBTData(psbtx);
+    // PrecomputePSBTData calls GetUnsignedTx() which we checked already works, but it can still
+    // reject conflicting block references.
+    const std::optional<PrecomputedTransactionData> txdata_opt{PrecomputePSBTData(psbtx)};
+    if (!txdata_opt) {
+        result.SetInvalid("PSBT inputs reference conflicting block hashes for the same height");
+        return result;
+    }
+    const PrecomputedTransactionData& txdata{*txdata_opt};
 
     for (unsigned int i = 0; i < psbtx.inputs.size(); ++i) {
         PSBTInput& input = psbtx.inputs[i];

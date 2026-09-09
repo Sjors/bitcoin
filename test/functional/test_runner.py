@@ -141,6 +141,7 @@ BASE_SCRIPTS = [
     'p2p_blockfilters.py',
     'feature_assumevalid.py',
     'wallet_taproot.py',
+    'wallet_block_reference.py',
     'feature_bip68_sequence.py',
     'rpc_packages.py',
     'rpc_bind.py --ipv4',

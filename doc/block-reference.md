@@ -80,3 +80,18 @@ witness v1 input and is valid on every chain.
   spends. All other annexes remain non-standard. A transaction whose
   reference is not yet mature is rejected from the mempool with a
   retryable, non-punishable error, like a premature coinbase spend.
+
+## Wallet
+
+- `tr2(KEY, TREE)` is `tr()` with a witness v2 output. Addresses are
+  bech32m with witness version 2 (`bc1z...`).
+- `send`, `sendall` and `walletcreatefundedpsbt` accept a
+  `block_reference` option. When set, every witness v2 input references
+  the block at `tip - 99`.
+- A PSBT input carries the reference in field type `0x7f` (prototype,
+  not assigned by any BIP) as a 4-byte little endian height followed by
+  the 32-byte block hash. Signers use it to build the annex and the
+  message; it is kept after finalization so the final witness can be
+  verified. `decodepsbt` shows it as `block_reference`.
+- `signrawtransactionwithwallet` and `signrawtransactionwithkey` sign v2
+  inputs without a reference.

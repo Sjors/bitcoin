@@ -71,6 +71,8 @@ inline constexpr uint8_t PSBT_IN_TAP_MERKLE_ROOT = 0x18;
 inline constexpr uint8_t PSBT_IN_MUSIG2_PARTICIPANT_PUBKEYS = 0x1a;
 inline constexpr uint8_t PSBT_IN_MUSIG2_PUB_NONCE = 0x1b;
 inline constexpr uint8_t PSBT_IN_MUSIG2_PARTIAL_SIG = 0x1c;
+//! Block referenced by a witness v2 input (see doc/block-reference.md). Prototype; the type number is not assigned by any BIP.
+inline constexpr uint8_t PSBT_IN_BLOCK_REFERENCE = 0x7f;
 inline constexpr uint8_t PSBT_IN_PROPRIETARY = 0xFC;
 
 // Output types
@@ -321,6 +323,8 @@ public:
     std::map<std::vector<unsigned char>, std::vector<unsigned char>> unknown;
     std::set<PSBTProprietary> m_proprietary;
     std::optional<int> sighash_type;
+    //! Height and hash of the block a witness v2 input references (annex and signature commitment).
+    std::optional<std::pair<int, uint256>> m_block_reference;
 
     void FillSignatureData(SignatureData& sigdata) const;
     void FromSignatureData(const SignatureData& sigdata);
@@ -514,6 +518,12 @@ public:
         if (!final_script_witness.IsNull()) {
             SerializeToVector(s, CompactSizeWriter(PSBT_IN_SCRIPTWITNESS));
             SerializeToVector(s, final_script_witness.stack);
+        }
+
+        // Write block reference (kept after finalization: verifying the final witness needs it)
+        if (m_block_reference) {
+            SerializeToVector(s, CompactSizeWriter(PSBT_IN_BLOCK_REFERENCE));
+            SerializeToVector(s, uint32_t(m_block_reference->first), m_block_reference->second);
         }
 
         // Write PSBTv2 fields
@@ -856,6 +866,15 @@ public:
                 {
                     ExpectedKeySize("Input Taproot Merkle Root", key, 1);
                     UnserializeFromVector(s, m_tap_merkle_root);
+                    break;
+                }
+                case PSBT_IN_BLOCK_REFERENCE:
+                {
+                    ExpectedKeySize("Input Block Reference", key, 1);
+                    uint32_t height;
+                    uint256 block_hash;
+                    UnserializeFromVector(s, height, block_hash);
+                    m_block_reference = {int(height), block_hash};
                     break;
                 }
                 case PSBT_IN_MUSIG2_PARTICIPANT_PUBKEYS:

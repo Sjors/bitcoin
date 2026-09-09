@@ -461,6 +461,7 @@ void PSBTInput::Merge(const PSBTInput& input)
         m_musig2_partial_sigs[agg_key_lh].insert(psigs.begin(), psigs.end());
     }
     if (sighash_type == std::nullopt && input.sighash_type != std::nullopt) sighash_type = input.sighash_type;
+    if (m_block_reference == std::nullopt && input.m_block_reference != std::nullopt) m_block_reference = input.m_block_reference;
     if (sequence == std::nullopt && input.sequence != std::nullopt) sequence = input.sequence;
     if (time_locktime == std::nullopt && input.time_locktime != std::nullopt) time_locktime = input.time_locktime;
     if (height_locktime == std::nullopt && input.height_locktime != std::nullopt) height_locktime = input.height_locktime;
@@ -637,6 +638,14 @@ std::optional<PrecomputedTransactionData> PrecomputePSBTData(const PartiallySign
     } else {
         txdata.Init(tx, {}, true);
     }
+    // Block references: one hash per height; inputs claiming different hashes for one height conflict.
+    std::map<int, uint256> block_hashes;
+    for (const PSBTInput& input : psbt.inputs) {
+        if (!input.m_block_reference) continue;
+        const auto [it, inserted] = block_hashes.insert(*input.m_block_reference);
+        if (!inserted && it->second != input.m_block_reference->second) return std::nullopt;
+    }
+    txdata.m_block_hashes.assign(block_hashes.begin(), block_hashes.end());
     return txdata;
 }
 
@@ -726,7 +735,7 @@ util::Expected<void, PSBTError> SignPSBTInput(const SigningProvider& provider, P
     if (txdata == nullptr) {
         sig_complete = ProduceSignature(provider, DUMMY_SIGNATURE_CREATOR, utxo.scriptPubKey, sigdata);
     } else {
-        MutableTransactionSignatureCreator creator(tx, index, utxo.nValue, txdata, {.sighash_type = sighash});
+        MutableTransactionSignatureCreator creator(tx, index, utxo.nValue, txdata, {.sighash_type = sighash, .block_reference = input.m_block_reference});
         sig_complete = ProduceSignature(provider, creator, utxo.scriptPubKey, sigdata);
     }
     // Verify that a witness signature was produced in case one was required.
