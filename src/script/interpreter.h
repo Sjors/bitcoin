@@ -146,6 +146,10 @@ enum class script_verify_flag_name : uint8_t {
     // Making unknown public key versions (in BIP 342 scripts) non-standard
     SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_PUBKEYTYPE,
 
+    // Witness v2 Taproot validation (BIP341/342 rules, plus block references)
+    //
+    SCRIPT_VERIFY_TAPROOT_V2,
+
     // Constants to point to the highest flag in use. Add new flags above this line.
     //
     SCRIPT_VERIFY_END_MARKER
@@ -243,6 +247,7 @@ struct ScriptExecutionData
 inline constexpr size_t WITNESS_V0_SCRIPTHASH_SIZE = 32;
 inline constexpr size_t WITNESS_V0_KEYHASH_SIZE = 20;
 inline constexpr size_t WITNESS_V1_TAPROOT_SIZE = 32;
+inline constexpr size_t WITNESS_V2_TAPROOT_SIZE = 32;
 
 inline constexpr uint8_t TAPROOT_LEAF_MASK = 0xfe;
 inline constexpr uint8_t TAPROOT_LEAF_TAPSCRIPT = 0xc0;

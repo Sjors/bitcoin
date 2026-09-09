@@ -2290,6 +2290,11 @@ script_verify_flags GetBlockScriptFlags(const CBlockIndex& block_index, const Ch
         flags |= SCRIPT_VERIFY_NULLDUMMY;
     }
 
+    // Enforce witness v2 Taproot (with block references)
+    if (DeploymentActiveAt(block_index, chainman, Consensus::DEPLOYMENT_TAPROOT_V2)) {
+        flags |= SCRIPT_VERIFY_TAPROOT_V2;
+    }
+
     return flags;
 }
 

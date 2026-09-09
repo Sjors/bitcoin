@@ -1426,9 +1426,9 @@ void PrecomputedTransactionData::Init(const T& txTo, std::vector<CTxOut>&& spent
     for (size_t inpos = 0; inpos < txTo.vin.size() && !(uses_bip143_segwit && uses_bip341_taproot); ++inpos) {
         if (!txTo.vin[inpos].scriptWitness.IsNull()) {
             if (m_spent_outputs_ready && m_spent_outputs[inpos].scriptPubKey.size() == 2 + WITNESS_V1_TAPROOT_SIZE &&
-                m_spent_outputs[inpos].scriptPubKey[0] == OP_1) {
-                // Treat every witness-bearing spend with 34-byte scriptPubKey that starts with OP_1 as a Taproot
-                // spend. This only works if spent_outputs was provided as well, but if it wasn't, actual validation
+                (m_spent_outputs[inpos].scriptPubKey[0] == OP_1 || m_spent_outputs[inpos].scriptPubKey[0] == OP_2)) {
+                // Treat every witness-bearing spend with 34-byte scriptPubKey that starts with OP_1 or OP_2 as a
+                // Taproot (v1 or v2) spend. This only works if spent_outputs was provided as well, but if it wasn't, actual validation
                 // will fail anyway. Note that this branch may trigger for scriptPubKeys that aren't actually segwit
                 // but in that case validation will fail as SCRIPT_ERR_WITNESS_UNEXPECTED anyway.
                 uses_bip341_taproot = true;
@@ -1954,9 +1954,10 @@ static bool VerifyWitnessProgram(const CScriptWitness& witness, int witversion, 
         } else {
             return set_error(serror, SCRIPT_ERR_WITNESS_PROGRAM_WRONG_LENGTH);
         }
-    } else if (witversion == 1 && program.size() == WITNESS_V1_TAPROOT_SIZE && !is_p2sh) {
-        // BIP341 Taproot: 32-byte non-P2SH witness v1 program (which encodes a P2C-tweaked pubkey)
-        if (!(flags & SCRIPT_VERIFY_TAPROOT)) return set_success(serror);
+    } else if ((witversion == 1 || (witversion == 2 && (flags & SCRIPT_VERIFY_TAPROOT_V2))) && program.size() == WITNESS_V1_TAPROOT_SIZE && !is_p2sh) {
+        // BIP341 Taproot: 32-byte non-P2SH witness v1 program (which encodes a P2C-tweaked pubkey).
+        // Witness v2 programs of the same size follow the same rules (see below for the difference).
+        if (witversion == 1 && !(flags & SCRIPT_VERIFY_TAPROOT)) return set_success(serror);
         if (stack.size() == 0) return set_error(serror, SCRIPT_ERR_WITNESS_PROGRAM_WITNESS_EMPTY);
         if (stack.size() >= 2 && !stack.back().empty() && stack.back()[0] == ANNEX_TAG) {
             // Drop annex (this is non-standard; see IsWitnessStandard)
@@ -2200,6 +2201,7 @@ const std::map<std::string, script_verify_flag_name>& ScriptFlagNamesToEnum()
         FLAG_NAME(DISCOURAGE_UPGRADABLE_PUBKEYTYPE),
         FLAG_NAME(DISCOURAGE_OP_SUCCESS),
         FLAG_NAME(DISCOURAGE_UPGRADABLE_TAPROOT_VERSION),
+        FLAG_NAME(TAPROOT_V2),
     };
 #undef FLAG_NAME
     return g_names_to_enum;
