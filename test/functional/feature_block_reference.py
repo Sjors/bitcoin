@@ -64,7 +64,7 @@ class V2Coin:
         self.outpoint = COutPoint(int(funding["txid"], 16), funding["sent_vout"])
         self.utxo = CTxOut(amount, self.tap.scriptPubKey)
 
-    def spend(self, test, *, scriptpath=False, ref_height=None, block_hash=None, annex=None):
+    def spend(self, test, *, scriptpath=False, ref_height=None, block_hash=None, annex=None, fee=FEE):
         """Build a transaction spending this coin back to the MiniWallet.
 
         ref_height: put a block reference annex for this height in the witness.
@@ -75,7 +75,7 @@ class V2Coin:
         """
         tx = CTransaction()
         tx.vin = [CTxIn(self.outpoint)]
-        tx.vout = [CTxOut(self.amount - FEE, test.wallet.get_output_script())]
+        tx.vout = [CTxOut(self.amount - fee, test.wallet.get_output_script())]
         if ref_height is not None:
             annex = block_ref_annex(ref_height)
             if block_hash is None:
@@ -99,14 +99,14 @@ class BlockReferenceTest(BitcoinTestFramework):
     def set_test_params(self):
         self.num_nodes = 2
 
-    def submit_block(self, node, txs):
+    def submit_block(self, node, txs, sync=True):
         """Mine a block containing txs on top of node's tip; return submitblock's result (None if accepted)."""
         height = node.getblockcount() + 1
         block = create_block(int(node.getbestblockhash(), 16), create_coinbase(height), txlist=txs, ntime=node.getblock(node.getbestblockhash())["time"] + 1)
         add_witness_commitment(block)
         block.solve()
         result = node.submitblock(block.serialize().hex())
-        if result is None:
+        if result is None and sync:
             self.sync_blocks()
         return result
 
@@ -118,6 +118,8 @@ class BlockReferenceTest(BitcoinTestFramework):
         self.test_shallow_reorg()
         self.test_unmature_by_reorg()
         self.test_deep_reorg()
+        self.test_fork_split()
+        self.test_activation()
 
     def test_v2_spends(self):
         self.log.info("Witness v2 outputs spend like Taproot")
@@ -274,6 +276,65 @@ class BlockReferenceTest(BitcoinTestFramework):
         self.sync_mempools()
         self.generate(node0, 1)
         assert_equal(node1.gettxout(tx_b.txid_hex, 0)["confirmations"], 1)
+
+    def test_fork_split(self):
+        self.log.info("Splitting a coin across a fork: each side accepts only its own spend")
+        node0, node1 = self.nodes
+        coin = V2Coin(self, node0)
+        self.sync_blocks()
+        split = node0.getblockcount()
+        self.disconnect_nodes(0, 1)
+        self.generate(node0, COINBASE_MATURITY, sync_fun=self.no_op)
+        self.generate(node1, COINBASE_MATURITY, sync_fun=self.no_op)
+        # Spend the same coin on both sides, each referencing that side's first post-split block
+        # (different fees so that the txids differ).
+        coin.node = node0
+        tx_a = coin.spend(self, ref_height=split + 1)
+        coin.node = node1
+        tx_b = coin.spend(self, ref_height=split + 1, fee=FEE + 1)
+        assert_raises_rpc_error(-26, "mempool-script-verify-flag-failed (Invalid Schnorr signature)", node0.sendrawtransaction, tx_b.serialize().hex())
+        assert_raises_rpc_error(-26, "mempool-script-verify-flag-failed (Invalid Schnorr signature)", node1.sendrawtransaction, tx_a.serialize().hex())
+        node0.sendrawtransaction(tx_a.serialize().hex())
+        node1.sendrawtransaction(tx_b.serialize().hex())
+        self.generate(node0, 1, sync_fun=self.no_op)
+        self.generate(node1, 2, sync_fun=self.no_op)
+        # Side B wins; its spend is confirmed and side A's spend is gone
+        self.connect_nodes(0, 1)
+        self.sync_blocks()
+        assert_equal(node0.gettxout(tx_b.txid_hex, 0)["confirmations"], 2)
+        assert_equal(node0.gettxout(tx_a.txid_hex, 0), None)
+        assert tx_a.txid_hex not in node0.getrawmempool()
+
+    def test_activation(self):
+        self.log.info("Before activation v2 outputs are anyone-can-spend; after it, references below the activation height are invalid")
+        node0, node1 = self.nodes
+        coins = [V2Coin(self, node0) for _ in range(4)]
+        self.sync_blocks()
+        self.disconnect_nodes(0, 1)
+        activation = node1.getblockcount() + 3
+        self.restart_node(1, extra_args=["-testactivationheight=taproot_v2@%d" % activation])
+        for coin in coins:
+            coin.node = node1
+        # Before activation, an immature reference is not enforced in blocks (the annex has no meaning),
+        # while the mempool applies the rules as policy.
+        tip = node1.getblockcount()
+        immature = coins[0].spend(self, ref_height=tip + 1 - COINBASE_MATURITY + 1)
+        assert_raises_rpc_error(-26, "bad-txns-block-reference-before-activation", node1.sendrawtransaction, immature.serialize().hex())
+        assert_equal(self.submit_block(node1, [immature], sync=False), None)
+        node1.invalidateblock(node1.getbestblockhash())  # keep node1's chain valid for node0
+        # Activate, then mature the first post-activation block
+        self.generate(node1, activation + COINBASE_MATURITY - 1 - node1.getblockcount(), sync_fun=self.no_op)
+        assert_equal(node1.getdeploymentinfo()["deployments"]["taproot_v2"], {"type": "buried", "active": True, "height": activation})
+        before = coins[1].spend(self, ref_height=activation - 1)
+        assert_raises_rpc_error(-26, "bad-txns-block-reference-before-activation", node1.sendrawtransaction, before.serialize().hex())
+        assert_equal(self.submit_block(node1, [before], sync=False), "bad-txns-block-reference-before-activation")
+        tx = coins[2].spend(self, ref_height=activation)
+        node1.sendrawtransaction(tx.serialize().hex())
+        self.generate(node1, 1, sync_fun=self.no_op)
+        assert_equal(node1.gettxout(tx.txid_hex, 0)["confirmations"], 1)
+        # node0 (always active) accepts node1's chain
+        self.connect_nodes(0, 1)
+        self.sync_blocks()
 
 
 if __name__ == '__main__':
