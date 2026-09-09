@@ -252,6 +252,32 @@ std::optional<LockPoints> CalculateLockPointsAtTip(
     return LockPoints{min_height, min_time, Assert(tip->GetAncestor(max_input_height))};
 }
 
+/**
+ * Check that the blocks referenced by tx's inputs (see doc/block-reference.md) are at least
+ * COINBASE_MATURITY blocks before spend_height, and record their hashes in txdata so that
+ * signature verification can commit to them.
+ *
+ * @param[in] tip           The block preceding the one the transaction is (to be) included in.
+ * @param[in] spend_height  Height of the block the transaction is (to be) included in.
+ * @param[in] min_height    Lowest height that may be referenced (the activation height of witness v2).
+ */
+static bool CheckBlockReferences(const CTransaction& tx, const CCoinsViewCache& inputs, const CBlockIndex& tip, int spend_height, int min_height, PrecomputedTransactionData& txdata, TxValidationState& state)
+{
+    assert(txdata.m_block_hashes.empty());
+    for (const int height : Consensus::GetBlockReferences(tx, inputs)) {
+        if (height < min_height) {
+            return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-block-reference-before-activation",
+                                 strprintf("references block at height %d, before activation at %d", height, min_height));
+        }
+        if (int64_t{height} + COINBASE_MATURITY > spend_height) {
+            return state.Invalid(TxValidationResult::TX_PREMATURE_SPEND, "bad-txns-block-reference-immature",
+                                 strprintf("references block at height %d, at depth %d", height, spend_height - height));
+        }
+        txdata.m_block_hashes.emplace_back(height, Assert(tip.GetAncestor(height))->GetBlockHash());
+    }
+    return true;
+}
+
 bool CheckSequenceLocksAtTip(CBlockIndex* tip,
                              const LockPoints& lock_points)
 {
@@ -888,6 +914,12 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     // The mempool holds txs for the next block, so pass height+1 to CheckTxInputs
     if (!Consensus::CheckTxInputs(tx, state, m_view, m_active_chainstate.m_chain.Height() + 1, ws.m_base_fees)) {
         return false; // state filled in by CheckTxInputs
+    }
+
+    // Likewise, referenced blocks must be mature for the next block. This is checked regardless of
+    // activation, as the standard script flags always apply the witness v2 rules (and need the hashes).
+    if (!CheckBlockReferences(tx, m_view, *m_active_chainstate.m_chain.Tip(), m_active_chainstate.m_chain.Height() + 1, m_active_chainstate.m_chainman.GetConsensus().TaprootV2Height, ws.m_precomputed_txdata, state)) {
+        return false; // state filled in by CheckBlockReferences
     }
 
     if (m_pool.m_opts.require_standard) {
@@ -2566,6 +2598,16 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
             if (!SequenceLocks(tx, nLockTimeFlags, prevheights, *pindex)) {
                 state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-txns-nonfinal",
                               "contains a non-BIP68-final transaction " + tx.GetHash().ToString());
+                break;
+            }
+
+            // Check that referenced blocks are mature, and look up their hashes for the script checks below.
+            // Like BIP68 this must be in ConnectBlock, as it depends on the UTXO set (to identify v2 spends).
+            // Before activation a witness v2 spend is anyone-can-spend and its annex has no meaning.
+            if ((flags & SCRIPT_VERIFY_TAPROOT_V2) && !CheckBlockReferences(tx, view, *pindex, pindex->nHeight, m_chainman.GetConsensus().TaprootV2Height, txsdata[i], tx_state)) {
+                state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
+                              tx_state.GetRejectReason(),
+                              tx_state.GetDebugMessage() + " in transaction " + tx.GetHash().ToString());
                 break;
             }
         }

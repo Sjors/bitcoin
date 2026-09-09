@@ -18,6 +18,8 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
+#include <span>
 #include <string>
 
 bool IsFinalTx(const CTransaction &tx, int nBlockHeight, int64_t nBlockTime)
@@ -165,6 +167,24 @@ int64_t GetTransactionSigOpCost(const CTransaction& tx, const CCoinsViewCache& i
         nSigOps += CountWitnessSigOps(tx.vin[i].scriptSig, prevout.scriptPubKey, tx.vin[i].scriptWitness, flags);
     }
     return nSigOps;
+}
+
+std::vector<int> Consensus::GetBlockReferences(const CTransaction& tx, const CCoinsViewCache& inputs)
+{
+    std::vector<int> heights;
+    for (const CTxIn& txin : tx.vin) {
+        const auto& stack{txin.scriptWitness.stack};
+        if (stack.size() < 2 || stack.back().size() < BLOCK_REF_ANNEX_SIZE || stack.back()[0] != ANNEX_TAG) continue;
+        int witnessversion;
+        std::vector<unsigned char> witnessprogram;
+        const CScript& spk{inputs.AccessCoin(txin.prevout).out.scriptPubKey};
+        if (!spk.IsWitnessProgram(witnessversion, witnessprogram) || witnessversion != 2 || witnessprogram.size() != WITNESS_V2_TAPROOT_SIZE) continue;
+        std::optional<int> height;
+        if (ParseBlockReference(stack.back(), height) && height) heights.push_back(*height);
+    }
+    std::ranges::sort(heights);
+    heights.erase(std::ranges::unique(heights).begin(), heights.end());
+    return heights;
 }
 
 bool Consensus::CheckTxInputs(const CTransaction& tx, TxValidationState& state, const CCoinsViewCache& inputs, int nSpendHeight, CAmount& txfee)

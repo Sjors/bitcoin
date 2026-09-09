@@ -5,6 +5,7 @@
 
 #include <script/interpreter.h>
 
+#include <crypto/common.h>
 #include <crypto/ripemd160.h>
 #include <crypto/sha1.h>
 #include <crypto/sha256.h>
@@ -21,6 +22,7 @@
 #include <compare>
 #include <cstring>
 #include <limits>
+#include <ranges>
 #include <stdexcept>
 
 typedef std::vector<unsigned char> valtype;
@@ -1489,9 +1491,21 @@ static bool HandleMissingData(MissingDataBehavior mdb)
     assert(!"Unknown MissingDataBehavior value");
 }
 
+bool ParseBlockReference(std::span<const unsigned char> annex, std::optional<int>& height)
+{
+    if (annex.size() < 2 || annex[1] != BLOCK_REF_ANNEX_TYPE) return true;
+    if (annex.size() < BLOCK_REF_ANNEX_SIZE) return false;
+    const uint32_t h{ReadLE32(annex.data() + 2)};
+    if (h > uint32_t{std::numeric_limits<int>::max()}) return false;
+    height = static_cast<int>(h);
+    return true;
+}
+
 template<typename T>
 bool SignatureHashSchnorr(uint256& hash_out, ScriptExecutionData& execdata, const T& tx_to, uint32_t in_pos, uint8_t hash_type, SigVersion sigversion, const PrecomputedTransactionData& cache, MissingDataBehavior mdb)
 {
+    // ext_flag is a bitfield: bit 0 for the BIP342 tapscript extension, bit 1 for the block
+    // reference extension (witness v2). Extensions are appended in bit order.
     uint8_t ext_flag, key_version;
     switch (sigversion) {
     case SigVersion::TAPROOT:
@@ -1509,6 +1523,7 @@ bool SignatureHashSchnorr(uint256& hash_out, ScriptExecutionData& execdata, cons
     default:
         assert(false);
     }
+    if (execdata.m_block_ref_height) ext_flag |= 2;
     assert(in_pos < tx_to.vin.size());
     if (!(cache.m_bip341_taproot_ready && cache.m_spent_outputs_ready)) {
         return HandleMissingData(mdb);
@@ -1573,6 +1588,13 @@ bool SignatureHashSchnorr(uint256& hash_out, ScriptExecutionData& execdata, cons
         ss << key_version;
         assert(execdata.m_codeseparator_pos_init);
         ss << execdata.m_codeseparator_pos;
+    }
+
+    // Block reference extension: commit to the hash of the referenced block
+    if (execdata.m_block_ref_height) {
+        const auto it{std::ranges::find(cache.m_block_hashes, *execdata.m_block_ref_height, &std::pair<int, uint256>::first)};
+        if (it == cache.m_block_hashes.end()) return HandleMissingData(mdb);
+        ss << it->second;
     }
 
     hash_out = ss.GetSHA256();
@@ -1964,6 +1986,10 @@ static bool VerifyWitnessProgram(const CScriptWitness& witness, int witversion, 
             const valtype& annex = SpanPopBack(stack);
             execdata.m_annex_hash = (HashWriter{} << annex).GetSHA256();
             execdata.m_annex_present = true;
+            // Witness v2: the annex may reference a block, which the signature message then commits to
+            if (witversion == 2 && !ParseBlockReference(annex, execdata.m_block_ref_height)) {
+                return set_error(serror, SCRIPT_ERR_BLOCK_REFERENCE);
+            }
         } else {
             execdata.m_annex_present = false;
         }

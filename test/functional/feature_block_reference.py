@@ -112,6 +112,7 @@ class BlockReferenceTest(BitcoinTestFramework):
     def run_test(self):
         self.wallet = MiniWallet(self.nodes[0])
         self.test_v2_spends()
+        self.test_block_references()
 
     def test_v2_spends(self):
         self.log.info("Witness v2 outputs spend like Taproot")
@@ -130,6 +131,34 @@ class BlockReferenceTest(BitcoinTestFramework):
             bad = V2Coin(self, node).spend(self, scriptpath=scriptpath)
             bad.wit.vtxinwit[0].scriptWitness.stack[0] = bytes(64)
             assert_equal(self.submit_block(node, [bad]), "block-script-verify-flag-failed (Invalid Schnorr signature)")
+
+    def test_block_references(self):
+        self.log.info("Block references: maturity and signature commitment (block validation)")
+        node = self.nodes[0]
+        for scriptpath in (False, True):
+            # The referenced block must be COINBASE_MATURITY blocks before the block containing the spend
+            coin = V2Coin(self, node)
+            tip = node.getblockcount()
+            immature = coin.spend(self, scriptpath=scriptpath, ref_height=tip + 1 - COINBASE_MATURITY + 1)
+            assert_equal(self.submit_block(node, [immature]), "bad-txns-block-reference-immature")
+            coin = V2Coin(self, node)
+            tip = node.getblockcount()
+            tx = coin.spend(self, scriptpath=scriptpath, ref_height=tip + 1 - COINBASE_MATURITY)
+            # Signatures over the wrong block hash, or a malformed reference, are invalid
+            wrong = V2Coin(self, node).spend(self, scriptpath=scriptpath, ref_height=tip + 1 - COINBASE_MATURITY, block_hash=bytes(32))
+            assert_equal(self.submit_block(node, [wrong]), "block-script-verify-flag-failed (Invalid Schnorr signature)")
+            malformed = V2Coin(self, node).spend(self, scriptpath=scriptpath, annex=bytes([0x50, 0x01, 0x00]))
+            assert_equal(self.submit_block(node, [malformed]), "block-script-verify-flag-failed (Malformed block reference in annex)")
+            # Bytes after the height have no meaning
+            tip = node.getblockcount()
+            tail = V2Coin(self, node)
+            trailing = tail.spend(self, scriptpath=scriptpath, annex=block_ref_annex(tip + 1 - COINBASE_MATURITY) + b"data",
+                                  block_hash=bytes.fromhex(node.getblockhash(tip + 1 - COINBASE_MATURITY))[::-1])
+            assert_equal(self.submit_block(node, [tx, trailing]), None)
+            assert_equal(node.gettxout(tx.txid_hex, 0)["confirmations"], 1)
+            assert_equal(node.gettxout(trailing.txid_hex, 0)["confirmations"], 1)
+            # The rejected immature reference is fine one block later
+            assert_equal(self.submit_block(node, [immature]), None)
 
 
 if __name__ == '__main__':
