@@ -115,6 +115,9 @@ class BlockReferenceTest(BitcoinTestFramework):
         self.test_v2_spends()
         self.test_block_references()
         self.test_block_references_mempool()
+        self.test_shallow_reorg()
+        self.test_unmature_by_reorg()
+        self.test_deep_reorg()
 
     def test_v2_spends(self):
         self.log.info("Witness v2 outputs spend like Taproot")
@@ -194,6 +197,83 @@ class BlockReferenceTest(BitcoinTestFramework):
         self.generate(node, 1)
         node.sendrawtransaction(immature.serialize().hex())
         assert immature.txid_hex in node.getrawmempool()
+
+    def test_shallow_reorg(self):
+        self.log.info("A reorg that keeps the referenced block puts the transaction back in the mempool")
+        node0, node1 = self.nodes
+        coin = V2Coin(self, node0)
+        self.sync_blocks()
+        tip = node0.getblockcount()
+        tx = coin.spend(self, ref_height=tip + 1 - COINBASE_MATURITY)
+        self.disconnect_nodes(0, 1)
+        node0.sendrawtransaction(tx.serialize().hex())
+        self.generate(node0, 1, sync_fun=self.no_op)
+        assert_equal(node0.gettxout(tx.txid_hex, 0)["confirmations"], 1)
+        self.generate(node1, 2, sync_fun=self.no_op)
+        self.connect_nodes(0, 1)
+        self.sync_blocks()
+        assert tx.txid_hex in node0.getrawmempool()
+        self.generate(node0, 1)
+        assert_equal(node0.gettxout(tx.txid_hex, 0)["confirmations"], 1)
+
+    def test_unmature_by_reorg(self):
+        self.log.info("A reorg to a shorter chain evicts a reference that is no longer mature")
+        node0, node1 = self.nodes
+        coin = V2Coin(self, node0)
+        self.sync_blocks()
+        tip = node0.getblockcount()
+        tx = coin.spend(self, ref_height=tip + 1 - COINBASE_MATURITY)
+        node0.sendrawtransaction(tx.serialize().hex())
+        assert tx.txid_hex in node0.getrawmempool()
+        tip_hash = node0.getblockhash(tip)
+        node0.invalidateblock(tip_hash)
+        assert tx.txid_hex not in node0.getrawmempool()
+        node0.reconsiderblock(tip_hash)
+        assert tx.txid_hex not in node0.getrawmempool()
+        node0.sendrawtransaction(tx.serialize().hex())
+        self.generate(node0, 1)
+        assert_equal(node0.gettxout(tx.txid_hex, 0)["confirmations"], 1)
+
+    def test_deep_reorg(self):
+        self.log.info("A reorg that replaces the referenced block invalidates the transaction")
+        node0, node1 = self.nodes
+        a1, a2, a3 = (V2Coin(self, node0) for _ in range(3))
+        self.sync_blocks()
+        split = node0.getblockcount()
+        self.disconnect_nodes(0, 1)
+        # Chain A: node0 mines COINBASE_MATURITY blocks, then a spend referencing the first post-split block,
+        # then holds another such spend in its mempool.
+        self.generate(node0, COINBASE_MATURITY, sync_fun=self.no_op)
+        hash_a = bytes.fromhex(node0.getblockhash(split + 1))[::-1]
+        tx_a1 = a1.spend(self, ref_height=split + 1)
+        node0.sendrawtransaction(tx_a1.serialize().hex())
+        self.generate(node0, 1, sync_fun=self.no_op)
+        assert_equal(node0.gettxout(tx_a1.txid_hex, 0)["confirmations"], 1)
+        tx_a2 = a2.spend(self, ref_height=split + 1)
+        node0.sendrawtransaction(tx_a2.serialize().hex())
+        # Chain B: node1 mines a longer chain.
+        self.generate(node1, COINBASE_MATURITY + 3, sync_fun=self.no_op)
+        self.connect_nodes(0, 1)
+        self.sync_blocks()
+        assert_equal(node0.getblockcount(), split + COINBASE_MATURITY + 3)
+        hash_b = bytes.fromhex(node0.getblockhash(split + 1))[::-1]
+        assert hash_a != hash_b
+        # Neither chain-A spend survives: the disconnected one is not re-added, the unconfirmed one is evicted.
+        assert tx_a1.txid_hex not in node0.getrawmempool()
+        assert tx_a2.txid_hex not in node0.getrawmempool()
+        # Re-submitting must re-verify the signature against chain B. Both spends were accepted to node0's
+        # mempool on chain A, which cached their script execution under the block validation flags; a block
+        # containing them must not be accepted from that cache (script execution cache regression).
+        for tx in (tx_a1, tx_a2):
+            assert_raises_rpc_error(-26, "mempool-script-verify-flag-failed (Invalid Schnorr signature)", node0.sendrawtransaction, tx.serialize().hex())
+            assert_raises_rpc_error(-26, "mempool-script-verify-flag-failed (Invalid Schnorr signature)", node1.sendrawtransaction, tx.serialize().hex())
+            assert_equal(self.submit_block(node0, [tx]), "block-script-verify-flag-failed (Invalid Schnorr signature)")
+        # A reference to the chain-B block works on both nodes.
+        tx_b = a3.spend(self, ref_height=split + 1)
+        node0.sendrawtransaction(tx_b.serialize().hex())
+        self.sync_mempools()
+        self.generate(node0, 1)
+        assert_equal(node1.gettxout(tx_b.txid_hex, 0)["confirmations"], 1)
 
 
 if __name__ == '__main__':
