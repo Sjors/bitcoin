@@ -182,6 +182,11 @@ struct PrecomputedTransactionData
     //! Whether m_spent_outputs is initialized.
     bool m_spent_outputs_ready = false;
 
+    /** Block hashes (by height, sorted) that inputs of this transaction may commit to in their
+     *  signature message. This is chain context that is not derivable from the transaction, so it
+     *  is filled in by the caller (validation) rather than by Init(). */
+    std::vector<std::pair<int, uint256>> m_block_hashes;
+
     PrecomputedTransactionData() = default;
 
     /** Initialize this PrecomputedTransactionData with transaction data.

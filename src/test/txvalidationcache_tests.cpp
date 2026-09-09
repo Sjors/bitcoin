@@ -152,6 +152,11 @@ static void ValidateCheckInputsForAllFlags(const CTransaction &tx, script_verify
             std::vector<CScriptCheck> scriptchecks;
             BOOST_CHECK(CheckInputScripts(tx, state, &active_coins_tip, test_flags, true, add_to_cache, txdata, validation_cache, &scriptchecks));
             BOOST_CHECK(scriptchecks.empty());
+            // ... but not if the inputs reference a different set of block hashes
+            PrecomputedTransactionData txdata_block_ref;
+            txdata_block_ref.m_block_hashes.emplace_back(0, uint256::ONE);
+            BOOST_CHECK(CheckInputScripts(tx, state, &active_coins_tip, test_flags, true, add_to_cache, txdata_block_ref, validation_cache, &scriptchecks));
+            BOOST_CHECK_EQUAL(scriptchecks.size(), tx.vin.size());
         } else {
             // Check that we get script executions to check, if the transaction
             // was invalid, or we didn't add to cache.
