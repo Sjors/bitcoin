@@ -1346,6 +1346,29 @@ bool CWallet::AbandonTransaction(CWalletTx& tx)
     return true;
 }
 
+void CWallet::AbandonBlockReferences(int height)
+{
+    AssertLockHeld(cs_wallet);
+    for (auto& [txid, wtx] : mapWallet) {
+        if (wtx.isConfirmed() || wtx.isAbandoned()) continue;
+        for (const CTxIn& txin : wtx.GetTx()->vin) {
+            const auto& stack{txin.scriptWitness.stack};
+            if (stack.size() < 2 || stack.back().empty() || stack.back()[0] != ANNEX_TAG) continue;
+            const auto parent{mapWallet.find(txin.prevout.hash)};
+            if (parent == mapWallet.end() || txin.prevout.n >= parent->second.GetTx()->vout.size()) continue;
+            int witnessversion;
+            std::vector<unsigned char> witnessprogram;
+            if (!parent->second.GetTx()->vout[txin.prevout.n].scriptPubKey.IsWitnessProgram(witnessversion, witnessprogram) || witnessversion != 2) continue;
+            std::optional<int> ref_height;
+            if (ParseBlockReference(stack.back(), ref_height) && ref_height == height) {
+                WalletLogPrintf("Abandoning %s: it references block %d, which was replaced by a reorg\n", txid.ToString(), height);
+                AbandonTransaction(wtx);
+                break;
+            }
+        }
+    }
+}
+
 void CWallet::MarkConflicted(const uint256& hashBlock, int conflicting_height, const Txid& hashTx)
 {
     LOCK(cs_wallet);
@@ -1556,6 +1579,12 @@ void CWallet::blockConnected(const ChainstateRole& role, const interfaces::Block
     // needed by MarkConflicted.
     SetLastBlockProcessedInMem(block.height, block.hash);
 
+    // A reorg that replaced a block invalidates transactions referencing it.
+    if (const auto it{m_disconnected_blocks.find(block.height)}; it != m_disconnected_blocks.end()) {
+        if (it->second != block.hash) AbandonBlockReferences(block.height);
+        m_disconnected_blocks.erase(it);
+    }
+
     // No need to scan block if it was created before the wallet birthday.
     // Uses chain max time and twice the grace period to adjust time for block time variability.
     if (block.chain_time_max < m_birth_time.load() - (TIMESTAMP_WINDOW * 2)) return;
@@ -1583,6 +1612,7 @@ void CWallet::blockDisconnected(const interfaces::BlockInfo& block)
     // User may have to call abandontransaction again. It may be addressed in the
     // future with a stickier abandoned state or even removing abandontransaction call.
     int disconnect_height = block.height;
+    m_disconnected_blocks[disconnect_height] = block.hash;
 
     for (size_t index = 0; index < block.data->vtx.size(); index++) {
         const CTransactionRef& ptx = block.data->vtx[index];

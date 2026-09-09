@@ -26,7 +26,7 @@ from test_framework.wallet import MiniWallet
 
 class WalletBlockReferenceTest(BitcoinTestFramework):
     def set_test_params(self):
-        self.num_nodes = 1
+        self.num_nodes = 2
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
@@ -117,6 +117,39 @@ class WalletBlockReferenceTest(BitcoinTestFramework):
         self.generate(node, 1)
         assert_raises_rpc_error(-8, "block_reference requires at least one witness v2 (tr2) input", v1.send, {addr: Decimal("0.001")}, options={"block_reference": True})
         assert_raises_rpc_error(-8, "block_reference requires at least one witness v2 (tr2) input", v1.walletcreatefundedpsbt, [], {addr: Decimal("0.001")}, 0, {"block_reference": True})
+
+        self.log.info("A shallow reorg keeps a referencing transaction; one that replaces the referenced block abandons it")
+        node1 = self.nodes[1]
+        self.sync_blocks()
+        self.disconnect_nodes(0, 1)
+        res = w.send({addr: Decimal("0.001")}, options={"block_reference": True})
+        self.generate(node, 1, sync_fun=self.no_op)
+        self.generate(node1, 2, sync_fun=self.no_op)
+        self.connect_nodes(0, 1)
+        self.sync_blocks()
+        assert res["txid"] in node.getrawmempool()
+        assert_equal(w.gettransaction(res["txid"])["details"][0]["abandoned"], False)
+        self.generate(node, 1)
+
+        # Bury everything so far, so that the deep reorg below only replaces empty blocks and the new spend
+        self.generate(node, COINBASE_MATURITY + 1)
+        self.disconnect_nodes(0, 1)
+        ref_height = node.getblockcount() - (COINBASE_MATURITY - 1)
+        balance_before = w.getbalance()
+        res = w.send({addr: Decimal("0.001")}, options={"block_reference": True})
+        self.generate(node, 1, sync_fun=self.no_op)
+        assert_equal(w.gettransaction(res["txid"])["confirmations"], 1)
+        # node1 rebuilds the chain from below the referenced block and outgrows node0
+        node1.invalidateblock(node1.getblockhash(ref_height))
+        self.generate(node1, node.getblockcount() - node1.getblockcount() + 1, sync_fun=self.no_op)
+        self.connect_nodes(0, 1)
+        self.sync_blocks()
+        assert res["txid"] not in node.getrawmempool()
+        tx_info = w.gettransaction(res["txid"])
+        assert_equal(tx_info["confirmations"], 0)
+        assert_equal(tx_info["details"][0]["abandoned"], True)
+        # The abandoned transaction's inputs are spendable again
+        assert_equal(w.getbalance(), balance_before)
 
 
 if __name__ == '__main__':

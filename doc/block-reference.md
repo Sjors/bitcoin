@@ -95,3 +95,7 @@ witness v1 input and is valid on every chain.
   verified. `decodepsbt` shows it as `block_reference`.
 - `signrawtransactionwithwallet` and `signrawtransactionwithkey` sign v2
   inputs without a reference.
+- When a reorg replaces a block that an unconfirmed wallet transaction
+  references, the wallet abandons that transaction: its signatures can never
+  verify again, and its inputs become spendable. A reorg that puts the same
+  block back leaves the transaction alone.
