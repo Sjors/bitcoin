@@ -119,9 +119,13 @@ class BlockReferenceTest(BitcoinTestFramework):
         for scriptpath in (False, True):
             coin = V2Coin(self, node)
             tx = coin.spend(self, scriptpath=scriptpath)
-            # Not standard yet, so mine it directly
-            assert_equal(self.submit_block(node, [tx]), None)
+            node.sendrawtransaction(tx.serialize().hex())
+            self.generate(node, 1)
             assert_equal(node.gettxout(tx.txid_hex, 0)["confirmations"], 1)
+            # An annex without defined meaning is not standard, as for v1
+            unknown_annex = V2Coin(self, node).spend(self, scriptpath=scriptpath, annex=bytes([0x50, 0x02]))
+            assert_raises_rpc_error(-26, "bad-witness-nonstandard", node.sendrawtransaction, unknown_annex.serialize().hex())
+            assert_equal(self.submit_block(node, [unknown_annex]), None)
             # An invalid signature is rejected (v2 is not anyone-can-spend)
             bad = V2Coin(self, node).spend(self, scriptpath=scriptpath)
             bad.wit.vtxinwit[0].scriptWitness.stack[0] = bytes(64)
