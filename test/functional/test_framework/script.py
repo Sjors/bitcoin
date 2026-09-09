@@ -28,6 +28,7 @@ MAX_SCRIPT_SIZE = 10000
 MAX_PUBKEYS_PER_MULTI_A = 999
 LOCKTIME_THRESHOLD = 500000000
 ANNEX_TAG = 0x50
+BLOCK_REF_ANNEX_TYPE = 0x01
 
 SEQUENCE_LOCKTIME_DISABLE_FLAG = (1<<31)
 SEQUENCE_LOCKTIME_TYPE_FLAG = (1<<22) # this means use time (0 means height)
@@ -814,7 +815,9 @@ def BIP341_sha_sequences(txTo):
 def BIP341_sha_outputs(txTo):
     return sha256(b"".join(o.serialize() for o in txTo.vout))
 
-def TaprootSignatureMsg(txTo, spent_utxos, hash_type, input_index=0, *, scriptpath=False, leaf_script=None, codeseparator_pos=-1, annex=None, leaf_ver=LEAF_VERSION_TAPSCRIPT):
+def TaprootSignatureMsg(txTo, spent_utxos, hash_type, input_index=0, *, scriptpath=False, leaf_script=None, codeseparator_pos=-1, annex=None, leaf_ver=LEAF_VERSION_TAPSCRIPT, block_hash=None):
+    """Compute the BIP341 signature message. If block_hash is given, the block reference
+    extension (witness v2, ext_flag bit 1) is included: the message commits to that hash."""
     assert_equal(len(txTo.vin), len(spent_utxos))
     assert input_index < len(txTo.vin)
     out_type = SIGHASH_ALL if hash_type == 0 else hash_type & 3
@@ -835,6 +838,8 @@ def TaprootSignatureMsg(txTo, spent_utxos, hash_type, input_index=0, *, scriptpa
         spend_type |= 1
     if scriptpath:
         spend_type |= 2
+    if block_hash is not None:
+        spend_type |= 4
     ss += bytes([spend_type])
     if in_type == SIGHASH_ANYONECANPAY:
         ss += txTo.vin[input_index].prevout.serialize()
@@ -854,7 +859,9 @@ def TaprootSignatureMsg(txTo, spent_utxos, hash_type, input_index=0, *, scriptpa
         ss += TaggedHash("TapLeaf", bytes([leaf_ver]) + ser_string(leaf_script))
         ss += bytes([0])
         ss += codeseparator_pos.to_bytes(4, "little", signed=False)
-    assert_equal(len(ss), 175 - (in_type == SIGHASH_ANYONECANPAY) * 49 - (out_type != SIGHASH_ALL and out_type != SIGHASH_SINGLE) * 32 + (annex is not None) * 32 + scriptpath * 37)
+    if block_hash is not None:
+        ss += block_hash
+    assert_equal(len(ss), 175 - (in_type == SIGHASH_ANYONECANPAY) * 49 - (out_type != SIGHASH_ALL and out_type != SIGHASH_SINGLE) * 32 + (annex is not None) * 32 + scriptpath * 37 + (block_hash is not None) * 32)
     return ss
 
 def TaprootSignatureHash(*args, **kwargs):
@@ -914,10 +921,15 @@ TaprootInfo = namedtuple("TaprootInfo", "scriptPubKey,internal_pubkey,negflag,tw
 # - merklebranch: the merkle branch to use for this leaf (32*N bytes)
 TaprootLeafInfo = namedtuple("TaprootLeafInfo", "script,version,merklebranch,leaf_hash")
 
-def taproot_construct(pubkey, scripts=None, treat_internal_as_infinity=False):
+def block_ref_annex(height):
+    """Annex committing to the block at the given height (witness v2 block reference)."""
+    return bytes([ANNEX_TAG, BLOCK_REF_ANNEX_TYPE]) + height.to_bytes(4, "little")
+
+def taproot_construct(pubkey, scripts=None, treat_internal_as_infinity=False, witver=1):
     """Construct a tree of Taproot spending conditions
 
     pubkey: a 32-byte xonly pubkey for the internal pubkey (bytes)
+    witver: witness version of the resulting scriptPubKey (1 for BIP341, 2 for v2 with block references)
     scripts: a list of items; each item is either:
              - a (name, CScript or bytes, leaf version) tuple
              - a (name, CScript or bytes) tuple (defaulting to leaf version 0xc0)
@@ -938,7 +950,7 @@ def taproot_construct(pubkey, scripts=None, treat_internal_as_infinity=False):
     else:
         tweaked, negated = tweak_add_pubkey(pubkey, tweak)
     leaves = dict((name, TaprootLeafInfo(script, version, merklebranch, leaf)) for name, version, script, merklebranch, leaf in ret)
-    return TaprootInfo(CScript([OP_1, tweaked]), pubkey, negated + 0, tweak, leaves, h, tweaked)
+    return TaprootInfo(CScript([CScriptOp.encode_op_n(witver), tweaked]), pubkey, negated + 0, tweak, leaves, h, tweaked)
 
 def is_op_success(o):
     return o == 0x50 or o == 0x62 or o == 0x89 or o == 0x8a or o == 0x8d or o == 0x8e or (o >= 0x7e and o <= 0x81) or (o >= 0x83 and o <= 0x86) or (o >= 0x95 and o <= 0x99) or (o >= 0xbb and o <= 0xfe)
