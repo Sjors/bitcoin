@@ -1501,6 +1501,15 @@ bool ParseBlockReference(std::span<const unsigned char> annex, std::optional<int
     return true;
 }
 
+std::vector<unsigned char> BlockReferenceAnnex(int height)
+{
+    std::vector<unsigned char> annex(BLOCK_REF_ANNEX_SIZE);
+    annex[0] = ANNEX_TAG;
+    annex[1] = BLOCK_REF_ANNEX_TYPE;
+    WriteLE32(annex.data() + 2, height);
+    return annex;
+}
+
 template<typename T>
 bool SignatureHashSchnorr(uint256& hash_out, ScriptExecutionData& execdata, const T& tx_to, uint32_t in_pos, uint8_t hash_type, SigVersion sigversion, const PrecomputedTransactionData& cache, MissingDataBehavior mdb)
 {

@@ -261,6 +261,8 @@ inline constexpr size_t BLOCK_REF_ANNEX_SIZE = 6;
  *  Returns false if the annex is a malformed block reference; otherwise sets height when the
  *  annex is a block reference and leaves it untouched when it is not. */
 bool ParseBlockReference(std::span<const unsigned char> annex, std::optional<int>& height);
+/** Build the annex (including the ANNEX_TAG byte) that references the block at the given height. */
+std::vector<unsigned char> BlockReferenceAnnex(int height);
 
 inline constexpr uint8_t TAPROOT_LEAF_MASK = 0xfe;
 inline constexpr uint8_t TAPROOT_LEAF_TAPSCRIPT = 0xc0;
