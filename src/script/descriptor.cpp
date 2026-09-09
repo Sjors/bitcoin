@@ -1515,6 +1515,8 @@ public:
 class TRDescriptor final : public DescriptorImpl
 {
     std::vector<int> m_depths;
+    //! Witness version of the output: 1 for tr(), 2 for tr2() (Taproot with block references)
+    const int m_witver;
 protected:
     std::vector<CScript> MakeScripts(const std::vector<CPubKey>& keys, std::span<const CScript> scripts, FlatSigningProvider& out) const override
     {
@@ -1530,7 +1532,7 @@ protected:
         builder.Finalize(xpk);
         WitnessV1Taproot output = builder.GetOutput();
         out.tr_trees[output] = builder;
-        return Vector(GetScriptForDestination(output));
+        return Vector(CScript() << CScript::EncodeOP_N(m_witver) << ToByteVector(output));
     }
     bool ToStringSubScriptHelper(const SigningProvider* arg, std::string& ret, const StringType type, const DescriptorCache* cache = nullptr) const override
     {
@@ -1568,9 +1570,10 @@ protected:
         return any_success;
     }
 public:
-    TRDescriptor(std::unique_ptr<PubkeyProvider> internal_key, std::vector<std::unique_ptr<DescriptorImpl>> descs, std::vector<int> depths) :
-        DescriptorImpl(Vector(std::move(internal_key)), std::move(descs), "tr"), m_depths(std::move(depths))
+    TRDescriptor(std::unique_ptr<PubkeyProvider> internal_key, std::vector<std::unique_ptr<DescriptorImpl>> descs, std::vector<int> depths, int witver = 1) :
+        DescriptorImpl(Vector(std::move(internal_key)), std::move(descs), witver == 2 ? "tr2" : "tr"), m_depths(std::move(depths)), m_witver(witver)
     {
+        assert(witver == 1 || witver == 2);
         assert(m_subdescriptor_args.size() == m_depths.size());
     }
     std::optional<OutputType> GetOutputType() const override { return OutputType::BECH32M; }
@@ -1580,12 +1583,13 @@ public:
 
     std::optional<int64_t> MaxSatisfactionWeight(bool) const override {
         // FIXME: We assume keypath spend, which can lead to very large underestimations.
-        return 1 + 65;
+        // A witness v2 spend may carry a block reference annex.
+        return 1 + 65 + (m_witver == 2 ? 1 + BLOCK_REF_ANNEX_SIZE : 0);
     }
 
     std::optional<int64_t> MaxSatisfactionElems() const override {
         // FIXME: See above, we assume keypath spend.
-        return 1;
+        return m_witver == 2 ? 2 : 1;
     }
 
     std::unique_ptr<DescriptorImpl> Clone() const override
@@ -1593,7 +1597,7 @@ public:
         std::vector<std::unique_ptr<DescriptorImpl>> subdescs;
         subdescs.reserve(m_subdescriptor_args.size());
         std::transform(m_subdescriptor_args.begin(), m_subdescriptor_args.end(), std::back_inserter(subdescs), [](const std::unique_ptr<DescriptorImpl>& d) { return d->Clone(); });
-        return std::make_unique<TRDescriptor>(m_pubkey_args.at(0)->Clone(), std::move(subdescs), m_depths);
+        return std::make_unique<TRDescriptor>(m_pubkey_args.at(0)->Clone(), std::move(subdescs), m_depths, m_witver);
     }
 };
 
@@ -2540,7 +2544,9 @@ std::vector<std::unique_ptr<DescriptorImpl>> ParseScript(uint32_t& key_exp_index
         error = "Can only have addr() at top level";
         return {};
     }
-    if (ctx == ParseScriptContext::TOP && Func("tr", expr)) {
+    // tr2() is tr() with a witness v2 output, which supports block references (see doc/block-reference.md)
+    const int tr_witver{ctx != ParseScriptContext::TOP ? 0 : Func("tr", expr) ? 1 : Func("tr2", expr) ? 2 : 0};
+    if (tr_witver) {
         auto arg = Expr(expr);
         auto internal_keys = ParsePubkey(key_exp_index, arg, ParseScriptContext::P2TR, out, error);
         if (internal_keys.empty()) {
@@ -2631,12 +2637,12 @@ std::vector<std::unique_ptr<DescriptorImpl>> ParseScript(uint32_t& key_exp_index
             for (auto& subs : subscripts) {
                 this_subs.emplace_back(std::move(subs.at(i)));
             }
-            ret.emplace_back(std::make_unique<TRDescriptor>(std::move(internal_keys.at(i)), std::move(this_subs), depths));
+            ret.emplace_back(std::make_unique<TRDescriptor>(std::move(internal_keys.at(i)), std::move(this_subs), depths, tr_witver));
         }
         return ret;
 
 
-    } else if (Func("tr", expr)) {
+    } else if (Func("tr", expr) || Func("tr2", expr)) {
         error = "Can only have tr at top level";
         return {};
     }
@@ -2865,7 +2871,7 @@ std::unique_ptr<DescriptorImpl> InferScript(const CScript& script, ParseScriptCo
             if (sub) return std::make_unique<WSHDescriptor>(std::move(sub));
         }
     }
-    if (txntype == TxoutType::WITNESS_V1_TAPROOT && ctx == ParseScriptContext::TOP) {
+    if ((txntype == TxoutType::WITNESS_V1_TAPROOT || txntype == TxoutType::WITNESS_V2_TAPROOT) && ctx == ParseScriptContext::TOP) {
         // Extract x-only pubkey from output.
         XOnlyPubKey pubkey;
         std::copy(data[0].begin(), data[0].end(), pubkey.begin());
@@ -2894,12 +2900,12 @@ std::unique_ptr<DescriptorImpl> InferScript(const CScript& script, ParseScriptCo
                 }
                 if (ok) {
                     auto key = InferXOnlyPubkey(tap.internal_key, ParseScriptContext::P2TR, provider);
-                    return std::make_unique<TRDescriptor>(std::move(key), std::move(subscripts), std::move(depths));
+                    return std::make_unique<TRDescriptor>(std::move(key), std::move(subscripts), std::move(depths), txntype == TxoutType::WITNESS_V2_TAPROOT ? 2 : 1);
                 }
             }
         }
         // If the above doesn't work, construct a rawtr() descriptor with just the encoded x-only pubkey.
-        if (pubkey.IsFullyValid()) {
+        if (txntype == TxoutType::WITNESS_V1_TAPROOT && pubkey.IsFullyValid()) {
             auto key = InferXOnlyPubkey(pubkey, ParseScriptContext::P2TR, provider);
             if (key) {
                 return std::make_unique<RawTRDescriptor>(std::move(key));
