@@ -28,6 +28,7 @@ from test_framework.messages import (
     CTxInWitness,
     CTxOut,
 )
+from test_framework.p2p import P2PDataStore
 from test_framework.script import (
     CScript,
     OP_CHECKSIG,
@@ -113,6 +114,7 @@ class BlockReferenceTest(BitcoinTestFramework):
         self.wallet = MiniWallet(self.nodes[0])
         self.test_v2_spends()
         self.test_block_references()
+        self.test_block_references_mempool()
 
     def test_v2_spends(self):
         self.log.info("Witness v2 outputs spend like Taproot")
@@ -159,6 +161,39 @@ class BlockReferenceTest(BitcoinTestFramework):
             assert_equal(node.gettxout(trailing.txid_hex, 0)["confirmations"], 1)
             # The rejected immature reference is fine one block later
             assert_equal(self.submit_block(node, [immature]), None)
+
+    def test_block_references_mempool(self):
+        self.log.info("Block references: relay policy and mempool acceptance")
+        node = self.nodes[0]
+        peer = node.add_p2p_connection(P2PDataStore())
+        for scriptpath in (False, True):
+            coin = V2Coin(self, node)
+            tip = node.getblockcount()
+            ref_height = tip + 1 - COINBASE_MATURITY
+            # Immature: rejected, but not as a consensus failure
+            immature = coin.spend(self, scriptpath=scriptpath, ref_height=ref_height + 1)
+            assert_raises_rpc_error(-26, "bad-txns-block-reference-immature", node.sendrawtransaction, immature.serialize().hex())
+            # Signed for another chain: rejected, and the relaying peer is not punished
+            wrong = coin.spend(self, scriptpath=scriptpath, ref_height=ref_height, block_hash=bytes(32))
+            peer.send_txs_and_test([wrong], node, success=False, reject_reason="mempool-script-verify-flag-failed (Invalid Schnorr signature)")
+            # Only the bare 6-byte reference is standard
+            block_hash = bytes.fromhex(node.getblockhash(ref_height))[::-1]
+            trailing = coin.spend(self, scriptpath=scriptpath, annex=block_ref_annex(ref_height) + b"data", block_hash=block_hash)
+            assert_raises_rpc_error(-26, "bad-witness-nonstandard", node.sendrawtransaction, trailing.serialize().hex())
+            # A mature reference is standard and gets mined
+            tx = coin.spend(self, scriptpath=scriptpath, ref_height=ref_height)
+            node.sendrawtransaction(tx.serialize().hex())
+            self.generate(node, 1)
+            assert_equal(node.gettxout(tx.txid_hex, 0)["confirmations"], 1)
+
+        # An immature reference becomes acceptable one block later
+        coin = V2Coin(self, node)
+        tip = node.getblockcount()
+        immature = coin.spend(self, ref_height=tip + 1 - COINBASE_MATURITY + 1)
+        assert_raises_rpc_error(-26, "bad-txns-block-reference-immature", node.sendrawtransaction, immature.serialize().hex())
+        self.generate(node, 1)
+        node.sendrawtransaction(immature.serialize().hex())
+        assert immature.txid_hex in node.getrawmempool()
 
 
 if __name__ == '__main__':

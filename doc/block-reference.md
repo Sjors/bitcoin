@@ -77,4 +77,6 @@ witness v1 input and is valid on every chain.
   reference the most recent eligible block, that is the block at
   `tip - 99`.
 - Policy: a block reference annex of exactly 6 bytes is standard for v2
-  spends. All other annexes remain non-standard.
+  spends. All other annexes remain non-standard. A transaction whose
+  reference is not yet mature is rejected from the mempool with a
+  retryable, non-punishable error, like a premature coinbase spend.
