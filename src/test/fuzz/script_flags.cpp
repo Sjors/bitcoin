@@ -4,6 +4,7 @@
 
 #include <consensus/amount.h>
 #include <primitives/transaction.h>
+#include <hash.h>
 #include <script/interpreter.h>
 #include <serialize.h>
 #include <streams.h>
@@ -53,6 +54,15 @@ FUZZ_TARGET(script_flags)
         }
         PrecomputedTransactionData txdata;
         txdata.Init(tx, std::move(spent_outputs));
+        // Provide a hash for every referenced block (witness v2 block reference annex), so that
+        // signature checks, which assert on missing data, can run. The value is arbitrary.
+        for (const CTxIn& txin : tx.vin) {
+            const auto& stack{txin.scriptWitness.stack};
+            std::optional<int> height;
+            if (stack.size() >= 2 && !stack.back().empty() && stack.back()[0] == ANNEX_TAG && ParseBlockReference(stack.back(), height) && height) {
+                txdata.m_block_hashes.emplace_back(*height, (HashWriter{} << *height).GetSHA256());
+            }
+        }
 
         for (unsigned i = 0; i < tx.vin.size(); ++i) {
             const CTxOut& prevout = txdata.m_spent_outputs.at(i);
