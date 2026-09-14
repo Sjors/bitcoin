@@ -93,6 +93,30 @@ witness v1 input and is valid on every chain.
   the 32-byte block hash. Signers use it to build the annex and the
   message; it is kept after finalization so the final witness can be
   verified. `decodepsbt` shows it as `block_reference`.
+- For a nonzero height-based locktime between the reference height and the
+  wallet's tip, the wallet also includes headers from the referenced block
+  through the locktime height, inclusive. No headers are included for zero
+  or timestamp-based locktimes, or when the locktime height is before the
+  referenced block or beyond the tip. The chosen locktime is not changed.
+  Headers are shared by all inputs in global PSBT records of type `0x7f`
+  (prototype, not assigned by any BIP).
+  Each key is the type byte followed by a 4-byte little endian height;
+  its value is the serialized 80-byte header. `decodepsbt` exposes these
+  as `block_headers`, an object mapping heights to hex-encoded headers.
+  Combining and joining PSBTs reject conflicting headers at the same height.
+  A chain-aware combiner can resolve such conflicts before combining.
+  Combining, joining and finalizing PSBTs preserve these records. They are
+  not part of the final transaction.
+- These optional headers let an offline signer inspect the chain extending
+  a referenced block and its proof of work. A verifier can derive each block
+  hash from its header and check continuity using the next header's previous
+  block hash. Their presence does not establish the claimed height, the
+  intended side of a fork, or that this is the most-work chain. Signers must
+  apply their own verification and trust policy;
+  this prototype continues to sign PSBTs without headers. An external signer
+  can use the transaction's height locktime as the endpoint without knowing
+  the wallet's tip. Reference maturity is still checked against the containing
+  block's height, not the locktime; this metadata does not change consensus.
 - `signrawtransactionwithwallet` and `signrawtransactionwithkey` sign v2
   inputs without a reference.
 - When a reorg replaces a block that an unconfirmed wallet transaction

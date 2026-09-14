@@ -45,6 +45,7 @@ bool PartiallySignedTransaction::Merge(const PartiallySignedTransaction& psbt)
     if (GetVersion() != psbt.GetVersion()) {
         return false;
     }
+    if (!MergeBlockHeaders(psbt)) return false;
 
     for (unsigned int i = 0; i < inputs.size(); ++i) {
         inputs[i].Merge(psbt.inputs[i]);
@@ -81,6 +82,16 @@ void PartiallySignedTransaction::MergeGlobalXPubs(const PartiallySignedTransacti
             if (!known) m_xpubs[origin].insert(xpub);
         }
     }
+}
+
+bool PartiallySignedTransaction::MergeBlockHeaders(const PartiallySignedTransaction& psbt)
+{
+    for (const auto& [height, header] : psbt.m_block_headers) {
+        const auto it{m_block_headers.find(height)};
+        if (it != m_block_headers.end() && it->second.GetHash() != header.GetHash()) return false;
+    }
+    m_block_headers.insert(psbt.m_block_headers.begin(), psbt.m_block_headers.end());
+    return true;
 }
 
 std::optional<uint32_t> PartiallySignedTransaction::ComputeTimeLock() const

@@ -1074,6 +1074,10 @@ static RPCMethod decodepsbt()
                                 {RPCResult::Type::STR, "path", "The path"},
                             }},
                         }},
+                        {RPCResult::Type::OBJ_DYN, "block_headers", /*optional=*/true, "Optional block headers for checking block references (see doc/block-reference.md)",
+                        {
+                            {RPCResult::Type::STR_HEX, "height", "The serialized 80-byte block header, keyed by its claimed height"},
+                        }},
                         {RPCResult::Type::NUM, "tx_version", /* optional */ true, "The version number of the unsigned transaction. Not to be confused with PSBT version"},
                         {RPCResult::Type::NUM, "fallback_locktime", /* optional */ true, "The locktime to fallback to if no inputs specify a required locktime."},
                         {RPCResult::Type::NUM, "input_count", /* optional */ true, "The number of inputs in this psbt"},
@@ -1120,6 +1124,16 @@ static RPCMethod decodepsbt()
         UniValue tx_univ(UniValue::VOBJ);
         TxToUniv(CTransaction(*CHECK_NONFATAL(psbtx.GetUnsignedTx())), /*block_hash=*/uint256(), /*entry=*/tx_univ, /*include_hex=*/false);
         result.pushKV("tx", std::move(tx_univ));
+    }
+
+    if (!psbtx.m_block_headers.empty()) {
+        UniValue headers(UniValue::VOBJ);
+        for (const auto& [height, header] : psbtx.m_block_headers) {
+            DataStream ss;
+            ss << header;
+            headers.pushKV(strprintf("%u", height), HexStr(ss));
+        }
+        result.pushKV("block_headers", std::move(headers));
     }
 
     // Add the global xpubs
@@ -1645,7 +1659,7 @@ static RPCMethod combinepsbt()
 
     std::optional<PartiallySignedTransaction> merged_psbt = CombinePSBTs(psbtxs);
     if (!merged_psbt) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "PSBTs not compatible (different transactions)");
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "PSBTs not compatible (different transactions, versions, or conflicting block headers)");
     }
 
     DataStream ssTx{};
@@ -1943,6 +1957,9 @@ static RPCMethod joinpsbts()
             merged_psbt.AddOutput(output);
         }
         merged_psbt.MergeGlobalXPubs(psbt);
+        if (!merged_psbt.MergeBlockHeaders(psbt)) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "PSBTs contain conflicting block headers at the same height");
+        }
         merged_psbt.m_proprietary.insert(psbt.m_proprietary.begin(), psbt.m_proprietary.end());
         merged_psbt.unknown.insert(psbt.unknown.begin(), psbt.unknown.end());
     }

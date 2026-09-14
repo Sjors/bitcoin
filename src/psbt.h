@@ -9,6 +9,7 @@
 #include <musig.h>
 #include <node/transaction.h>
 #include <policy/feerate.h>
+#include <primitives/block.h>
 #include <primitives/transaction.h>
 #include <pubkey.h>
 #include <script/keyorigin.h>
@@ -40,6 +41,8 @@ inline constexpr uint8_t PSBT_GLOBAL_FALLBACK_LOCKTIME = 0x03;
 inline constexpr uint8_t PSBT_GLOBAL_INPUT_COUNT = 0x04;
 inline constexpr uint8_t PSBT_GLOBAL_OUTPUT_COUNT = 0x05;
 inline constexpr uint8_t PSBT_GLOBAL_TX_MODIFIABLE = 0x06;
+//! Block header keyed by height (see doc/block-reference.md). Prototype; not assigned by any BIP.
+inline constexpr uint8_t PSBT_GLOBAL_BLOCK_HEADER = 0x7f;
 inline constexpr uint8_t PSBT_GLOBAL_VERSION = 0xFB;
 inline constexpr uint8_t PSBT_GLOBAL_PROPRIETARY = 0xFC;
 
@@ -1263,6 +1266,8 @@ public:
     // We use a vector of CExtPubKey in the event that there happens to be the same KeyOriginInfos for different CExtPubKeys
     // Note that this map swaps the key and values from the serialization
     std::map<KeyOriginInfo, std::set<CExtPubKey>> m_xpubs;
+    //! Optional headers for checking block references, shared by all inputs.
+    std::map<uint32_t, CBlockHeader> m_block_headers;
     std::optional<std::bitset<8>> m_tx_modifiable;
     std::vector<PSBTInput> inputs;
     std::vector<PSBTOutput> outputs;
@@ -1280,6 +1285,8 @@ public:
     /** Merge the global xpubs of psbt into this, keeping the existing origin for an xpub
       * seen again with a different one, as the serialized records are keyed by xpub. */
     void MergeGlobalXPubs(const PartiallySignedTransaction& psbt);
+    /** Merge global headers, returning false without modifying them if a height has conflicting headers. */
+    [[nodiscard]] bool MergeBlockHeaders(const PartiallySignedTransaction& psbt);
     bool AddInput(const PSBTInput& psbtin);
     bool AddOutput(const PSBTOutput& psbtout);
     std::optional<uint32_t> ComputeTimeLock() const;
@@ -1331,6 +1338,12 @@ public:
                 SerializeToVector(s, CompactSizeWriter(PSBT_GLOBAL_TX_MODIFIABLE));
                 SerializeToVector(s, static_cast<uint8_t>(m_tx_modifiable->to_ulong()));
             }
+        }
+
+        // Write block headers (also kept after finalization).
+        for (const auto& [height, header] : m_block_headers) {
+            SerializeToVector(s, CompactSizeWriter(PSBT_GLOBAL_BLOCK_HEADER), height);
+            SerializeToVector(s, header);
         }
 
         // PSBT version
@@ -1492,6 +1505,16 @@ public:
                         // Insert xpub into existing set
                         m_xpubs[keypath].insert(xpub);
                     }
+                    break;
+                }
+                case PSBT_GLOBAL_BLOCK_HEADER:
+                {
+                    ExpectedKeySize("Global Block Header", key, 5);
+                    uint32_t height;
+                    skey >> height;
+                    CBlockHeader header;
+                    UnserializeFromVector(s, header);
+                    m_block_headers.emplace(height, header);
                     break;
                 }
                 case PSBT_GLOBAL_VERSION:

@@ -6,11 +6,13 @@
 #include <consensus/consensus.h>
 #include <consensus/validation.h>
 #include <core_io.h>
+#include <interfaces/chain.h>
 #include <key_io.h>
 #include <node/types.h>
 #include <policy/policy.h>
 #include <script/solver.h>
 #include <policy/truc_policy.h>
+#include <primitives/block.h>
 #include <rpc/rawtransaction_util.h>
 #include <rpc/util.h>
 #include <script/script.h>
@@ -99,9 +101,14 @@ std::set<int> InterpretSubtractFeeFromOutputInstructions(const UniValue& sffo_in
 static void SetBlockReferences(const CWallet& wallet, PartiallySignedTransaction& psbtx)
 {
     LOCK(wallet.cs_wallet);
-    const int height{wallet.GetLastBlockHeight() - (COINBASE_MATURITY - 1)};
+    const int tip_height{wallet.GetLastBlockHeight()};
+    const int height{tip_height - (COINBASE_MATURITY - 1)};
     if (height < 0) throw JSONRPCError(RPC_INVALID_PARAMETER, "Chain too short for a block reference");
-    const uint256 block_hash{wallet.chain().getBlockHash(height)};
+    const uint256 tip_hash{wallet.GetLastBlockHash()};
+    uint256 block_hash;
+    if (!wallet.chain().findAncestorByHeight(tip_hash, height, interfaces::FoundBlock().hash(block_hash))) {
+        throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to retrieve referenced block");
+    }
     bool any{false};
     for (PSBTInput& input : psbtx.inputs) {
         CTxOut utxo;
@@ -113,6 +120,25 @@ static void SetBlockReferences(const CWallet& wallet, PartiallySignedTransaction
     }
     // A transaction without any referencing input would be replayable, which is what the caller asked to avoid.
     if (!any) throw JSONRPCError(RPC_INVALID_PARAMETER, "block_reference requires at least one witness v2 (tr2) input, but none was selected");
+
+    // An external signer can use a height locktime as the endpoint; it need not know our tip.
+    const auto locktime{psbtx.ComputeTimeLock()};
+    if (!locktime || *locktime == 0 || *locktime >= LOCKTIME_THRESHOLD ||
+        *locktime < uint32_t(height) || *locktime > uint32_t(tip_height)) return;
+
+    uint256 header_hash;
+    if (!wallet.chain().findAncestorByHeight(tip_hash, *locktime, interfaces::FoundBlock().hash(header_hash))) {
+        throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to retrieve locktime block");
+    }
+    // Follow the same tip's ancestors so the headers stay consistent with the reference during a reorg.
+    for (int h{int(*locktime)}; h >= height; --h) {
+        CBlockHeader header;
+        if (!wallet.chain().findBlock(header_hash, interfaces::FoundBlock().header(header))) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to retrieve block reference headers");
+        }
+        psbtx.m_block_headers.emplace(h, header);
+        header_hash = header.hashPrevBlock;
+    }
 }
 
 static bool WantBlockReference(const UniValue& options)

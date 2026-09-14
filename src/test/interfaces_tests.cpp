@@ -26,6 +26,11 @@ BOOST_FIXTURE_TEST_CASE(findBlock, TestChain100Setup)
     BOOST_CHECK(chain->findBlock(active[10]->GetBlockHash(), FoundBlock().hash(hash)));
     BOOST_CHECK_EQUAL(hash, active[10]->GetBlockHash());
 
+    CBlockHeader header;
+    BOOST_CHECK(chain->findBlock(active[10]->GetBlockHash(), FoundBlock().header(header)));
+    BOOST_CHECK_EQUAL(header.GetHash(), active[10]->GetBlockHash());
+    BOOST_CHECK_EQUAL(header.hashPrevBlock, active[9]->GetBlockHash());
+
     int height = -1;
     BOOST_CHECK(chain->findBlock(active[20]->GetBlockHash(), FoundBlock().height(height)));
     BOOST_CHECK_EQUAL(height, active[20]->nHeight);

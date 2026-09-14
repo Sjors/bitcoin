@@ -450,6 +450,7 @@ bool FillBlock(const CBlockIndex* index, const FoundBlock& block, UniqueLock<Rec
 {
     if (!index) return false;
     if (block.m_hash) *block.m_hash = index->GetBlockHash();
+    if (block.m_header) *block.m_header = index->GetBlockHeader();
     if (block.m_height) *block.m_height = index->nHeight;
     if (block.m_time) *block.m_time = index->GetBlockTime();
     if (block.m_max_time) *block.m_max_time = index->GetBlockTimeMax();
