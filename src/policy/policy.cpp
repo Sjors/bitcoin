@@ -320,13 +320,15 @@ bool IsWitnessStandard(const CTransaction& tx, const CCoinsViewCache& mapInputs)
 
         // Check policy limits for Taproot spends:
         // - MAX_STANDARD_TAPSCRIPT_STACK_ITEM_SIZE limit for stack item size
-        // - No annexes
-        if (witnessversion == 1 && witnessprogram.size() == WITNESS_V1_TAPROOT_SIZE && !p2sh) {
-            // Taproot spend (non-P2SH-wrapped, version 1, witness program size 32; see BIP 341)
+        // - No annexes, except a witness v2 block reference
+        if ((witnessversion == 1 || witnessversion == 2) && witnessprogram.size() == WITNESS_V1_TAPROOT_SIZE && !p2sh) {
+            // Taproot spend (non-P2SH-wrapped, version 1 or 2, witness program size 32; see BIP 341)
             std::span stack{tx.vin[i].scriptWitness.stack};
             if (stack.size() >= 2 && !stack.back().empty() && stack.back()[0] == ANNEX_TAG) {
-                // Annexes are nonstandard as long as no semantics are defined for them.
-                return false;
+                // Annexes are nonstandard as long as no semantics are defined for them. The exception is a
+                // witness v2 block reference of exactly the defined size (see doc/block-reference.md).
+                if (witnessversion != 2 || stack.back().size() != BLOCK_REF_ANNEX_SIZE || stack.back()[1] != BLOCK_REF_ANNEX_TYPE) return false;
+                SpanPopBack(stack);
             }
             if (stack.size() >= 2) {
                 // Script path spend (2 or more stack elements after removing optional annex)

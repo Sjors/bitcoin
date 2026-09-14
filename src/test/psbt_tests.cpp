@@ -4,6 +4,7 @@
 
 #include <addresstype.h>
 #include <key.h>
+#include <primitives/block.h>
 #include <psbt.h>
 #include <script/descriptor.h>
 #include <script/script.h>
@@ -19,6 +20,45 @@
 #include <vector>
 
 BOOST_FIXTURE_TEST_SUITE(psbt_tests, BasicTestingSetup)
+
+BOOST_AUTO_TEST_CASE(block_headers)
+{
+    CMutableTransaction tx;
+    tx.vin.emplace_back();
+    tx.vout.emplace_back(1, CScript() << OP_TRUE);
+    CBlockHeader first;
+    first.nVersion = 1;
+    CBlockHeader second;
+    second.nVersion = 1;
+    second.hashPrevBlock = first.GetHash();
+
+    for (const uint32_t version : {0, 2}) {
+        PartiallySignedTransaction psbt{tx, version};
+        psbt.m_block_headers.emplace(100, first);
+        DataStream stream;
+        stream << psbt;
+        auto decoded = DecodeRawPSBT(stream);
+        BOOST_REQUIRE(decoded);
+        BOOST_REQUIRE_EQUAL(decoded->m_block_headers.size(), 1);
+        BOOST_CHECK(decoded->m_block_headers.at(100).GetHash() == first.GetHash());
+
+        // Combining overlapping collections retains both headers, with no duplicate keys.
+        PartiallySignedTransaction other{tx, version};
+        other.m_block_headers.emplace(100, first);
+        other.m_block_headers.emplace(101, second);
+        BOOST_REQUIRE(decoded->Merge(other));
+        BOOST_CHECK_EQUAL(decoded->m_block_headers.size(), 2);
+        BOOST_CHECK(decoded->m_block_headers.at(101).hashPrevBlock == first.GetHash());
+
+        // Reject a conflict before inserting even the nonconflicting headers.
+        other.m_block_headers.emplace(99, first);
+        other.m_block_headers.at(101).nNonce++;
+        BOOST_CHECK(!decoded->Merge(other));
+        BOOST_CHECK_EQUAL(decoded->m_block_headers.size(), 2);
+        BOOST_CHECK(decoded->m_block_headers.at(101).GetHash() == second.GetHash());
+        BOOST_CHECK(!other.Merge(*decoded));
+    }
+}
 
 static PSBTProprietary MakeProprietary(uint64_t subtype, uint8_t key_data, uint8_t value)
 {

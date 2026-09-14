@@ -508,6 +508,7 @@ static RPCMethod decodescript()
         case TxoutType::SCRIPTHASH:
         case TxoutType::WITNESS_UNKNOWN:
         case TxoutType::WITNESS_V1_TAPROOT:
+        case TxoutType::WITNESS_V2_TAPROOT:
         case TxoutType::ANCHOR:
             // Should not be wrapped
             return false;
@@ -551,6 +552,7 @@ static RPCMethod decodescript()
             case TxoutType::WITNESS_V0_KEYHASH:
             case TxoutType::WITNESS_V0_SCRIPTHASH:
             case TxoutType::WITNESS_V1_TAPROOT:
+            case TxoutType::WITNESS_V2_TAPROOT:
             case TxoutType::ANCHOR:
                 // Should not be wrapped
                 return false;
@@ -819,6 +821,11 @@ const RPCResult& DecodePSBTInputs()
                     {RPCResult::Type::STR, "pubkey", "The public key and signature that corresponds to it."},
                 }},
                 {RPCResult::Type::STR, "sighash", /*optional=*/true, "The sighash type to be used"},
+                {RPCResult::Type::OBJ, "block_reference", /*optional=*/true, "The block a witness v2 input references (see doc/block-reference.md)",
+                {
+                    {RPCResult::Type::NUM, "height", "The height of the referenced block"},
+                    {RPCResult::Type::STR_HEX, "hash", "The hash of the referenced block"},
+                }},
                 {RPCResult::Type::OBJ, "redeem_script", /*optional=*/true, "",
                 {
                     {RPCResult::Type::STR, "asm", "Disassembly of the redeem script"},
@@ -1067,6 +1074,10 @@ static RPCMethod decodepsbt()
                                 {RPCResult::Type::STR, "path", "The path"},
                             }},
                         }},
+                        {RPCResult::Type::OBJ_DYN, "block_headers", /*optional=*/true, "Optional block headers for checking block references (see doc/block-reference.md)",
+                        {
+                            {RPCResult::Type::STR_HEX, "height", "The serialized 80-byte block header, keyed by its claimed height"},
+                        }},
                         {RPCResult::Type::NUM, "tx_version", /* optional */ true, "The version number of the unsigned transaction. Not to be confused with PSBT version"},
                         {RPCResult::Type::NUM, "fallback_locktime", /* optional */ true, "The locktime to fallback to if no inputs specify a required locktime."},
                         {RPCResult::Type::NUM, "input_count", /* optional */ true, "The number of inputs in this psbt"},
@@ -1113,6 +1124,16 @@ static RPCMethod decodepsbt()
         UniValue tx_univ(UniValue::VOBJ);
         TxToUniv(CTransaction(*CHECK_NONFATAL(psbtx.GetUnsignedTx())), /*block_hash=*/uint256(), /*entry=*/tx_univ, /*include_hex=*/false);
         result.pushKV("tx", std::move(tx_univ));
+    }
+
+    if (!psbtx.m_block_headers.empty()) {
+        UniValue headers(UniValue::VOBJ);
+        for (const auto& [height, header] : psbtx.m_block_headers) {
+            DataStream ss;
+            ss << header;
+            headers.pushKV(strprintf("%u", height), HexStr(ss));
+        }
+        result.pushKV("block_headers", std::move(headers));
     }
 
     // Add the global xpubs
@@ -1225,6 +1246,14 @@ static RPCMethod decodepsbt()
         // Sighash
         if (input.sighash_type != std::nullopt) {
             in.pushKV("sighash", SighashToStr(*input.sighash_type));
+        }
+
+        // Block reference
+        if (input.m_block_reference) {
+            UniValue ref(UniValue::VOBJ);
+            ref.pushKV("height", input.m_block_reference->first);
+            ref.pushKV("hash", input.m_block_reference->second.GetHex());
+            in.pushKV("block_reference", std::move(ref));
         }
 
         // Redeem script and witness script
@@ -1630,7 +1659,7 @@ static RPCMethod combinepsbt()
 
     std::optional<PartiallySignedTransaction> merged_psbt = CombinePSBTs(psbtxs);
     if (!merged_psbt) {
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "PSBTs not compatible (different transactions)");
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "PSBTs not compatible (different transactions, versions, or conflicting block headers)");
     }
 
     DataStream ssTx{};
@@ -1928,6 +1957,9 @@ static RPCMethod joinpsbts()
             merged_psbt.AddOutput(output);
         }
         merged_psbt.MergeGlobalXPubs(psbt);
+        if (!merged_psbt.MergeBlockHeaders(psbt)) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "PSBTs contain conflicting block headers at the same height");
+        }
         merged_psbt.m_proprietary.insert(psbt.m_proprietary.begin(), psbt.m_proprietary.end());
         merged_psbt.unknown.insert(psbt.unknown.begin(), psbt.unknown.end());
     }
@@ -2115,7 +2147,8 @@ RPCMethod descriptorprocesspsbt()
     // Check whether or not all of the inputs are now correctly signed
     bool complete = true;
     const std::optional<PrecomputedTransactionData> txdata_opt{PrecomputePSBTData(psbtx)};
-    const PrecomputedTransactionData txdata{*CHECK_NONFATAL(txdata_opt)};
+    if (!txdata_opt) throw JSONRPCPSBTError(common::PSBTError::INVALID_TX);
+    const PrecomputedTransactionData& txdata{*txdata_opt};
     for (unsigned int i = 0; i < psbtx.inputs.size(); ++i) {
         complete = complete && PSBTInputSignedAndVerified(psbtx, i, &txdata);
     }

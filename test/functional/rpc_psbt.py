@@ -1576,7 +1576,7 @@ class PSBTTest(BitcoinTestFramework):
         psbt1 = PSBT(g=PSBTMap({PSBT_GLOBAL_UNSIGNED_TX: tx.serialize()}), i=[PSBTMap()], o=[PSBTMap()]).to_base64()
         tx.vout[0].nValue += 1  # slightly modify tx
         psbt2 = PSBT(g=PSBTMap({PSBT_GLOBAL_UNSIGNED_TX: tx.serialize()}), i=[PSBTMap()], o=[PSBTMap()]).to_base64()
-        assert_raises_rpc_error(-8, "PSBTs not compatible (different transactions)", self.nodes[0].combinepsbt, [psbt1, psbt2])
+        assert_raises_rpc_error(-8, "PSBTs not compatible (different transactions, versions, or conflicting block headers)", self.nodes[0].combinepsbt, [psbt1, psbt2])
         assert_equal(self.nodes[0].combinepsbt([psbt1, psbt1]), psbt1)
 
         self.log.info("Test that PSBT inputs are being checked via script execution")

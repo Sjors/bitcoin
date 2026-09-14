@@ -3,12 +3,16 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <common/messages.h>
+#include <consensus/consensus.h>
 #include <consensus/validation.h>
 #include <core_io.h>
+#include <interfaces/chain.h>
 #include <key_io.h>
 #include <node/types.h>
 #include <policy/policy.h>
+#include <script/solver.h>
 #include <policy/truc_policy.h>
+#include <primitives/block.h>
 #include <rpc/rawtransaction_util.h>
 #include <rpc/util.h>
 #include <script/script.h>
@@ -93,6 +97,55 @@ std::set<int> InterpretSubtractFeeFromOutputInstructions(const UniValue& sffo_in
     return sffo_set;
 }
 
+/** Make every witness v2 input of the PSBT reference the most recent eligible block (see doc/block-reference.md). */
+static void SetBlockReferences(const CWallet& wallet, PartiallySignedTransaction& psbtx)
+{
+    LOCK(wallet.cs_wallet);
+    const int tip_height{wallet.GetLastBlockHeight()};
+    const int height{tip_height - (COINBASE_MATURITY - 1)};
+    if (height < 0) throw JSONRPCError(RPC_INVALID_PARAMETER, "Chain too short for a block reference");
+    const uint256 tip_hash{wallet.GetLastBlockHash()};
+    uint256 block_hash;
+    if (!wallet.chain().findAncestorByHeight(tip_hash, height, interfaces::FoundBlock().hash(block_hash))) {
+        throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to retrieve referenced block");
+    }
+    bool any{false};
+    for (PSBTInput& input : psbtx.inputs) {
+        CTxOut utxo;
+        std::vector<std::vector<unsigned char>> solutions;
+        if (input.GetUTXO(utxo) && Solver(utxo.scriptPubKey, solutions) == TxoutType::WITNESS_V2_TAPROOT) {
+            input.m_block_reference = {height, block_hash};
+            any = true;
+        }
+    }
+    // A transaction without any referencing input would be replayable, which is what the caller asked to avoid.
+    if (!any) throw JSONRPCError(RPC_INVALID_PARAMETER, "block_reference requires at least one witness v2 (tr2) input, but none was selected");
+
+    // An external signer can use a height locktime as the endpoint; it need not know our tip.
+    const auto locktime{psbtx.ComputeTimeLock()};
+    if (!locktime || *locktime == 0 || *locktime >= LOCKTIME_THRESHOLD ||
+        *locktime < uint32_t(height) || *locktime > uint32_t(tip_height)) return;
+
+    uint256 header_hash;
+    if (!wallet.chain().findAncestorByHeight(tip_hash, *locktime, interfaces::FoundBlock().hash(header_hash))) {
+        throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to retrieve locktime block");
+    }
+    // Follow the same tip's ancestors so the headers stay consistent with the reference during a reorg.
+    for (int h{int(*locktime)}; h >= height; --h) {
+        CBlockHeader header;
+        if (!wallet.chain().findBlock(header_hash, interfaces::FoundBlock().header(header))) {
+            throw JSONRPCError(RPC_INTERNAL_ERROR, "Unable to retrieve block reference headers");
+        }
+        psbtx.m_block_headers.emplace(h, header);
+        header_hash = header.hashPrevBlock;
+    }
+}
+
+static bool WantBlockReference(const UniValue& options)
+{
+    return options.exists("block_reference") && options["block_reference"].get_bool();
+}
+
 static UniValue FinishTransaction(const std::shared_ptr<CWallet> pwallet, const UniValue& options, CMutableTransaction& rawTx)
 {
     bool can_anti_fee_snipe = !options.exists("locktime");
@@ -115,6 +168,7 @@ static UniValue FinishTransaction(const std::shared_ptr<CWallet> pwallet, const 
     // so external signers are not asked to sign more than once.
     bool complete;
     pwallet->FillPSBT(psbtx, {.sign = false, .bip32_derivs = true}, complete);
+    if (WantBlockReference(options)) SetBlockReferences(*pwallet, psbtx);
     const auto err{pwallet->FillPSBT(psbtx, {.sign = true, .bip32_derivs = false}, complete)};
     if (err) {
         throw JSONRPCPSBTError(*err);
@@ -491,6 +545,7 @@ CreatedTransactionResult FundTransaction(CWallet& wallet, const CMutableTransact
                     {"add_inputs", UniValueType(UniValue::VBOOL)},
                     {"include_unsafe", UniValueType(UniValue::VBOOL)},
                     {"add_to_wallet", UniValueType(UniValue::VBOOL)},
+                    {"block_reference", UniValueType(UniValue::VBOOL)},
                     {"changeAddress", UniValueType(UniValue::VSTR)},
                     {"change_address", UniValueType(UniValue::VSTR)},
                     {"changePosition", UniValueType(UniValue::VNUM)},
@@ -1203,6 +1258,7 @@ RPCMethod send()
                     {"minconf", RPCArg::Type::NUM, RPCArg::Default{0}, "If add_inputs is specified, require inputs with at least this many confirmations."},
                     {"maxconf", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "If add_inputs is specified, require inputs with at most this many confirmations."},
                     {"add_to_wallet", RPCArg::Type::BOOL, RPCArg::Default{true}, "When false, returns a serialized transaction which will not be added to the wallet or broadcast"},
+                    {"block_reference", RPCArg::Type::BOOL, RPCArg::Default{false}, "Reference the block at height tip-99 from every witness v2 (tr2) input, so that the transaction is only valid on this chain (see doc/block-reference.md)."},
                     {"change_address", RPCArg::Type::STR, RPCArg::DefaultHint{"automatic"}, "The bitcoin address to receive the change"},
                     {"change_position", RPCArg::Type::NUM, RPCArg::DefaultHint{"random"}, "The index of the change output"},
                     {"change_type", RPCArg::Type::STR, RPCArg::DefaultHint{"set by -changetype"}, "The output type to use. Only valid if change_address is not specified. Options are " + FormatAllOutputTypes() + "."},
@@ -1327,6 +1383,7 @@ RPCMethod sendall()
                 Cat<std::vector<RPCArg>>(
                     {
                         {"add_to_wallet", RPCArg::Type::BOOL, RPCArg::Default{true}, "When false, returns the serialized transaction without broadcasting or adding it to the wallet"},
+                        {"block_reference", RPCArg::Type::BOOL, RPCArg::Default{false}, "Reference the block at height tip-99 from every witness v2 (tr2) input, so that the transaction is only valid on this chain (see doc/block-reference.md)."},
                         {"fee_rate", RPCArg::Type::AMOUNT, RPCArg::DefaultHint{"not set, fall back to wallet fee estimation"}, "Specify a fee rate in " + CURRENCY_ATOM + "/vB.", RPCArgOptions{.also_positional = true}},
                         {"include_watching", RPCArg::Type::BOOL, RPCArg::Default{false}, "(DEPRECATED) No longer used"},
                         {"inputs", RPCArg::Type::ARR, RPCArg::Default{UniValue::VARR}, "Use exactly the specified inputs to build the transaction. Specifying inputs is incompatible with the send_max, minconf, and maxconf options.",
@@ -1712,6 +1769,7 @@ RPCMethod walletcreatefundedpsbt()
                                                           "Warning: the resulting transaction may become invalid if one of the unsafe inputs disappears.\n"
                                                           "If that happens, you will need to fund the transaction with different inputs and republish it."},
                             {"minconf", RPCArg::Type::NUM, RPCArg::Default{0}, "If add_inputs is specified, require inputs with at least this many confirmations."},
+                            {"block_reference", RPCArg::Type::BOOL, RPCArg::Default{false}, "Reference the block at height tip-99 from every witness v2 (tr2) input, so that the transaction is only valid on this chain (see doc/block-reference.md)."},
                             {"maxconf", RPCArg::Type::NUM, RPCArg::Optional::OMITTED, "If add_inputs is specified, require inputs with at most this many confirmations."},
                             {"changeAddress", RPCArg::Type::STR, RPCArg::DefaultHint{"automatic"}, "The bitcoin address to receive the change"},
                             {"changePosition", RPCArg::Type::NUM, RPCArg::DefaultHint{"random"}, "The index of the change output"},
@@ -1802,6 +1860,7 @@ RPCMethod walletcreatefundedpsbt()
     if (err) {
         throw JSONRPCPSBTError(*err);
     }
+    if (!request.params[3].isNull() && WantBlockReference(request.params[3])) SetBlockReferences(wallet, psbtx);
 
     // Serialize the PSBT
     DataStream ssTx{};

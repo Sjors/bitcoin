@@ -1050,7 +1050,7 @@ util::Result<std::pair<std::vector<FeeFrac>, std::vector<FeeFrac>>> CTxMemPool::
     return m_pool->m_txgraph->GetMainStagingDiagrams();
 }
 
-CTxMemPool::ChangeSet::TxHandle CTxMemPool::ChangeSet::StageAddition(const CTransactionRef& tx, const CAmount fee, int64_t time, unsigned int entry_height, uint64_t entry_sequence, bool spends_coinbase, int64_t sigops_cost, LockPoints lp)
+CTxMemPool::ChangeSet::TxHandle CTxMemPool::ChangeSet::StageAddition(const CTransactionRef& tx, const CAmount fee, int64_t time, unsigned int entry_height, uint64_t entry_sequence, bool spends_coinbase, int64_t sigops_cost, LockPoints lp, std::vector<const CBlockIndex*> block_refs)
 {
     LOCK(m_pool->cs);
     Assume(m_to_add.find(tx->GetHash()) == m_to_add.end());
@@ -1063,7 +1063,7 @@ CTxMemPool::ChangeSet::TxHandle CTxMemPool::ChangeSet::StageAddition(const CTran
     m_pool->ApplyDelta(tx->GetHash(), delta);
 
     FeePerWeight feerate(fee, GetSigOpsAdjustedWeight(GetTransactionWeight(*tx), sigops_cost, ::nBytesPerSigOp));
-    auto newit = m_to_add.emplace(tx, fee, time, entry_height, entry_sequence, spends_coinbase, sigops_cost, lp).first;
+    auto newit = m_to_add.emplace(tx, fee, time, entry_height, entry_sequence, spends_coinbase, sigops_cost, lp, std::move(block_refs)).first;
     m_pool->m_txgraph->AddTransaction(const_cast<CTxMemPoolEntry&>(*newit), feerate);
     if (delta) {
         newit->UpdateModifiedFee(delta);

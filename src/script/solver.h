@@ -31,6 +31,7 @@ enum class TxoutType {
     WITNESS_V0_SCRIPTHASH,
     WITNESS_V0_KEYHASH,
     WITNESS_V1_TAPROOT,
+    WITNESS_V2_TAPROOT, //!< Witness v2 with 32-byte program: Taproot with block references
     WITNESS_UNKNOWN, //!< Only for Witness versions not already defined above
 };
 

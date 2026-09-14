@@ -448,6 +448,13 @@ private:
     // Update last block processed in memory only
     void SetLastBlockProcessedInMem(int block_height, uint256 block_hash) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 
+    /** Hashes of blocks disconnected by a reorg that has not (yet) reconnected a block at that height.
+     *  Used to notice when a block that wallet transactions reference is replaced. */
+    std::map<int, uint256> m_disconnected_blocks GUARDED_BY(cs_wallet);
+    /** Abandon unconfirmed transactions with a block reference (see doc/block-reference.md) to the given
+     *  height: their signatures no longer verify once that block is replaced. */
+    void AbandonBlockReferences(int height) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
+
     //! Update mempool conflicts for TRUC sibling transactions
     void UpdateTrucSiblingConflicts(const CWalletTx& parent_wtx, const Txid& child_txid, bool add_conflict) EXCLUSIVE_LOCKS_REQUIRED(cs_wallet);
 

@@ -23,13 +23,16 @@
 
 #include <cstddef>
 #include <map>
+#include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 enum class ScriptType {
     P2WPKH, // segwitv0, witness-pubkey-hash (ECDSA signature)
     P2TR_KeyPath, // segwitv1, taproot key-path spend (Schnorr signature)
     P2TR_ScriptPath, // segwitv1, taproot script-path spend (Tapscript leaf with a single OP_CHECKSIG)
+    P2TR2_KeyPath_BlockRef, // segwitv2, taproot key-path spend with a block reference (annex, message extension)
 };
 
 static size_t ExpectedWitnessStackSize(ScriptType script_type)
@@ -38,6 +41,7 @@ static size_t ExpectedWitnessStackSize(ScriptType script_type)
     case ScriptType::P2WPKH: return 2; // [pubkey, signature]
     case ScriptType::P2TR_KeyPath: return 1; // [signature]
     case ScriptType::P2TR_ScriptPath: return 3; // [signature, tapscript, control block]
+    case ScriptType::P2TR2_KeyPath_BlockRef: return 2; // [signature, annex]
     } // no default case, so the compiler can warn about missing cases
     assert(false);
 }
@@ -63,6 +67,7 @@ static void VerifyScriptBench(benchmark::Bench& bench, ScriptType script_type)
         switch (script_type) {
         case ScriptType::P2WPKH: return WitnessV0KeyHash(pubkey);
         case ScriptType::P2TR_KeyPath: return WitnessV1Taproot(xonly_pubkey);
+        case ScriptType::P2TR2_KeyPath_BlockRef: return WitnessUnknown{2, ToByteVector(xonly_pubkey)};
         case ScriptType::P2TR_ScriptPath:
             TaprootBuilder builder;
             builder.Add(0, CScript() << ToByteVector(xonly_pubkey) << OP_CHECKSIG, TAPROOT_LEAF_TAPSCRIPT);
@@ -83,11 +88,15 @@ static void VerifyScriptBench(benchmark::Bench& bench, ScriptType script_type)
             {txSpend.vin[0].prevout, Coin(txCredit.vout[0], /*nHeightIn=*/100, /*fCoinBaseIn=*/false)}
         };
         std::map<int, bilingual_str> input_errors;
-        bool complete = SignTransaction(txSpend, &keystore, coins, {.sighash_type = SIGHASH_ALL}, input_errors);
+        const std::pair<int, uint256> block_ref{100, uint256::ONE};
+        SignOptions options{.sighash_type = SIGHASH_ALL};
+        if (script_type == ScriptType::P2TR2_KeyPath_BlockRef) options.block_reference = block_ref;
+        bool complete = SignTransaction(txSpend, &keystore, coins, options, input_errors);
         assert(complete);
         // Weak sanity check on witness data to ensure we produced the intended spending type
         assert(txSpend.vin[0].scriptWitness.stack.size() == ExpectedWitnessStackSize(script_type));
         txdata.Init(txSpend, /*spent_outputs=*/{txCredit.vout[0]});
+        if (options.block_reference) txdata.m_block_hashes.push_back(block_ref);
     }
 
     // Benchmark.
@@ -108,6 +117,7 @@ static void VerifyScriptBench(benchmark::Bench& bench, ScriptType script_type)
 static void VerifyScriptP2WPKH(benchmark::Bench& bench) { VerifyScriptBench(bench, ScriptType::P2WPKH); }
 static void VerifyScriptP2TR_KeyPath(benchmark::Bench& bench) { VerifyScriptBench(bench, ScriptType::P2TR_KeyPath); }
 static void VerifyScriptP2TR_ScriptPath(benchmark::Bench& bench) { VerifyScriptBench(bench, ScriptType::P2TR_ScriptPath); }
+static void VerifyScriptP2TR2_KeyPath_BlockRef(benchmark::Bench& bench) { VerifyScriptBench(bench, ScriptType::P2TR2_KeyPath_BlockRef); }
 
 static void VerifyNestedIfScript(benchmark::Bench& bench)
 {
@@ -134,4 +144,5 @@ static void VerifyNestedIfScript(benchmark::Bench& bench)
 BENCHMARK(VerifyScriptP2WPKH);
 BENCHMARK(VerifyScriptP2TR_KeyPath);
 BENCHMARK(VerifyScriptP2TR_ScriptPath);
+BENCHMARK(VerifyScriptP2TR2_KeyPath_BlockRef);
 BENCHMARK(VerifyNestedIfScript);

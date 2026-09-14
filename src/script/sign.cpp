@@ -87,7 +87,15 @@ std::optional<uint256> MutableTransactionSignatureCreator::ComputeSchnorrSignatu
 
     ScriptExecutionData execdata;
     execdata.m_annex_init = true;
-    execdata.m_annex_present = false; // Only support annex-less signing for now.
+    execdata.m_annex_present = false; // Only support annex-less signing, except for a block reference.
+    int witnessversion;
+    std::vector<unsigned char> witnessprogram;
+    if (m_options.block_reference && m_txdata->m_spent_outputs[nIn].scriptPubKey.IsWitnessProgram(witnessversion, witnessprogram) && witnessversion == 2) {
+        const auto annex{BlockReferenceAnnex(m_options.block_reference->first)};
+        execdata.m_annex_present = true;
+        execdata.m_annex_hash = (HashWriter{} << annex).GetSHA256();
+        execdata.m_block_ref_height = m_options.block_reference->first;
+    }
     if (sigversion == SigVersion::TAPSCRIPT) {
         execdata.m_codeseparator_pos_init = true;
         execdata.m_codeseparator_pos = 0xFFFFFFFF; // Only support non-OP_CODESEPARATOR BIP342 signing for now.
@@ -717,6 +725,7 @@ static bool SignStep(const SigningProvider& provider, const BaseSignatureCreator
         return false;
 
     case TxoutType::WITNESS_V1_TAPROOT:
+    case TxoutType::WITNESS_V2_TAPROOT:
         return SignTaproot(provider, creator, WitnessV1Taproot(XOnlyPubKey{vSolutions[0]}), sigdata, ret);
 
     case TxoutType::ANCHOR:
@@ -795,9 +804,12 @@ bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreato
         sigdata.scriptWitness.stack = result;
         sigdata.witness = true;
         result.clear();
-    } else if (whichType == TxoutType::WITNESS_V1_TAPROOT && !P2SH) {
+    } else if ((whichType == TxoutType::WITNESS_V1_TAPROOT || whichType == TxoutType::WITNESS_V2_TAPROOT) && !P2SH) {
         sigdata.witness = true;
         if (solved) {
+            if (whichType == TxoutType::WITNESS_V2_TAPROOT && creator.BlockReferenceHeight()) {
+                result.push_back(BlockReferenceAnnex(*creator.BlockReferenceHeight()));
+            }
             sigdata.scriptWitness.stack = std::move(result);
         }
         result.clear();
@@ -1045,6 +1057,7 @@ bool SignTransaction(CMutableTransaction& mtx, const SigningProvider* keystore, 
     if (spent_outputs.size() == mtx.vin.size()) {
         txdata.Init(txConst, std::move(spent_outputs), true);
     }
+    if (options.block_reference) txdata.m_block_hashes.push_back(*options.block_reference);
 
     // Sign what we can:
     for (unsigned int i = 0; i < mtx.vin.size(); ++i) {
