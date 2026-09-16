@@ -19,6 +19,7 @@
 #include <index/blockfilterindex.h>
 #include <init.h>
 #include <interfaces/chain.h>
+#include <interfaces/external_signer.h>
 #include <interfaces/handler.h>
 #include <interfaces/mining.h>
 #include <interfaces/node.h>
@@ -277,7 +278,7 @@ public:
 #ifdef ENABLE_EXTERNAL_SIGNER
         std::vector<ExternalSigner> signers = {};
         const std::string command = args().GetArg("-signer", "");
-        if (command == "") return {};
+        if (command == "" && !GetRegisteredSignerService()) return {};
         ExternalSigner::Enumerate(command, signers, Params().GetChainTypeString());
         std::vector<std::unique_ptr<interfaces::ExternalSigner>> result;
         result.reserve(signers.size());

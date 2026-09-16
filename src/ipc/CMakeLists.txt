@@ -15,6 +15,7 @@ target_capnp_sources(bitcoin_ipc ${CMAKE_CURRENT_SOURCE_DIR}
   capnp/init.capnp
   capnp/mining.capnp
   capnp/rpc.capnp
+  capnp/signer.capnp
 )
 
 target_link_libraries(bitcoin_ipc
