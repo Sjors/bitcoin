@@ -155,6 +155,7 @@ target_json_data_sources(test_bitcoin
   data/bip138_payload.json
   data/bip138_encrypted_backup.json
   data/bip138_chacha20poly1305_encryption.json
+  data/bip138_bip380_descriptor_backup.json
   data/blockfilters.json
   data/key_io_invalid.json
   data/key_io_valid.json
@@ -166,6 +167,7 @@ target_json_data_sources(test_bitcoin
 )
 target_raw_data_sources(test_bitcoin NAMESPACE test::data
   data/asmap.raw
+  data/bip138_bip380_descriptor_backup.txt
 )
 
 add_windows_application_manifest(test_bitcoin)
