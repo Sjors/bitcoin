@@ -22,6 +22,7 @@
 #include <util/bip32.h>
 #include <util/strencodings.h>
 #include <wallet/context.h>
+#include <wallet/export.h>
 #include <wallet/test/util.h>
 #include <wallet/wallet.h>
 
@@ -832,6 +833,17 @@ static EncryptedBackup EncryptTestPayload(std::span<const uint8_t> payload)
     return backup;
 }
 
+static EncryptedBackup EncryptDescriptorItems(const std::vector<std::string>& items)
+{
+    DataStream payload;
+    for (const auto& item : items) {
+        payload << uint8_t{1} << uint8_t{1} << uint8_t{0x7c};
+        WriteCompactSize(payload, item.size());
+        payload.write(MakeByteSpan(item));
+    }
+    return EncryptTestPayload({UCharCast(payload.data()), payload.size()});
+}
+
 BOOST_AUTO_TEST_CASE(payload_validation_test)
 {
     const auto keys{ExtractKeysFromDescriptor(BACKUP_TEST_DESCRIPTOR)};
@@ -859,6 +871,169 @@ BOOST_AUTO_TEST_CASE(payload_validation_test)
     BOOST_REQUIRE(contents);
     BOOST_REQUIRE_EQUAL(contents->size(), 1);
     BOOST_CHECK_EQUAL(HexStr(contents->front()), "61");
+}
+
+BOOST_AUTO_TEST_CASE(bip380_descriptor_backup_vector_test)
+{
+    const UniValue vectors{read_json(json_tests::bip138_bip380_descriptor_backup)};
+    BOOST_REQUIRE(vectors.size() >= 2);
+    // Both canonical JSON documents and the text fixture describe the same pair.
+    const auto& pair{vectors[0]["document"]["descriptor_sets"][0]};
+    const std::vector<std::string> expected_descriptors{pair["descriptor"].get_str(), pair["change_descriptor"].get_str()};
+    std::string text_vector;
+    for (const std::byte byte : test::data::bip138_bip380_descriptor_backup) {
+        text_vector.push_back(std::to_integer<char>(byte));
+    }
+
+    // The receive-only vector is covered by its own import test.
+    for (size_t i{0}; i < 3; ++i) {
+        const bool is_text{i == 2};
+        BOOST_TEST_CONTEXT((is_text ? "BIP380 text descriptor" : vectors[i]["description"].get_str())) {
+            CWallet wallet(/*chain=*/nullptr, "", CreateMockableWalletDatabase());
+            {
+                LOCK(wallet.cs_wallet);
+                wallet.SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
+                wallet.SetWalletFlag(WALLET_FLAG_DISABLE_PRIVATE_KEYS);
+                // Ensure the explicit vector range cannot be supplied by the default keypool size.
+                wallet.m_keypool_size = 1;
+            }
+            const std::string plaintext{is_text ? text_vector : vectors[i]["document"].write()};
+            const auto backup{EncryptDescriptorItems({plaintext})};
+            const auto imported{wallet.ImportEncryptedDescriptorBackup(EncodeEncryptedBackupBase64(backup), BACKUP_TEST_XPUB)};
+            BOOST_REQUIRE_MESSAGE(imported, util::ErrorString(imported).original);
+            BOOST_CHECK_EQUAL(*imported, 2);
+
+            LOCK(wallet.cs_wallet);
+            const auto descriptors{ExportDescriptors(wallet, /*export_private=*/false)};
+            BOOST_REQUIRE(descriptors);
+            BOOST_REQUIRE_EQUAL(descriptors->size(), 2);
+            for (size_t branch{0}; branch < expected_descriptors.size(); ++branch) {
+                const auto found{std::ranges::find_if(*descriptors, [&](const auto& info) {
+                    return info.descriptor.substr(0, info.descriptor.find('#')) == expected_descriptors[branch];
+                })};
+                BOOST_REQUIRE(found != descriptors->end());
+                BOOST_REQUIRE(found->internal.has_value());
+                BOOST_CHECK_EQUAL(*found->internal, branch == 1);
+                BOOST_CHECK(found->active);
+                BOOST_CHECK_EQUAL(found->creation_time, is_text ? 0 : pair["birth_time"].getInt<int64_t>());
+                if (!is_text) {
+                    BOOST_REQUIRE(found->range.has_value());
+                    BOOST_CHECK_EQUAL(found->range->first, pair["range"][0].getInt<int64_t>());
+                    // Core stores an exclusive range end.
+                    BOOST_CHECK_EQUAL(found->range->second, pair["range"][1].getInt<int64_t>() + 1);
+                }
+            }
+        }
+    }
+}
+
+BOOST_AUTO_TEST_CASE(descriptor_document_import_test)
+{
+    CWallet wallet(/*chain=*/nullptr, "", CreateMockableWalletDatabase());
+    {
+        LOCK(wallet.cs_wallet);
+        wallet.SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
+        wallet.SetWalletFlag(WALLET_FLAG_DISABLE_PRIVATE_KEYS);
+    }
+    const std::string empty_document{"{\"version\":1,\"descriptor_sets\":[]}"};
+    auto empty_import{wallet.ImportEncryptedDescriptorBackup(EncodeEncryptedBackupBase64(EncryptDescriptorItems({empty_document})), BACKUP_TEST_XPUB)};
+    BOOST_REQUIRE_MESSAGE(empty_import, util::ErrorString(empty_import).original);
+    BOOST_CHECK_EQUAL(*empty_import, 0);
+    {
+        LOCK(wallet.cs_wallet);
+        BOOST_CHECK(wallet.GetAllScriptPubKeyMans().empty());
+    }
+    const std::string document{"{\"version\":1,\"descriptor_sets\":[{\"descriptor\":\"" + BACKUP_TEST_DESCRIPTOR + "\",\"range\":[0,9]}]}"};
+    auto imported{wallet.ImportEncryptedDescriptorBackup(EncodeEncryptedBackupBase64(EncryptDescriptorItems({document})), BACKUP_TEST_XPUB)};
+    BOOST_REQUIRE_MESSAGE(imported, util::ErrorString(imported).original);
+    BOOST_CHECK_EQUAL(*imported, 2);
+    std::vector<WalletDescInfo> before_reimport;
+    {
+        LOCK(wallet.cs_wallet);
+        auto descriptors{ExportDescriptors(wallet, /*export_private=*/false)};
+        BOOST_REQUIRE(descriptors);
+        BOOST_REQUIRE_EQUAL(descriptors->size(), 2);
+        for (const auto& descriptor : *descriptors) {
+            BOOST_CHECK(descriptor.active);
+            BOOST_CHECK_EQUAL(descriptor.creation_time, 0);
+            BOOST_CHECK(descriptor.internal.has_value());
+        }
+        // Receive and change have independent cursors, which must survive a
+        // re-import of the multipath descriptor without an explicit xpub.
+        BOOST_REQUIRE(wallet.GetNewDestination(OutputType::BECH32, ""));
+        BOOST_REQUIRE(wallet.GetNewDestination(OutputType::BECH32, ""));
+        BOOST_REQUIRE(wallet.GetNewChangeDestination(OutputType::BECH32));
+        auto advanced{ExportDescriptors(wallet, /*export_private=*/false)};
+        BOOST_REQUIRE(advanced);
+        before_reimport = std::move(*advanced);
+    }
+    auto reimported{wallet.ImportEncryptedDescriptorBackup(EncodeEncryptedBackupBase64(EncryptDescriptorItems({document})), std::nullopt)};
+    BOOST_REQUIRE_MESSAGE(reimported, util::ErrorString(reimported).original);
+    {
+        LOCK(wallet.cs_wallet);
+        auto after{ExportDescriptors(wallet, /*export_private=*/false)};
+        BOOST_REQUIRE(after);
+        for (const auto& previous : before_reimport) {
+            const auto match{std::ranges::find_if(*after, [&](const auto& info) { return info.descriptor == previous.descriptor; })};
+            BOOST_REQUIRE(match != after->end());
+            BOOST_CHECK_EQUAL(match->next_index, previous.next_index);
+        }
+    }
+
+    // Each JSON document remains a separate content item, including formatted JSON.
+    // Empty documents before, between, and after populated documents are ignored.
+    const std::string archived{"{\n\"version\":1,\n\"descriptor_sets\":[{\"descriptor\":\"" + BACKUP_TEST_DESCRIPTOR + "\",\"archived\":true,\"range\":[0,9]}]}"};
+    auto multiple{wallet.ImportEncryptedDescriptorBackup(EncodeEncryptedBackupBase64(EncryptDescriptorItems({empty_document, document, empty_document, archived, empty_document})), BACKUP_TEST_XPUB)};
+    BOOST_REQUIRE_MESSAGE(multiple, util::ErrorString(multiple).original);
+    BOOST_CHECK_EQUAL(*multiple, 4);
+
+    // Fixed descriptors are valid content, but cannot be active in Core.
+    const std::string fixed{"wpkh(" + BACKUP_TEST_XPUB + "/0/5)"};
+    auto fixed_import{wallet.ImportEncryptedDescriptorBackup(EncodeEncryptedBackupBase64(EncryptDescriptorItems({fixed})), BACKUP_TEST_XPUB)};
+    BOOST_REQUIRE_MESSAGE(fixed_import, util::ErrorString(fixed_import).original);
+
+    for (const std::string& invalid : std::vector<std::string>{
+             "{\"descriptor_sets\":[]}", "{\"version\":2,\"descriptor_sets\":[]}",
+             "{\"version\":1.5,\"descriptor_sets\":[]}",
+             "{\"version\":1,\"descriptor_sets\":[{\"descriptor\":\"" + BACKUP_TEST_DESCRIPTOR + "\",\"archived\":1}]}",
+             "{\"version\":1,\"descriptor_sets\":[{\"descriptor\":\"" + BACKUP_TEST_DESCRIPTOR + "\",\"range\":[0,\"9\"]}]}",
+             "{\"version\":1,\"descriptor_sets\":[{\"descriptor\":\"" + BACKUP_TEST_DESCRIPTOR + "\",\"birth_time\":-1}]}",
+             "{\"version\":1,\"descriptor_sets\":[{\"descriptor\":\"" + BACKUP_TEST_DESCRIPTOR + "\",\"change_descriptor\":\"" + fixed + "\"}]}"}) {
+        auto rejected{wallet.ImportEncryptedDescriptorBackup(EncodeEncryptedBackupBase64(EncryptDescriptorItems({invalid})), BACKUP_TEST_XPUB)};
+        BOOST_CHECK_MESSAGE(!rejected, invalid);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(receive_only_descriptor_document_vector_test)
+{
+    // BIP138 receive-only descriptor document vector.
+    const UniValue vectors{read_json(json_tests::bip138_bip380_descriptor_backup)};
+    BOOST_REQUIRE_EQUAL(vectors.size(), 3);
+    const auto& vec{vectors[2]};
+    BOOST_TEST_CONTEXT(vec["description"].get_str()) {
+        CWallet wallet(/*chain=*/nullptr, "", CreateMockableWalletDatabase());
+        {
+            LOCK(wallet.cs_wallet);
+            wallet.SetWalletFlag(WALLET_FLAG_DESCRIPTORS);
+            wallet.SetWalletFlag(WALLET_FLAG_DISABLE_PRIVATE_KEYS);
+        }
+        const auto& document{vec["document"]};
+        const auto backup{EncryptDescriptorItems({document.write()})};
+        const auto imported{wallet.ImportEncryptedDescriptorBackup(EncodeEncryptedBackupBase64(backup), BACKUP_TEST_XPUB)};
+        BOOST_REQUIRE_MESSAGE(imported, util::ErrorString(imported).original);
+        BOOST_CHECK_EQUAL(*imported, 1);
+
+        LOCK(wallet.cs_wallet);
+        const auto descriptors{ExportDescriptors(wallet, /*export_private=*/false)};
+        BOOST_REQUIRE(descriptors);
+        BOOST_REQUIRE_EQUAL(descriptors->size(), 1);
+        const auto& info{descriptors->front()};
+        BOOST_CHECK_EQUAL(info.descriptor.substr(0, info.descriptor.find('#')), document["descriptor_sets"][0]["descriptor"].get_str());
+        BOOST_REQUIRE(info.internal.has_value());
+        BOOST_CHECK(!*info.internal);
+        BOOST_CHECK(info.active);
+        BOOST_CHECK_EQUAL(info.creation_time, 0);
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()
