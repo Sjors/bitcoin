@@ -154,6 +154,8 @@ target_json_data_sources(test_bitcoin
   data/bip138_derivation_path.json
   data/bip138_individual_secrets.json
   data/bip138_content_type.json
+  data/bip138_payload.json
+  data/bip138_encrypted_backup.json
   data/bip138_chacha20poly1305_encryption.json
   data/bip352_send_and_receive_vectors.json
   data/blockfilters.json
