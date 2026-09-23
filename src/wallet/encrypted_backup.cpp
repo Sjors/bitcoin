@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
+#include <map>
 #include <set>
 #include <span>
 
@@ -17,12 +19,58 @@
 #include <serialize.h>
 #include <span.h>
 #include <streams.h>
+#include <univalue.h>
 #include <util/bip32.h>
 #include <util/strencodings.h>
 #include <util/string.h>
 #include <util/utf8.h>
+#include <wallet/descriptor_info.h>
+#include <wallet/descriptor_recombiner.h>
+#include <wallet/export.h>
+#include <wallet/wallet.h>
 
 namespace wallet {
+
+static std::optional<XOnlyPubKey> ToXOnly(const CExtPubKey& ext_pubkey)
+{
+    if (!ext_pubkey.pubkey.IsFullyValid() || !ext_pubkey.pubkey.IsValidNonHybrid()) {
+        return std::nullopt;
+    }
+    return XOnlyPubKey{ext_pubkey.pubkey};
+}
+
+static std::string EncryptionAlgorithmString(EncryptionAlgorithm algorithm)
+{
+    switch (algorithm) {
+    case EncryptionAlgorithm::CHACHA20_POLY1305:
+        return "ChaCha20-Poly1305";
+    case EncryptionAlgorithm::RESERVED:
+        break;
+    }
+    return "unknown";
+}
+
+static std::optional<DerivationPath> ExtractTargetDerivationPath(std::string_view descriptor, std::string_view target_xpub)
+{
+    const size_t xpub_pos{descriptor.find(target_xpub)};
+    if (xpub_pos == std::string_view::npos) return std::nullopt;
+
+    if (xpub_pos == 0 || descriptor[xpub_pos - 1] != ']') return std::nullopt;
+
+    const size_t bracket_start{descriptor.rfind('[', xpub_pos - 1)};
+    if (bracket_start == std::string_view::npos) return std::nullopt;
+
+    const std::string_view origin{descriptor.substr(bracket_start + 1, xpub_pos - bracket_start - 2)};
+    const size_t slash_pos{origin.find('/')};
+    if (slash_pos == std::string_view::npos) return std::nullopt;
+
+    DerivationPath parsed_path;
+    if (!ParseHDKeypath("m" + std::string{origin.substr(slash_pos)}, parsed_path) || parsed_path.empty()) {
+        return std::nullopt;
+    }
+
+    return parsed_path;
+}
 
 util::Result<std::vector<XOnlyPubKey>> ExtractKeysFromDescriptor(const std::string& descriptor,
                                                                  std::set<std::string>* excluded_expressions)
@@ -742,6 +790,323 @@ util::Result<std::vector<uint8_t>> DecryptBackupWithDescriptor(const EncryptedBa
     }
 
     return util::Error{Untranslated("No matching key found for decryption")};
+}
+
+struct DescriptorBackupSet {
+    std::optional<WalletDescriptorInfo> receive;
+    std::optional<WalletDescriptorInfo> change;
+    std::string multipath_descriptor;
+    bool multipath{false};
+    bool archived{true};
+    std::optional<std::pair<int64_t, int64_t>> range;
+    uint64_t birth_time{std::numeric_limits<uint64_t>::max()};
+};
+
+static util::Result<void> AddDescriptorToBackupSet(DescriptorBackupSet& set, WalletDescriptorInfo info, bool change, bool multipath = false)
+{
+    if (set.range && info.range) {
+        set.range = std::make_pair(
+            std::min(set.range->first, info.range->first),
+            std::max(set.range->second, info.range->second));
+    } else if (!set.range) {
+        set.range = info.range;
+    }
+    set.birth_time = std::min(set.birth_time, info.creation_time);
+    set.archived = set.archived && !info.active;
+    set.multipath = set.multipath || multipath;
+
+    auto& target{change ? set.change : set.receive};
+    if (target) {
+        return util::Error{Untranslated("Duplicate receive or change descriptor in backup set.")};
+    }
+    target = std::move(info);
+    return {};
+}
+
+static std::string DescriptorBackupSetMultipathDescriptor(const DescriptorBackupSet& set)
+{
+    return set.multipath_descriptor;
+}
+
+static UniValue DescriptorBackupSetToUniValue(const DescriptorBackupSet& set)
+{
+    UniValue obj(UniValue::VOBJ);
+    obj.pushKV("descriptor", set.receive->descriptor);
+    if (set.change) {
+        obj.pushKV("change_descriptor", set.change->descriptor);
+    }
+    if (set.archived) {
+        obj.pushKV("archived", true);
+    }
+    if (set.birth_time != std::numeric_limits<uint64_t>::max()) {
+        obj.pushKV("birth_time", set.birth_time);
+    }
+    if (set.range) {
+        UniValue range(UniValue::VARR);
+        range.push_back(set.range->first);
+        // range_end is exclusive internally, display as inclusive (hence -1)
+        range.push_back(set.range->second - 1);
+        obj.pushKV("range", std::move(range));
+    }
+    return obj;
+}
+
+util::Result<std::string> CWallet::CreateEncryptedDescriptorBackup(const std::optional<std::string>& target_xpub, bool compact) const
+{
+    if (target_xpub) {
+        const CExtPubKey ext_pubkey{DecodeExtPubKey(*target_xpub)};
+        if (!ext_pubkey.pubkey.IsValid()) {
+            return util::Error{Untranslated(strprintf("Invalid extended public key: %s", *target_xpub))};
+        }
+    }
+
+    std::vector<WalletDescriptorInfo> all_descriptors;
+    std::vector<DerivationPath> derivation_paths;
+    bool found_target_xpub{false};
+
+    {
+        LOCK(cs_wallet);
+
+        auto exported{ExportDescriptors(*this, /*export_private=*/false)};
+        if (!exported) return util::Error{Untranslated(exported.error())};
+        all_descriptors = std::move(*exported);
+        for (const auto& info : all_descriptors) {
+            const auto& desc_str{info.descriptor};
+            if (target_xpub && desc_str.find(*target_xpub) != std::string::npos) {
+                found_target_xpub = true;
+                if (derivation_paths.empty()) {
+                    if (auto path{ExtractTargetDerivationPath(desc_str, *target_xpub)}) {
+                        derivation_paths.push_back(*path);
+                    }
+                }
+            }
+        }
+    }
+
+    if (all_descriptors.empty()) {
+        return util::Error{Untranslated("No descriptors found in wallet.")};
+    }
+
+    if (target_xpub && !found_target_xpub) {
+        return util::Error{Untranslated(strprintf("Specified xpub not found in any wallet descriptor: %s", *target_xpub))};
+    }
+
+    if (target_xpub && derivation_paths.empty()) {
+        return util::Error{Untranslated("Specified xpub has no origin info (derivation path) in descriptor.")};
+    }
+
+    const auto recombined_descriptors{RecombineDescriptors(all_descriptors)};
+    std::map<std::string, DescriptorBackupSet> descriptor_sets;
+    for (const auto& info : all_descriptors) {
+        const auto recombined{recombined_descriptors.find(info.descriptor)};
+        if (recombined == recombined_descriptors.end()) {
+            return util::Error{Untranslated(strprintf("Descriptor does not have a unique receive/change pair and cannot be backed up as BIP380 content: %s", info.descriptor))};
+        }
+        auto& descriptor_set{descriptor_sets[recombined->second.descriptor]};
+        descriptor_set.multipath_descriptor = recombined->second.descriptor;
+        if (auto add_result{AddDescriptorToBackupSet(descriptor_set, info, recombined->second.internal)}; !add_result) {
+            return util::Error{util::ErrorString(add_result)};
+        }
+    }
+
+    std::vector<DescriptorBackupSet> sorted_sets;
+    sorted_sets.reserve(descriptor_sets.size());
+    for (auto& [_, set] : descriptor_sets) {
+        if (!set.receive || (!set.multipath && !set.change)) {
+            return util::Error{Untranslated("Descriptor backup requires both receive and change descriptors.")};
+        }
+        if (set.multipath && set.change) {
+            return util::Error{Untranslated("Multipath descriptor backup must not include a change descriptor.")};
+        }
+        sorted_sets.push_back(std::move(set));
+    }
+
+    std::sort(sorted_sets.begin(), sorted_sets.end(), [](const auto& a, const auto& b) {
+        return a.receive->descriptor < b.receive->descriptor;
+    });
+
+    std::vector<std::string> encryption_descriptors;
+    encryption_descriptors.reserve(all_descriptors.size());
+    for (const auto& info : all_descriptors) encryption_descriptors.push_back(info.descriptor);
+    std::string plaintext_str;
+    if (compact) {
+        // BIP380 content is either a single bare descriptor or a JSON
+        // document. A compact backup holds one bare descriptor, keeping it
+        // small enough for e.g. QR codes or engraving.
+        if (sorted_sets.size() > 1) {
+            return util::Error{Untranslated(strprintf(
+                "Compact backup requires a wallet with a single descriptor set, but this wallet has %d. Create a regular backup instead.",
+                sorted_sets.size()))};
+        }
+        plaintext_str = DescriptorBackupSetMultipathDescriptor(sorted_sets.front());
+    } else {
+        UniValue descriptor_sets_arr(UniValue::VARR);
+        for (const auto& descriptor_set : sorted_sets) {
+            descriptor_sets_arr.push_back(DescriptorBackupSetToUniValue(descriptor_set));
+        }
+
+        UniValue descriptor_backup(UniValue::VOBJ);
+        descriptor_backup.pushKV("version", 1);
+        descriptor_backup.pushKV("descriptor_sets", std::move(descriptor_sets_arr));
+        plaintext_str = descriptor_backup.write();
+    }
+
+    const std::vector<uint8_t> plaintext{plaintext_str.begin(), plaintext_str.end()};
+    const EncryptedBackupContentType content{
+        .type = DataType::BIP_NUMBER,
+        .bip_number = BIP_DESCRIPTORS,
+        .payload = {},
+    };
+
+    // Compact backups favor size (e.g. for QR codes or engraving), so skip
+    // the decoy padding, which BIP138 recommends but does not require.
+    auto backup_result{CreateEncryptedBackup(encryption_descriptors, plaintext, content, derivation_paths, /*decoys=*/!compact)};
+    if (!backup_result) {
+        return util::Error{Untranslated(strprintf("Failed to create encrypted backup: %s", util::ErrorString(backup_result).original))};
+    }
+
+    return EncodeEncryptedBackupBase64(*backup_result);
+}
+
+static util::Result<std::vector<std::vector<uint8_t>>> DecryptDescriptorBackupItemsWithExtPubKey(const std::string& base64_str, const std::string& pubkey_str)
+{
+    const CExtPubKey ext_pubkey{DecodeExtPubKey(pubkey_str)};
+    if (!ext_pubkey.pubkey.IsValid()) {
+        return util::Error{Untranslated(strprintf("Invalid extended public key: %s", pubkey_str))};
+    }
+
+    auto backup_result{DecodeEncryptedBackupBase64(base64_str)};
+    if (!backup_result) {
+        return util::Error{Untranslated(strprintf("Failed to decode backup: %s", util::ErrorString(backup_result).original))};
+    }
+
+    auto xonly_key{ToXOnly(ext_pubkey)};
+    if (!xonly_key) {
+        return util::Error{Untranslated(strprintf("Invalid extended public key: %s", pubkey_str))};
+    }
+
+    auto payload{DecryptBackupPayloadWithKey(*backup_result, *xonly_key)};
+    if (!payload) {
+        return util::Error{Untranslated("Failed to decrypt backup: provided key does not match any recipient.")};
+    }
+
+    auto plaintexts{FindPlaintextsForContent(*payload, BIP_DESCRIPTORS)};
+    if (!plaintexts) {
+        return util::Error{Untranslated("Backup was decrypted, but it contains no descriptor (BIP380) content.")};
+    }
+
+    return std::move(*plaintexts);
+}
+
+util::Result<std::vector<uint8_t>> CWallet::DecryptEncryptedBackupBase64WithExtPubKey(const std::string& base64_str, const std::string& pubkey_str)
+{
+    auto items{DecryptDescriptorBackupItemsWithExtPubKey(base64_str, pubkey_str)};
+    if (!items) return util::Error{util::ErrorString(items)};
+    return JoinPlaintextItems(*items);
+}
+
+util::Result<std::vector<uint8_t>> CWallet::DecryptEncryptedBackupBase64WithWalletKeys(const std::string& base64_str) const
+{
+    auto items{DecryptDescriptorBackupItemsWithWalletKeys(base64_str)};
+    if (!items) return util::Error{util::ErrorString(items)};
+    return JoinPlaintextItems(*items);
+}
+
+util::Result<std::vector<std::vector<uint8_t>>> CWallet::DecryptDescriptorBackupItemsWithWalletKeys(const std::string& base64_str) const
+{
+    auto backup_result{DecodeEncryptedBackupBase64(base64_str)};
+    if (!backup_result) {
+        return util::Error{Untranslated(strprintf("Failed to decode backup: %s", util::ErrorString(backup_result).original))};
+    }
+
+    // Try the path hints from the backup header first, then the common
+    // derivation paths that recovery implementations check automatically.
+    std::vector<DerivationPath> candidate_paths{backup_result->derivation_paths};
+    const auto common_paths{CommonDerivationPaths()};
+    candidate_paths.insert(candidate_paths.end(), common_paths.begin(), common_paths.end());
+
+    // Collect the root key of every descriptor in the wallet, with the
+    // corresponding private key when available.
+    std::map<CExtPubKey, std::optional<CExtKey>> root_keys;
+    {
+        LOCK(cs_wallet);
+        for (auto* spkm : GetAllScriptPubKeyMans()) {
+            auto* desc_spkm{dynamic_cast<DescriptorScriptPubKeyMan*>(spkm)};
+            if (!desc_spkm) continue;
+            LOCK(desc_spkm->cs_desc_man);
+            const WalletDescriptor w_desc{desc_spkm->GetWalletDescriptor()};
+            std::set<CPubKey> desc_pubkeys;
+            std::set<CExtPubKey> desc_xpubs;
+            w_desc.descriptor->GetPubKeys(desc_pubkeys, desc_xpubs);
+            for (const CExtPubKey& xpub : desc_xpubs) {
+                auto& xprv{root_keys[xpub]};
+                if (!xprv) {
+                    if (std::optional<CKey> key{desc_spkm->GetKey(xpub.pubkey.GetID())}) {
+                        xprv = CExtKey(xpub, *key);
+                    }
+                }
+            }
+        }
+    }
+
+    // A key that decrypts the backup ends the search either way: when the
+    // payload holds no descriptor content, no other key would fare better.
+    bilingual_str content_error;
+    const auto try_key{[&](const CPubKey& pubkey) -> std::optional<std::vector<std::vector<uint8_t>>> {
+        if (!pubkey.IsFullyValid() || !pubkey.IsValidNonHybrid()) return std::nullopt;
+        auto payload{DecryptBackupPayloadWithKey(*backup_result, XOnlyPubKey{pubkey})};
+        if (!payload) return std::nullopt;
+        auto plaintexts{FindPlaintextsForContent(*payload, BIP_DESCRIPTORS)};
+        if (!plaintexts) {
+            content_error = Untranslated("Backup was decrypted, but it contains no descriptor (BIP380) content.");
+            return std::nullopt;
+        }
+        return plaintexts;
+    }};
+
+    for (const auto& [xpub, xprv] : root_keys) {
+        // The root key itself may be the account-level key, e.g. for an
+        // imported watch-only descriptor.
+        if (auto plaintext{try_key(xpub.pubkey)}) return *plaintext;
+
+        // With the private key, derive candidate account-level keys at the
+        // hinted and common paths (hardened derivation requires it).
+        if (!xprv) continue;
+        for (const auto& path : candidate_paths) {
+            CExtKey derived{*xprv};
+            bool derive_ok{true};
+            for (const uint32_t child : path) {
+                CExtKey next;
+                if (!derived.Derive(next, child)) {
+                    derive_ok = false;
+                    break;
+                }
+                derived = next;
+            }
+            if (!derive_ok) continue;
+            if (auto plaintext{try_key(derived.Neuter().pubkey)}) return *plaintext;
+        }
+    }
+
+    if (!content_error.empty()) {
+        return util::Error{content_error};
+    }
+    return util::Error{Untranslated("Failed to decrypt backup: no wallet key matches any recipient.")};
+}
+
+util::Result<EncryptedBackupMetadata> CWallet::GetEncryptedBackupMetadata(const std::string& base64_str)
+{
+    auto backup_result{DecodeEncryptedBackupBase64(base64_str)};
+    if (!backup_result) {
+        return util::Error{Untranslated(strprintf("Failed to decode backup: %s", util::ErrorString(backup_result).original))};
+    }
+
+    return EncryptedBackupMetadata{
+        .version = backup_result->version,
+        .individual_secret_count = backup_result->individual_secrets.size(),
+        .encryption = EncryptionAlgorithmString(backup_result->encryption),
+        .derivation_paths = backup_result->derivation_paths,
+    };
 }
 
 } // namespace wallet
