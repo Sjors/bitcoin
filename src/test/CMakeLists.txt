@@ -130,6 +130,7 @@ add_executable(test_bitcoin
   util_check_tests.cpp
   util_expected_tests.cpp
   util_string_tests.cpp
+  utf8_tests.cpp
   util_tests.cpp
   util_threadnames_tests.cpp
   util_trace_tests.cpp
