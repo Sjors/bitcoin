@@ -130,6 +130,7 @@ add_executable(test_bitcoin
   util_check_tests.cpp
   util_expected_tests.cpp
   util_string_tests.cpp
+  utf8_tests.cpp
   util_tests.cpp
   util_threadnames_tests.cpp
   util_trace_tests.cpp
@@ -146,6 +147,15 @@ include(TargetDataSources)
 target_json_data_sources(test_bitcoin
   data/base58_encode_decode.json
   data/bip341_wallet_vectors.json
+  data/bip138_recipient_keys.json
+  data/bip138_encryption_secret.json
+  data/bip138_derivation_path.json
+  data/bip138_individual_secrets.json
+  data/bip138_content_type.json
+  data/bip138_payload.json
+  data/bip138_encrypted_backup.json
+  data/bip138_chacha20poly1305_encryption.json
+  data/bip138_bip380_descriptor_backup.json
   data/blockfilters.json
   data/key_io_invalid.json
   data/key_io_valid.json
@@ -157,6 +167,7 @@ target_json_data_sources(test_bitcoin
 )
 target_raw_data_sources(test_bitcoin NAMESPACE test::data
   data/asmap.raw
+  data/bip138_bip380_descriptor_backup.txt
 )
 
 add_windows_application_manifest(test_bitcoin)

@@ -21,6 +21,8 @@
 #include <util/fs.h>
 #include <util/time.h>
 #include <util/translation.h>
+#include <wallet/descriptor_info.h>
+#include <wallet/descriptor_recombiner.h>
 #include <wallet/export.h>
 #include <wallet/imports.h>
 #include <wallet/rpc/util.h>
@@ -324,6 +326,7 @@ RPCMethod listdescriptors()
             {
                 {RPCResult::Type::OBJ, "", "", {
                     {RPCResult::Type::STR, "desc", "Descriptor string representation"},
+                    {RPCResult::Type::STR, "multipath_desc", /*optional=*/true, "BIP389 multipath descriptor combining this descriptor with its receive/change counterpart"},
                     {RPCResult::Type::NUM, "timestamp", "The creation time of the descriptor"},
                     {RPCResult::Type::BOOL, "active", "Whether this descriptor is currently used to generate new addresses"},
                     {RPCResult::Type::BOOL, "internal", /*optional=*/true, "True if this descriptor is used to generate change addresses. False if this descriptor is used to generate receiving addresses; defined only for active descriptors"},
@@ -363,25 +366,15 @@ RPCMethod listdescriptors()
     std::sort(wallet_descriptors.begin(), wallet_descriptors.end(), [](const auto& a, const auto& b) {
         return a.descriptor < b.descriptor;
     });
+    const auto recombined_descriptors{RecombineDescriptors(wallet_descriptors)};
 
     UniValue descriptors(UniValue::VARR);
-    for (const WalletDescInfo& info : wallet_descriptors) {
-        UniValue spk(UniValue::VOBJ);
-        spk.pushKV("desc", info.descriptor);
-        spk.pushKV("timestamp", info.creation_time);
-        spk.pushKV("active", info.active);
-        if (info.internal.has_value()) {
-            spk.pushKV("internal", info.internal.value());
+    for (const WalletDescriptorInfo& info : wallet_descriptors) {
+        UniValue descriptor{DescriptorInfoToUniValue(info)};
+        if (const auto it{recombined_descriptors.find(info.descriptor)}; it != recombined_descriptors.end()) {
+            descriptor.pushKV("multipath_desc", it->second.descriptor + "#" + GetDescriptorChecksum(it->second.descriptor));
         }
-        if (info.range.has_value()) {
-            UniValue range(UniValue::VARR);
-            range.push_back(info.range->first);
-            range.push_back(info.range->second - 1);
-            spk.pushKV("range", std::move(range));
-            spk.pushKV("next", info.next_index);
-            spk.pushKV("next_index", info.next_index);
-        }
-        descriptors.push_back(std::move(spk));
+        descriptors.push_back(std::move(descriptor));
     }
 
     UniValue response(UniValue::VOBJ);
