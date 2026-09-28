@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -20,6 +21,7 @@
 #include <unordered_map>
 #include <vector>
 
+struct CExtKey;
 class CScript;
 class SigningProvider;
 struct FlatSigningProvider;
@@ -209,6 +211,9 @@ struct Descriptor {
 
     /** Get the number of key expressions in this descriptor. Used only for tests */
     virtual size_t GetKeyCount() const = 0;
+
+    /** Substitute all pubkeys with their corresponding private keys provided by the caller */
+    virtual void SubstituteMasterExtPubs(std::map<CExtPubKey, CExtKey> xprvs) = 0;
 };
 
 /** Validate the numeric bounds of a descriptor key-expression range
@@ -218,15 +223,25 @@ struct Descriptor {
  */
 util::Expected<void, std::string> CheckDescriptorRangeBounds(int64_t low, int64_t high);
 
-/** Parse a `descriptor` string. Included private keys are put in `out`.
+/** Parse a descriptor string.
  *
- * If the descriptor has a checksum, it must be valid. If `require_checksum`
- * is set, the checksum is mandatory - otherwise it is optional.
+ * If `descriptor` has a checksum, it must be valid. If `require_checksum`
+ * is set, a checksum is mandatory.
  *
- * If a parse error occurs, or the checksum is missing/invalid, or anything
- * else is wrong, an empty vector is returned.
+ * @param[in] descriptor Descriptor string to parse.
+ * @param[out] out Signing provider populated with private keys included in `descriptor`.
+ * @param[out] error Error message if parsing fails.
+ * @param[in] require_checksum Whether a checksum is required.
+ * @param[out] multipath If provided, set to the publicly derivable form of the
+ * multipath descriptor string before expansion, with a checksum. It is set to
+ * `std::nullopt` if `descriptor` is not multipath or contains a key expression
+ * that cannot be made publicly derivable. Private keys are replaced by their
+ * public forms. Private extended keys followed by a fixed hardened prefix are
+ * normalized by replacing them with their key origin and the extended public
+ * key at the last hardened step.
+ * @return Parsed descriptors, or an empty vector on error.
  */
-std::vector<std::unique_ptr<Descriptor>> Parse(std::string_view descriptor, FlatSigningProvider& out, std::string& error, bool require_checksum = false);
+std::vector<std::unique_ptr<Descriptor>> Parse(std::string_view descriptor, FlatSigningProvider& out, std::string& error, bool require_checksum = false, std::optional<std::string>* multipath = nullptr);
 
 /** Get the checksum for a `descriptor`.
  *

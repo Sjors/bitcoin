@@ -865,11 +865,9 @@ std::unique_ptr<DescriptorScriptPubKeyMan> DescriptorScriptPubKeyMan::LoadFromSt
     return std::unique_ptr<DescriptorScriptPubKeyMan>(new DescriptorScriptPubKeyMan(storage, id, descriptor, keypool_size, keys, ckeys));
 }
 
-std::unique_ptr<DescriptorScriptPubKeyMan> DescriptorScriptPubKeyMan::GenerateNewSingleSig(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, const CExtKey& master_key, OutputType addr_type, bool internal)
+std::unique_ptr<DescriptorScriptPubKeyMan> DescriptorScriptPubKeyMan::GenerateNewSingleSig(WalletStorage& storage, WalletBatch& batch, int64_t keypool_size, const CExtKey& master_key, WalletDescriptor w_desc)
 {
-    WalletDescriptor desc = GenerateWalletDescriptor(master_key.Neuter(), addr_type, internal);
-
-    auto spkm = std::unique_ptr<DescriptorScriptPubKeyMan>(new DescriptorScriptPubKeyMan(storage, desc, keypool_size));
+    auto spkm = std::unique_ptr<DescriptorScriptPubKeyMan>(new DescriptorScriptPubKeyMan(storage, w_desc, keypool_size));
 
     LOCK(spkm->cs_desc_man);
     Assert(spkm->m_storage.IsWalletFlagSet(WALLET_FLAG_DESCRIPTORS));
@@ -1581,6 +1579,14 @@ std::unordered_set<CScript, SaltedSipHasher> DescriptorScriptPubKeyMan::GetScrip
 int32_t DescriptorScriptPubKeyMan::GetEndRange() const
 {
     return m_max_cached_index + 1;
+}
+
+std::optional<int32_t> DescriptorScriptPubKeyMan::GetScriptPubKeyIndex(const CScript& script) const
+{
+    LOCK(cs_desc_man);
+    auto it = m_map_script_pub_keys.find(script);
+    if (it == m_map_script_pub_keys.end()) return std::nullopt;
+    return it->second;
 }
 
 bool DescriptorScriptPubKeyMan::GetDescriptorString(std::string& out, const bool priv) const
