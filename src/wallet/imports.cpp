@@ -122,12 +122,15 @@ ImportResult ImportDescriptor(CWallet& wallet, const ImportDescriptorRequest& re
         );
     }
 
+    std::pair<std::map<CExtPubKey, CExtKey>, std::map<CPubKey, CKey>> wallet_keys = wallet.GetKnownKeys();
     // Construct the wallet descriptors for overlap checks and reuse them during
     // import.
     Assume(request.timestamp.has_value());
     std::vector<WalletDescriptor> wallet_descs;
     wallet_descs.reserve(parsed_descs.size());
     for (auto& parsed_desc : parsed_descs) {
+        // Substitute before constructing wallet descriptors and checking for overlap.
+        parsed_desc->SubstituteMasterExtPubs(wallet_keys.first);
         const auto& w_desc{wallet_descs.emplace_back(std::move(parsed_desc), request.timestamp.value(), range_start, range_end, next_index)};
 
         // Refuse an import whose expanded descriptors are already part of a
@@ -158,6 +161,26 @@ ImportResult ImportDescriptor(CWallet& wallet, const ImportDescriptorRequest& re
         } else if (wallet_descs.size() > 2) {
             CHECK_NONFATAL(!desc_internal);
         }
+
+        // Insert into keys any private keys that the wallet already knows
+        // This needs to be done after xpubs have been substituted
+        // Only do this for the first descriptor in the multipath expansion as all substitutions will be for the same key
+        if (j == 0) {
+            std::set<CExtPubKey> desc_xpubs;
+            std::set<CPubKey> desc_pubs;
+            parsed_desc->GetPubKeys(desc_pubs, desc_xpubs);
+            for (const CExtPubKey& xpub : desc_xpubs) {
+                const auto& it = wallet_keys.first.find(xpub);
+                if (it == wallet_keys.first.end()) continue;
+                keys.keys.emplace(it->first.pubkey.GetID(), it->second.key);
+            }
+            for (const CPubKey& pub : desc_pubs) {
+                const auto& it = wallet_keys.second.find(pub);
+                if (it == wallet_keys.second.end()) continue;
+                keys.keys.emplace(it->first.GetID(), it->second);
+            }
+        }
+
         // ExpandPrivate to whether the descriptor can be derived at the first index.
         FlatSigningProvider expand_keys;
         std::vector<CScript> scripts;
