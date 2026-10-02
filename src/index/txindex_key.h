@@ -26,7 +26,7 @@ namespace txindex {
  *   ['s', block seq]                         -> block hash
  *   ['h', block hash]                        -> block seq
  *   ["next_block_seq"]                       -> next block seq to assign
- *   ["txid_hash_salt"]                       -> txid hasher salt
+ *   ["txid_hash_salt"]                       -> transaction identifier hasher salt
  *   ["best_block_v2"]                        -> current sync locator
  *   ['t', txid]                              -> legacy CDiskTxPos
  *   ['B']                                    -> legacy sync locator
@@ -36,7 +36,7 @@ constexpr uint8_t DB_TXINDEX_HASHED{'x'};
 constexpr uint8_t DB_BLOCK_SEQ{'s'};
 constexpr uint8_t DB_BLOCK_HASH{'h'};
 inline const std::string DB_NEXT_BLOCK_SEQ{"next_block_seq"};
-inline const std::string DB_TXID_HASH_SALT{"txid_hash_salt"};
+inline const std::string DB_HASH_SALT{"txid_hash_salt"};
 inline const std::string DB_BEST_BLOCK_V2{"best_block_v2"};
 //! Prefix of a legacy (pre-hashing) txindex row.
 constexpr uint8_t DB_TXINDEX{'t'};
@@ -99,9 +99,15 @@ struct BlockHashKey {
 constexpr int HASH_PREFIX_SIZE{5};
 using TxHashKeyPrefix = uint64_t;
 
-inline TxHashKeyPrefix CreateKeyPrefix(const SipHasher13UJ& hasher, const Txid& txid)
+inline TxHashKeyPrefix CreateKeyPrefix(const SipHasher13UJ& hasher, const uint256& tx_hash)
 {
-    return hasher.Hash(txid.ToUint256()) >> (8 * (sizeof(TxHashKeyPrefix) - HASH_PREFIX_SIZE));
+    return hasher.Hash(tx_hash) >> (8 * (sizeof(TxHashKeyPrefix) - HASH_PREFIX_SIZE));
+}
+
+template <typename TxHash>
+inline TxHashKeyPrefix CreateKeyPrefix(const SipHasher13UJ& hasher, const TxHash& tx_hash)
+{
+    return CreateKeyPrefix(hasher, tx_hash.ToUint256());
 }
 
 struct DBKey {

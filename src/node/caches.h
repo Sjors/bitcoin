@@ -21,6 +21,7 @@ namespace node {
 uint64_t GetDefaultDBCache();
 struct IndexCacheSizes {
     uint64_t tx_index{0};
+    uint64_t wtx_index{0};
     uint64_t filter_index{0};
     uint64_t txospender_index{0};
 };
