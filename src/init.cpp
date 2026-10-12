@@ -31,6 +31,7 @@
 #include <index/txospenderindex.h>
 #include <init/common.h>
 #include <interfaces/chain.h>
+#include <interfaces/external_signer.h>
 #include <interfaces/init.h>
 #include <interfaces/ipc.h>
 #include <interfaces/node.h>
@@ -403,6 +404,11 @@ void Shutdown(NodeContext& node)
             }
         }
     }
+
+    // Release any external signer registered over IPC: the proxy object
+    // holds a reference to the IPC event loop, which would otherwise keep
+    // its thread alive and block process exit.
+    SetRegisteredSignerService(nullptr);
 
     // If any -ipcbind clients are still connected, disconnect them now so they
     // do not block shutdown.

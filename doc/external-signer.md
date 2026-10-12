@@ -4,6 +4,27 @@ Bitcoin Core can be launched with `-signer=<cmd>` where `<cmd>` is an external t
 
 Interaction with external signer uses [Partially Signed Bitcoin Transaction (PSBT)](psbt.md).
 
+## Signer registration over IPC (experimental)
+
+As an alternative to spawning `<cmd>` for every operation, a signing service
+can run as a long-lived process, connect to a `bitcoin-node` [IPC socket](multiprocess.md)
+(`-ipcbind=unix`) and register itself via the `registerExternalSigner` method
+of the Cap'n Proto `Init` interface (see `src/ipc/capnp/signer.capnp`). A
+registered signer takes precedence over `-signer=<cmd>`, which remains as a
+fallback; no additional configuration is needed. If the signer process
+disconnects, the node reverts to `-signer` behavior on the next signer
+operation. Unlike the command protocol below, per-device enumeration errors
+are expected to be filtered out by the service rather than reported in-band.
+
+With [HWI](https://github.com/bitcoin-core/HWI), which defaults to the
+socket path in the default datadir of the chosen chain (use `--socket-path`
+to override):
+
+```sh
+bitcoin node -chain=regtest -ipcbind=unix
+hwi --chain regtest ipc
+```
+
 ## Example usage
 
 The following example is based on the [HWI](https://github.com/bitcoin-core/HWI) tool. Version 2.0 or newer is required. Although this tool is hosted under the Bitcoin Core GitHub organization and maintained by Bitcoin Core developers, it should be used with caution. It is considered experimental and has far less review than Bitcoin Core itself. Be particularly careful when running tools such as these on a computer with private keys on it.

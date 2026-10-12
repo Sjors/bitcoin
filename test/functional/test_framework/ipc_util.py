@@ -91,6 +91,7 @@ def load_capnp_modules(config):
         "init": capnp.load(str(src_dir / "ipc" / "capnp" / "init.capnp"), imports=imports),
         "echo": capnp.load(str(src_dir / "ipc" / "capnp" / "echo.capnp"), imports=imports),
         "mining": capnp.load(str(src_dir / "ipc" / "capnp" / "mining.capnp"), imports=imports),
+        "signer": capnp.load(str(src_dir / "ipc" / "capnp" / "signer.capnp"), imports=imports),
     }
 
 

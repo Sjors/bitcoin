@@ -12,6 +12,7 @@
 // IWYU pragma: begin_keep
 #include <interfaces/chain.h>
 #include <interfaces/echo.h>
+#include <interfaces/external_signer.h>
 #include <interfaces/mining.h>
 #include <interfaces/node.h>
 #include <interfaces/rpc.h>
@@ -45,6 +46,11 @@ public:
     virtual std::unique_ptr<WalletLoader> makeWalletLoader(Chain& chain) { return nullptr; }
     virtual std::unique_ptr<Echo> makeEcho() { return nullptr; }
     virtual std::unique_ptr<Rpc> makeRpc() { return nullptr; }
+    //! Called by an external signing service (e.g. HWI) connecting over IPC
+    //! to register itself as this node's signer backend. A registered signer
+    //! takes precedence over the -signer command. Default is a no-op for
+    //! processes that do not support external signers.
+    virtual void registerExternalSigner(std::shared_ptr<ExternalSignerService> signer) {}
     virtual Ipc* ipc() { return nullptr; }
     virtual bool canListenIpc() { return false; }
     virtual const char* exeName() { return nullptr; }

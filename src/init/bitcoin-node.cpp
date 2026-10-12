@@ -12,10 +12,12 @@
 #include <interfaces/node.h>
 #include <interfaces/rpc.h>
 #include <interfaces/wallet.h>
+#include <logging.h>
 #include <node/context.h>
 #include <util/check.h>
 
 #include <memory>
+#include <utility>
 
 namespace init {
 namespace {
@@ -40,6 +42,15 @@ public:
     }
     std::unique_ptr<interfaces::Echo> makeEcho() override { return interfaces::MakeEcho(); }
     std::unique_ptr<interfaces::Rpc> makeRpc() override { return interfaces::MakeRpc(m_node); }
+    void registerExternalSigner(std::shared_ptr<interfaces::ExternalSignerService> signer) override
+    {
+        // Runs on the IPC event loop thread; only stores the capability.
+        // Last registration wins. A dropped connection is detected lazily:
+        // the next call on a stale capability throws ipc::Exception, which
+        // clears the registration.
+        LogInfo("External signer registered over IPC\n");
+        SetRegisteredSignerService(std::move(signer));
+    }
     interfaces::Ipc* ipc() override { return m_ipc.get(); }
     bool canListenIpc() override { return true; }
     const char* exeName() override { return EXE_NAME; }

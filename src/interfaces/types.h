@@ -7,12 +7,20 @@
 
 #include <uint256.h>
 
+#include <string>
+
 namespace interfaces {
 
 //! Hash/height pair to help track and identify blocks.
 struct BlockRef {
     uint256 hash;
     int height = -1;
+};
+
+//! External signer metadata, returned by ExternalSignerService::enumerate.
+struct ExternalSignerInfo {
+    std::string fingerprint;
+    std::string name;
 };
 
 } // namespace interfaces
