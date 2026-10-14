@@ -5,6 +5,8 @@
 #include <common/system.h>
 #include <compressor.h>
 #include <core_io.h>
+#include <coins.h>
+#include <policy/policy.h>
 #include <key.h>
 #include <rpc/util.h>
 #include <script/interpreter.h>
@@ -92,6 +94,7 @@ static ScriptErrorDesc script_errors[]={
     {SCRIPT_ERR_WITNESS_UNEXPECTED, "WITNESS_UNEXPECTED"},
     {SCRIPT_ERR_WITNESS_PUBKEYTYPE, "WITNESS_PUBKEYTYPE"},
     {SCRIPT_ERR_TAPSCRIPT_EMPTY_PUBKEY, "TAPSCRIPT_EMPTY_PUBKEY"},
+    {SCRIPT_ERR_BLOCK_REFERENCE, "BLOCK_REFERENCE"},
     {SCRIPT_ERR_OP_CODESEPARATOR, "OP_CODESEPARATOR"},
     {SCRIPT_ERR_SIG_FINDANDDELETE, "SIG_FINDANDDELETE"},
     {SCRIPT_ERR_SCRIPTNUM, "SCRIPTNUM"}
@@ -1421,6 +1424,45 @@ BOOST_AUTO_TEST_CASE(sign_paytoanchor)
     curr.vin.emplace_back(COutPoint{prev.GetHash(), 0});
 
     BOOST_CHECK(SignSignature(keystore, CTransaction(prev), curr, 0, SIGHASH_ALL, sig_data));
+}
+
+/* Signing a witness v2 spend with a block reference adds the annex and commits to the block hash. */
+BOOST_AUTO_TEST_CASE(sign_block_reference)
+{
+    CKey key;
+    key.MakeNewKey(true);
+    FlatSigningProvider keystore;
+    keystore.keys.emplace(key.GetPubKey().GetID(), key);
+    TaprootBuilder builder;
+    builder.Finalize(XOnlyPubKey{key.GetPubKey()});
+    keystore.tr_trees[builder.GetOutput()] = builder;
+    const CScript spk{CScript() << OP_2 << ToByteVector(builder.GetOutput())};
+
+    CMutableTransaction prev, curr;
+    prev.vout.emplace_back(1, spk);
+    curr.vin.emplace_back(COutPoint{prev.GetHash(), 0});
+    curr.vout.emplace_back(1, CScript{});
+    const std::map<COutPoint, Coin> coins{{curr.vin[0].prevout, Coin(prev.vout[0], 1, false)}};
+    const int height{1000};
+    std::map<int, bilingual_str> errors;
+
+    BOOST_CHECK(SignTransaction(curr, &keystore, coins, {.block_reference = {{height, uint256::ONE}}}, errors));
+    BOOST_CHECK_EQUAL(curr.vin[0].scriptWitness.stack.size(), 2U);
+    BOOST_CHECK(curr.vin[0].scriptWitness.stack[1] == BlockReferenceAnnex(height));
+
+    // The signature only verifies with the referenced block's hash.
+    for (const uint256& block_hash : {uint256::ONE, uint256::ZERO}) {
+        PrecomputedTransactionData txdata;
+        txdata.Init(curr, {prev.vout[0]});
+        txdata.m_block_hashes.emplace_back(height, block_hash);
+        const MutableTransactionSignatureChecker checker{&curr, 0, 1, txdata, MissingDataBehavior::FAIL};
+        BOOST_CHECK_EQUAL(VerifyScript(CScript{}, spk, &curr.vin[0].scriptWitness, STANDARD_SCRIPT_VERIFY_FLAGS, checker, nullptr), block_hash == uint256::ONE);
+    }
+
+    // Without the option, a v2 spend is signed without an annex.
+    curr.vin[0].scriptWitness.SetNull();
+    BOOST_CHECK(SignTransaction(curr, &keystore, coins, {}, errors));
+    BOOST_CHECK_EQUAL(curr.vin[0].scriptWitness.stack.size(), 1U);
 }
 
 BOOST_AUTO_TEST_CASE(script_standard_push)

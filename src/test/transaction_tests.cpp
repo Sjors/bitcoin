@@ -1376,7 +1376,7 @@ BOOST_AUTO_TEST_CASE(spends_witness_prog)
     const auto program{ToByteVector(XOnlyPubKey{pubkey})};
     for (int i{2}; i <= 16; ++i) {
         tx_create.vout[0].scriptPubKey = GetScriptForDestination(WitnessUnknown{i, program});
-        BOOST_CHECK_EQUAL(Solver(tx_create.vout[0].scriptPubKey, sol_dummy), TxoutType::WITNESS_UNKNOWN);
+        BOOST_CHECK_EQUAL(Solver(tx_create.vout[0].scriptPubKey, sol_dummy), i == 2 ? TxoutType::WITNESS_V2_TAPROOT : TxoutType::WITNESS_UNKNOWN);
         tx_spend.vin[0].prevout.hash = tx_create.GetHash();
         AddCoins(coins, CTransaction{tx_create}, 0, false);
         BOOST_CHECK(::SpendsNonAnchorWitnessProg(CTransaction{tx_spend}, coins));

@@ -146,6 +146,10 @@ enum class script_verify_flag_name : uint8_t {
     // Making unknown public key versions (in BIP 342 scripts) non-standard
     SCRIPT_VERIFY_DISCOURAGE_UPGRADABLE_PUBKEYTYPE,
 
+    // Witness v2 Taproot validation (BIP341/342 rules, plus block references)
+    //
+    SCRIPT_VERIFY_TAPROOT_V2,
+
     // Constants to point to the highest flag in use. Add new flags above this line.
     //
     SCRIPT_VERIFY_END_MARKER
@@ -181,6 +185,11 @@ struct PrecomputedTransactionData
     std::vector<CTxOut> m_spent_outputs;
     //! Whether m_spent_outputs is initialized.
     bool m_spent_outputs_ready = false;
+
+    /** Block hashes (by height, sorted) that inputs of this transaction may commit to in their
+     *  signature message. This is chain context that is not derivable from the transaction, so it
+     *  is filled in by the caller (validation) rather than by Init(). */
+    std::vector<std::pair<int, uint256>> m_block_hashes;
 
     PrecomputedTransactionData() = default;
 
@@ -225,6 +234,9 @@ struct ScriptExecutionData
     //! Hash of the annex data.
     uint256 m_annex_hash;
 
+    //! Height of the block referenced by the annex (witness v2 block reference), if any.
+    std::optional<int> m_block_ref_height;
+
     //! Whether m_validation_weight_left is initialized.
     bool m_validation_weight_left_init = false;
     //! How much validation weight is left (decremented for every successful non-empty signature check).
@@ -238,6 +250,19 @@ struct ScriptExecutionData
 inline constexpr size_t WITNESS_V0_SCRIPTHASH_SIZE = 32;
 inline constexpr size_t WITNESS_V0_KEYHASH_SIZE = 20;
 inline constexpr size_t WITNESS_V1_TAPROOT_SIZE = 32;
+inline constexpr size_t WITNESS_V2_TAPROOT_SIZE = 32;
+
+/** Annex payload type byte for a block reference (see doc/block-reference.md). */
+inline constexpr uint8_t BLOCK_REF_ANNEX_TYPE = 0x01;
+/** Size of a block reference annex: annex tag, type byte, 4-byte little endian height. */
+inline constexpr size_t BLOCK_REF_ANNEX_SIZE = 6;
+
+/** Parse the block reference in an annex (including its leading ANNEX_TAG byte), if any.
+ *  Returns false if the annex is a malformed block reference; otherwise sets height when the
+ *  annex is a block reference and leaves it untouched when it is not. */
+bool ParseBlockReference(std::span<const unsigned char> annex, std::optional<int>& height);
+/** Build the annex (including the ANNEX_TAG byte) that references the block at the given height. */
+std::vector<unsigned char> BlockReferenceAnnex(int height);
 
 inline constexpr uint8_t TAPROOT_LEAF_MASK = 0xfe;
 inline constexpr uint8_t TAPROOT_LEAF_TAPSCRIPT = 0xc0;

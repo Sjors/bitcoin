@@ -848,7 +848,7 @@ def spenders_taproot_active():
         add_spender(spenders, "siglen/invalid_cs_neg", tap=tap, key=secs[2], leaf="cs_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", failure={"sign": default_sign, "sighash": bitflipper(default_sighash)}, **ERR_SCHNORR_SIG)
         add_spender(spenders, "siglen/invalid_csa_neg", tap=tap, key=secs[2], leaf="csa_neg", hashtype=hashtype, **SINGLE_SIG, sign=b"", failure={"sign": default_sign, "sighash": bitflipper(default_sighash)}, **ERR_SCHNORR_SIG)
 
-    # == Test that BIP341 spending only applies to witness version 1, program length 32, no P2SH ==
+    # == Test that BIP341 spending only applies to witness version 1 (and 2, which shares its rules), program length 32, no P2SH ==
 
     for p2sh in [False, True]:
         for witver in range(1, 17):
@@ -863,7 +863,7 @@ def spenders_taproot_active():
                     return CScript([CScriptOp.encode_op_n(witver), prog])
                 scripts = [("s0", CScript([pubs[0], OP_CHECKSIG])), ("dummy", CScript([OP_RETURN]))]
                 tap = taproot_construct(pubs[1], scripts)
-                if not p2sh and witver == 1 and witlen == 32:
+                if not p2sh and witver in (1, 2) and witlen == 32:
                     add_spender(spenders, "applic/keypath", p2sh=p2sh, spk_mutate_pre_p2sh=mutate, tap=tap, key=secs[1], **SIGHASH_BITFLIP, **ERR_SCHNORR_SIG)
                     add_spender(spenders, "applic/scriptpath", p2sh=p2sh, leaf="s0", spk_mutate_pre_p2sh=mutate, tap=tap, key=secs[0], **SINGLE_SIG, failure={"leaf": "dummy"}, **ERR_OP_RETURN)
                 else:

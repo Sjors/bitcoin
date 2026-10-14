@@ -241,7 +241,7 @@ bool CScript::IsPayToWitnessScriptHash() const
 bool CScript::IsPayToTaproot() const
 {
     return (this->size() == 34 &&
-            (*this)[0] == OP_1 &&
+            ((*this)[0] == OP_1 || (*this)[0] == OP_2) &&
             (*this)[1] == 0x20);
 }
 

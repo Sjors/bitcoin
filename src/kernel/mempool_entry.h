@@ -81,13 +81,17 @@ private:
     const int64_t sigOpCost;        //!< Total sigop cost
     mutable CAmount m_modified_fee; //!< Used for determining the priority of the transaction for mining in a block
     mutable LockPoints lockPoints;  //!< Track the height and time at which tx was final
+    /** Blocks referenced by the inputs (see doc/block-reference.md), as resolved at acceptance. The tx is only
+     *  valid while these are in the active chain and mature; a reorg that changes that must evict it. */
+    const std::vector<const CBlockIndex*> m_block_refs;
 
 public:
     virtual ~CTxMemPoolEntry() = default;
     CTxMemPoolEntry(const CTransactionRef& tx, CAmount fee,
                     int64_t time, unsigned int entry_height, uint64_t entry_sequence,
                     bool spends_coinbase,
-                    int64_t sigops_cost, LockPoints lp)
+                    int64_t sigops_cost, LockPoints lp,
+                    std::vector<const CBlockIndex*> block_refs = {})
         : tx{tx},
           nFee{fee},
           nTxWeight{GetTransactionWeight(*tx)},
@@ -98,7 +102,8 @@ public:
           spendsCoinbase{spends_coinbase},
           sigOpCost{sigops_cost},
           m_modified_fee{nFee},
-          lockPoints{lp} {}
+          lockPoints{lp},
+          m_block_refs{std::move(block_refs)} {}
 
     CTxMemPoolEntry& operator=(const CTxMemPoolEntry&) = delete;
     CTxMemPoolEntry(CTxMemPoolEntry&&) = default;
@@ -120,6 +125,7 @@ public:
     CAmount GetModifiedFee() const { return m_modified_fee; }
     size_t DynamicMemoryUsage() const { return nUsageSize; }
     const LockPoints& GetLockPoints() const { return lockPoints; }
+    const std::vector<const CBlockIndex*>& GetBlockReferences() const { return m_block_refs; }
 
     // Updates the modified fees with descendants/ancestors.
     void UpdateModifiedFee(CAmount fee_diff) const

@@ -252,6 +252,43 @@ std::optional<LockPoints> CalculateLockPointsAtTip(
     return LockPoints{min_height, min_time, Assert(tip->GetAncestor(max_input_height))};
 }
 
+/**
+ * Check that the blocks referenced by tx's inputs (see doc/block-reference.md) are at least
+ * COINBASE_MATURITY blocks before spend_height, and record their hashes in txdata so that
+ * signature verification can commit to them.
+ *
+ * @param[in] tip           The block preceding the one the transaction is (to be) included in.
+ * @param[in] spend_height  Height of the block the transaction is (to be) included in.
+ * @param[in] min_height    Lowest height that may be referenced (the activation height of witness v2).
+ * @param[out] block_refs   If given, the referenced blocks (for the mempool entry, see BlockReferencesValid()).
+ */
+static bool CheckBlockReferences(const CTransaction& tx, const CCoinsViewCache& inputs, const CBlockIndex& tip, int spend_height, int min_height, PrecomputedTransactionData& txdata, TxValidationState& state, std::vector<const CBlockIndex*>* block_refs = nullptr)
+{
+    assert(txdata.m_block_hashes.empty());
+    for (const int height : Consensus::GetBlockReferences(tx, inputs)) {
+        if (height < min_height) {
+            return state.Invalid(TxValidationResult::TX_CONSENSUS, "bad-txns-block-reference-before-activation",
+                                 strprintf("references block at height %d, before activation at %d", height, min_height));
+        }
+        if (int64_t{height} + COINBASE_MATURITY > spend_height) {
+            return state.Invalid(TxValidationResult::TX_PREMATURE_SPEND, "bad-txns-block-reference-immature",
+                                 strprintf("references block at height %d, at depth %d", height, spend_height - height));
+        }
+        const CBlockIndex* ref{Assert(tip.GetAncestor(height))};
+        txdata.m_block_hashes.emplace_back(height, ref->GetBlockHash());
+        if (block_refs) block_refs->push_back(ref);
+    }
+    return true;
+}
+
+/** Whether the blocks referenced by a mempool transaction are still in the chain and mature for the next block. */
+static bool BlockReferencesValid(const CChain& chain, const std::vector<const CBlockIndex*>& block_refs)
+{
+    return std::ranges::all_of(block_refs, [&](const CBlockIndex* ref) {
+        return chain.Contains(*ref) && ref->nHeight + COINBASE_MATURITY <= chain.Height() + 1;
+    });
+}
+
 bool CheckSequenceLocksAtTip(CBlockIndex* tip,
                              const LockPoints& lock_points)
 {
@@ -341,8 +378,8 @@ void Chainstate::MaybeUpdateMempoolForReorg(
     m_mempool->UpdateTransactionsFromBlock(vHashUpdate);
 
     // Predicate to use for filtering transactions in removeForReorg.
-    // Checks whether the transaction is still final and, if it spends a coinbase output, mature.
-    // Also updates valid entries' cached LockPoints if needed.
+    // Checks whether the transaction is still final and, if it spends a coinbase output or references
+    // a block, mature. Also updates valid entries' cached LockPoints if needed.
     // If false, the tx is still valid and its lockpoints are updated.
     // If true, the tx would be invalid in the next block; remove this entry and all of its descendants.
     // Note that TRUC rules are not applied here, so reorgs may cause violations of TRUC inheritance or
@@ -355,6 +392,10 @@ void Chainstate::MaybeUpdateMempoolForReorg(
 
         // The transaction must be final.
         if (!CheckFinalTxAtTip(*Assert(m_chain.Tip()), tx)) return true;
+
+        // Referenced blocks must still be in the chain (a reorg of at least COINBASE_MATURITY blocks,
+        // after which the signatures no longer verify) and mature (a reorg to a shorter chain).
+        if (!BlockReferencesValid(m_chain, it->GetBlockReferences())) return true;
 
         const LockPoints& lp = it->GetLockPoints();
         // CheckSequenceLocksAtTip checks if the transaction will be final in the next block to be
@@ -890,6 +931,13 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
         return false; // state filled in by CheckTxInputs
     }
 
+    // Likewise, referenced blocks must be mature for the next block. This is checked regardless of
+    // activation, as the standard script flags always apply the witness v2 rules (and need the hashes).
+    std::vector<const CBlockIndex*> block_refs;
+    if (!CheckBlockReferences(tx, m_view, *m_active_chainstate.m_chain.Tip(), m_active_chainstate.m_chain.Height() + 1, m_active_chainstate.m_chainman.GetConsensus().TaprootV2Height, ws.m_precomputed_txdata, state, &block_refs)) {
+        return false; // state filled in by CheckBlockReferences
+    }
+
     if (m_pool.m_opts.require_standard) {
         state = ValidateInputsStandardness(tx, m_view);
         if (state.IsInvalid()) {
@@ -921,7 +969,7 @@ bool MemPoolAccept::PreChecks(ATMPArgs& args, Workspace& ws)
     if (!m_subpackage.m_changeset) {
         m_subpackage.m_changeset = m_pool.GetChangeSet();
     }
-    ws.m_tx_handle = m_subpackage.m_changeset->StageAddition(ptx, ws.m_base_fees, nAcceptTime, m_active_chainstate.m_chain.Height(), entry_sequence, fSpendsCoinbase, nSigOpsCost, lock_points.value());
+    ws.m_tx_handle = m_subpackage.m_changeset->StageAddition(ptx, ws.m_base_fees, nAcceptTime, m_active_chainstate.m_chain.Height(), entry_sequence, fSpendsCoinbase, nSigOpsCost, lock_points.value(), std::move(block_refs));
 
     // ws.m_modified_fees includes any fee deltas from PrioritiseTransaction
     ws.m_modified_fees = ws.m_tx_handle->GetModifiedFee();
@@ -2076,7 +2124,13 @@ bool CheckInputScripts(const CTransaction& tx, TxValidationState& state,
     // transaction).
     uint256 hashCacheEntry;
     CSHA256 hasher = validation_cache.ScriptExecutionCacheHasher();
-    hasher.Write(UCharCast(tx.GetWitnessHash().begin()), 32).Write((unsigned char*)&flags, sizeof(flags)).Finalize(hashCacheEntry.begin());
+    hasher.Write(UCharCast(tx.GetWitnessHash().begin()), 32).Write((unsigned char*)&flags, sizeof(flags));
+    // Block hashes referenced by the inputs are part of the signature message but not of the wtxid,
+    // so a script execution result is only reusable for the same referenced blocks.
+    for (const auto& [height, block_hash] : txdata.m_block_hashes) {
+        hasher.Write(block_hash.begin(), 32);
+    }
+    hasher.Finalize(hashCacheEntry.begin());
     AssertLockHeld(cs_main); //TODO: Remove this requirement by making CuckooCache not require external locks
     if (validation_cache.m_script_execution_cache.contains(hashCacheEntry, !cacheFullScriptStore)) {
         return true;
@@ -2282,6 +2336,11 @@ script_verify_flags GetBlockScriptFlags(const CBlockIndex& block_index, const Ch
     // Enforce BIP147 NULLDUMMY (activated simultaneously with segwit)
     if (DeploymentActiveAt(block_index, chainman, Consensus::DEPLOYMENT_SEGWIT)) {
         flags |= SCRIPT_VERIFY_NULLDUMMY;
+    }
+
+    // Enforce witness v2 Taproot (with block references)
+    if (DeploymentActiveAt(block_index, chainman, Consensus::DEPLOYMENT_TAPROOT_V2)) {
+        flags |= SCRIPT_VERIFY_TAPROOT_V2;
     }
 
     return flags;
@@ -2555,6 +2614,16 @@ bool Chainstate::ConnectBlock(const CBlock& block, BlockValidationState& state, 
             if (!SequenceLocks(tx, nLockTimeFlags, prevheights, *pindex)) {
                 state.Invalid(BlockValidationResult::BLOCK_CONSENSUS, "bad-txns-nonfinal",
                               "contains a non-BIP68-final transaction " + tx.GetHash().ToString());
+                break;
+            }
+
+            // Check that referenced blocks are mature, and look up their hashes for the script checks below.
+            // Like BIP68 this must be in ConnectBlock, as it depends on the UTXO set (to identify v2 spends).
+            // Before activation a witness v2 spend is anyone-can-spend and its annex has no meaning.
+            if ((flags & SCRIPT_VERIFY_TAPROOT_V2) && !CheckBlockReferences(tx, view, *pindex, pindex->nHeight, m_chainman.GetConsensus().TaprootV2Height, txsdata[i], tx_state)) {
+                state.Invalid(BlockValidationResult::BLOCK_CONSENSUS,
+                              tx_state.GetRejectReason(),
+                              tx_state.GetDebugMessage() + " in transaction " + tx.GetHash().ToString());
                 break;
             }
         }
@@ -3594,6 +3663,9 @@ bool Chainstate::InvalidateBlock(BlockValidationState& state, CBlockIndex* const
         // transactions back to the mempool if disconnecting was successful,
         // and we're not doing a very deep invalidation (in which case
         // keeping the mempool up to date is probably futile anyway).
+        // Note that this limit is specific to invalidateblock; a normal reorg
+        // re-adds all disconnected transactions through AcceptToMemoryPool,
+        // which re-validates them (block references included) against the new tip.
         MaybeUpdateMempoolForReorg(disconnectpool, /* fAddToMempool = */ (++disconnected <= 10) && ret);
         if (!ret) return false;
         CBlockIndex* new_tip{m_chain.Tip()};

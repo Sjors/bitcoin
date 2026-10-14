@@ -657,7 +657,7 @@ public:
 
         using TxHandle = CTxMemPool::txiter;
 
-        TxHandle StageAddition(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int entry_height, uint64_t entry_sequence, bool spends_coinbase, int64_t sigops_cost, LockPoints lp);
+        TxHandle StageAddition(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int entry_height, uint64_t entry_sequence, bool spends_coinbase, int64_t sigops_cost, LockPoints lp, std::vector<const CBlockIndex*> block_refs = {});
 
         void StageRemoval(CTxMemPool::txiter it);
 

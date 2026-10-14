@@ -27,6 +27,14 @@ namespace Consensus {
  * Preconditions: tx.IsCoinBase() is false.
  */
 [[nodiscard]] bool CheckTxInputs(const CTransaction& tx, TxValidationState& state, const CCoinsViewCache& inputs, int nSpendHeight, CAmount& txfee);
+
+/**
+ * Heights of the blocks referenced by the inputs of a transaction (block reference annexes of
+ * witness v2 spends, see doc/block-reference.md), sorted and without duplicates. Malformed
+ * references are skipped; script validation rejects them.
+ * Preconditions: all inputs are available in `inputs`.
+ */
+std::vector<int> GetBlockReferences(const CTransaction& tx, const CCoinsViewCache& inputs);
 } // namespace Consensus
 
 /** Auxiliary functions for transaction validation (ideally should not be exposed) */

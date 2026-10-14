@@ -5,6 +5,7 @@
 
 #include <script/interpreter.h>
 
+#include <crypto/common.h>
 #include <crypto/ripemd160.h>
 #include <crypto/sha1.h>
 #include <crypto/sha256.h>
@@ -21,6 +22,7 @@
 #include <compare>
 #include <cstring>
 #include <limits>
+#include <ranges>
 #include <stdexcept>
 
 typedef std::vector<unsigned char> valtype;
@@ -1426,9 +1428,9 @@ void PrecomputedTransactionData::Init(const T& txTo, std::vector<CTxOut>&& spent
     for (size_t inpos = 0; inpos < txTo.vin.size() && !(uses_bip143_segwit && uses_bip341_taproot); ++inpos) {
         if (!txTo.vin[inpos].scriptWitness.IsNull()) {
             if (m_spent_outputs_ready && m_spent_outputs[inpos].scriptPubKey.size() == 2 + WITNESS_V1_TAPROOT_SIZE &&
-                m_spent_outputs[inpos].scriptPubKey[0] == OP_1) {
-                // Treat every witness-bearing spend with 34-byte scriptPubKey that starts with OP_1 as a Taproot
-                // spend. This only works if spent_outputs was provided as well, but if it wasn't, actual validation
+                (m_spent_outputs[inpos].scriptPubKey[0] == OP_1 || m_spent_outputs[inpos].scriptPubKey[0] == OP_2)) {
+                // Treat every witness-bearing spend with 34-byte scriptPubKey that starts with OP_1 or OP_2 as a
+                // Taproot (v1 or v2) spend. This only works if spent_outputs was provided as well, but if it wasn't, actual validation
                 // will fail anyway. Note that this branch may trigger for scriptPubKeys that aren't actually segwit
                 // but in that case validation will fail as SCRIPT_ERR_WITNESS_UNEXPECTED anyway.
                 uses_bip341_taproot = true;
@@ -1489,9 +1491,30 @@ static bool HandleMissingData(MissingDataBehavior mdb)
     assert(!"Unknown MissingDataBehavior value");
 }
 
+bool ParseBlockReference(std::span<const unsigned char> annex, std::optional<int>& height)
+{
+    if (annex.size() < 2 || annex[1] != BLOCK_REF_ANNEX_TYPE) return true;
+    if (annex.size() < BLOCK_REF_ANNEX_SIZE) return false;
+    const uint32_t h{ReadLE32(annex.data() + 2)};
+    if (h > uint32_t{std::numeric_limits<int>::max()}) return false;
+    height = static_cast<int>(h);
+    return true;
+}
+
+std::vector<unsigned char> BlockReferenceAnnex(int height)
+{
+    std::vector<unsigned char> annex(BLOCK_REF_ANNEX_SIZE);
+    annex[0] = ANNEX_TAG;
+    annex[1] = BLOCK_REF_ANNEX_TYPE;
+    WriteLE32(annex.data() + 2, height);
+    return annex;
+}
+
 template<typename T>
 bool SignatureHashSchnorr(uint256& hash_out, ScriptExecutionData& execdata, const T& tx_to, uint32_t in_pos, uint8_t hash_type, SigVersion sigversion, const PrecomputedTransactionData& cache, MissingDataBehavior mdb)
 {
+    // ext_flag is a bitfield: bit 0 for the BIP342 tapscript extension, bit 1 for the block
+    // reference extension (witness v2). Extensions are appended in bit order.
     uint8_t ext_flag, key_version;
     switch (sigversion) {
     case SigVersion::TAPROOT:
@@ -1509,6 +1532,7 @@ bool SignatureHashSchnorr(uint256& hash_out, ScriptExecutionData& execdata, cons
     default:
         assert(false);
     }
+    if (execdata.m_block_ref_height) ext_flag |= 2;
     assert(in_pos < tx_to.vin.size());
     if (!(cache.m_bip341_taproot_ready && cache.m_spent_outputs_ready)) {
         return HandleMissingData(mdb);
@@ -1573,6 +1597,13 @@ bool SignatureHashSchnorr(uint256& hash_out, ScriptExecutionData& execdata, cons
         ss << key_version;
         assert(execdata.m_codeseparator_pos_init);
         ss << execdata.m_codeseparator_pos;
+    }
+
+    // Block reference extension: commit to the hash of the referenced block
+    if (execdata.m_block_ref_height) {
+        const auto it{std::ranges::find(cache.m_block_hashes, *execdata.m_block_ref_height, &std::pair<int, uint256>::first)};
+        if (it == cache.m_block_hashes.end()) return HandleMissingData(mdb);
+        ss << it->second;
     }
 
     hash_out = ss.GetSHA256();
@@ -1954,15 +1985,20 @@ static bool VerifyWitnessProgram(const CScriptWitness& witness, int witversion, 
         } else {
             return set_error(serror, SCRIPT_ERR_WITNESS_PROGRAM_WRONG_LENGTH);
         }
-    } else if (witversion == 1 && program.size() == WITNESS_V1_TAPROOT_SIZE && !is_p2sh) {
-        // BIP341 Taproot: 32-byte non-P2SH witness v1 program (which encodes a P2C-tweaked pubkey)
-        if (!(flags & SCRIPT_VERIFY_TAPROOT)) return set_success(serror);
+    } else if ((witversion == 1 || (witversion == 2 && (flags & SCRIPT_VERIFY_TAPROOT_V2))) && program.size() == WITNESS_V1_TAPROOT_SIZE && !is_p2sh) {
+        // BIP341 Taproot: 32-byte non-P2SH witness v1 program (which encodes a P2C-tweaked pubkey).
+        // Witness v2 programs of the same size follow the same rules (see below for the difference).
+        if (witversion == 1 && !(flags & SCRIPT_VERIFY_TAPROOT)) return set_success(serror);
         if (stack.size() == 0) return set_error(serror, SCRIPT_ERR_WITNESS_PROGRAM_WITNESS_EMPTY);
         if (stack.size() >= 2 && !stack.back().empty() && stack.back()[0] == ANNEX_TAG) {
             // Drop annex (this is non-standard; see IsWitnessStandard)
             const valtype& annex = SpanPopBack(stack);
             execdata.m_annex_hash = (HashWriter{} << annex).GetSHA256();
             execdata.m_annex_present = true;
+            // Witness v2: the annex may reference a block, which the signature message then commits to
+            if (witversion == 2 && !ParseBlockReference(annex, execdata.m_block_ref_height)) {
+                return set_error(serror, SCRIPT_ERR_BLOCK_REFERENCE);
+            }
         } else {
             execdata.m_annex_present = false;
         }
@@ -2200,6 +2236,7 @@ const std::map<std::string, script_verify_flag_name>& ScriptFlagNamesToEnum()
         FLAG_NAME(DISCOURAGE_UPGRADABLE_PUBKEYTYPE),
         FLAG_NAME(DISCOURAGE_OP_SUCCESS),
         FLAG_NAME(DISCOURAGE_UPGRADABLE_TAPROOT_VERSION),
+        FLAG_NAME(TAPROOT_V2),
     };
 #undef FLAG_NAME
     return g_names_to_enum;

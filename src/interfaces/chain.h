@@ -25,6 +25,7 @@
 #include <vector>
 
 class CBlock;
+class CBlockHeader;
 class CFeeRate;
 class CRPCCommand;
 class CScheduler;
@@ -52,6 +53,8 @@ class FoundBlock
 {
 public:
     FoundBlock& hash(uint256& hash) { m_hash = &hash; return *this; }
+    //! Return the header from the block index, including for pruned blocks.
+    FoundBlock& header(CBlockHeader& header) { m_header = &header; return *this; }
     FoundBlock& height(int& height) { m_height = &height; return *this; }
     FoundBlock& time(int64_t& time) { m_time = &time; return *this; }
     FoundBlock& maxTime(int64_t& max_time) { m_max_time = &max_time; return *this; }
@@ -67,6 +70,7 @@ public:
     FoundBlock& data(CBlock& data) { m_data = &data; return *this; }
 
     uint256* m_hash = nullptr;
+    CBlockHeader* m_header = nullptr;
     int* m_height = nullptr;
     int64_t* m_time = nullptr;
     int64_t* m_max_time = nullptr;
