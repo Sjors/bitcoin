@@ -1151,14 +1151,30 @@ class ImportDescriptorsTest(BitcoinTestFramework):
 
         assert_equal(temp_wallet.getbalance(), encrypted_wallet.getbalance())
 
+        self.test_import_multipath()
+        self.test_older()
+        self.test_import_unused_key()
+        self.test_import_unused_key_existing()
+        self.test_import_unused_noprivs()
+        self.test_per_item_errors_are_reported_in_order()
+        self.test_keypool_range_bound()
+        self.test_rescan_fails_import()
+        self.test_import_noprivs()
+
+    def test_import_multipath(self):
         self.log.info("Multipath descriptors")
+        extended_key = ExtendedPrivateKey.generate()
+        xpriv = extended_key.to_string()
+        xpub = extended_key.pubkey().to_string()
         self.nodes[1].createwallet(wallet_name="multipath", blank=True)
         w_multipath = self.nodes[1].get_wallet_rpc("multipath")
         self.nodes[1].createwallet(wallet_name="multipath_split", blank=True)
         w_multisplit = self.nodes[1].get_wallet_rpc("multipath_split")
         timestamp = int(time.time())
+        multipath_desc = descsum_create(f"wpkh({xpriv}/<10;20>/0/*)")
+        multipath_pubdesc = descsum_create(f"wpkh({xpub}/<10;20>/0/*)")
 
-        self.test_importdesc({"desc": descsum_create(f"wpkh({xpriv}/<10;20>/0/*)"),
+        self.test_importdesc({"desc": multipath_desc,
                               "active": True,
                               "range": 10,
                               "timestamp": "now",
@@ -1167,7 +1183,7 @@ class ImportDescriptorsTest(BitcoinTestFramework):
                               error_code=-8,
                               error_message="Multipath descriptors should not have a label",
                               wallet=w_multipath)
-        self.test_importdesc({"desc": descsum_create(f"wpkh({xpriv}/<10;20>/0/*)"),
+        self.test_importdesc({"desc": multipath_desc,
                               "active": True,
                               "range": 10,
                               "timestamp": timestamp,
@@ -1177,7 +1193,7 @@ class ImportDescriptorsTest(BitcoinTestFramework):
                               error_message="Cannot have multipath descriptor while also specifying \'internal\'",
                               wallet=w_multipath)
 
-        self.test_importdesc({"desc": descsum_create(f"wpkh({xpriv}/<10;20>/0/*)"),
+        self.test_importdesc({"desc": multipath_desc,
                               "active": True,
                               "range": 10,
                               "timestamp": timestamp},
@@ -1200,9 +1216,15 @@ class ImportDescriptorsTest(BitcoinTestFramework):
         for _ in range(0, 10):
             assert_equal(w_multipath.getnewaddress(address_type="bech32"), w_multisplit.getnewaddress(address_type="bech32"))
             assert_equal(w_multipath.getrawchangeaddress(address_type="bech32"), w_multisplit.getrawchangeaddress(address_type="bech32"))
-        assert_equal(sorted(w_multipath.listdescriptors()["descriptors"], key=lambda x: x["desc"]), sorted(w_multisplit.listdescriptors()["descriptors"], key=lambda x: x["desc"]))
+        multipath_listdesc = w_multipath.listdescriptors()["descriptors"]
+        for desc in multipath_listdesc:
+            assert_equal(desc["multipath_descriptor"], multipath_pubdesc)
+            del desc["multipath_descriptor"]
+        assert_equal(sorted(multipath_listdesc, key=lambda x: x["desc"]), sorted(w_multisplit.listdescriptors()["descriptors"], key=lambda x: x["desc"]))
 
+    def test_older(self):
         self.log.info("Test older() safety")
+        xpub = ExtendedPrivateKey.generate().pubkey().to_string()
 
         for flag in [0, SEQUENCE_LOCKTIME_TYPE_FLAG]:
             self.log.debug("Importing a safe value always works")
@@ -1237,13 +1259,6 @@ class ImportDescriptorsTest(BitcoinTestFramework):
             )
 
 
-        self.test_import_unused_key()
-        self.test_import_unused_key_existing()
-        self.test_import_unused_noprivs()
-        self.test_per_item_errors_are_reported_in_order()
-        self.test_keypool_range_bound()
-        self.test_rescan_fails_import()
-        self.test_import_noprivs()
 
 if __name__ == '__main__':
     ImportDescriptorsTest(__file__).main()
