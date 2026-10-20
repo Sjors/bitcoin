@@ -6,6 +6,7 @@
 #define BITCOIN_NODE_BLOCK_TEMPLATE_MANAGER_H
 
 #include <node/mining_types.h>
+#include <util/not_null.h>
 #include <util/time.h>
 
 #include <memory>
@@ -47,7 +48,7 @@ public:
     const BlockCreateOptions& BlockCreateArgs() const { return m_block_create_args; }
 
     /** Create a fresh block template, applying init-time defaults to any unset options. */
-    std::unique_ptr<CBlockTemplate> CreateNewTemplate(const BlockCreateOptions& options);
+    util::NotNullUniquePtr<CBlockTemplate> CreateNewTemplate(const BlockCreateOptions& options);
 
     /** Submit a block via ProcessNewBlock and capture validation state.
      *  @return whether the block was accepted as a new valid block. */
