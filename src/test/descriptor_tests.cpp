@@ -563,6 +563,78 @@ void CheckMultipath(const std::string& prv,
     desc->ToString();
     std::vector<CScript> out_scripts;
     desc->Expand(0, prov, out_scripts, out);
+
+    // Check reconstruction roundtrip
+    std::unique_ptr<Descriptor> parse_pub = Parse(pub, prov, error);
+    BOOST_CHECK_MESSAGE(parse_pub, "Failed to parse " + pub);
+    std::unique_ptr<Descriptor> parse_prv = Parse(prv, prov, error);
+    BOOST_CHECK_MESSAGE(parse_prv, "Failed to parse " + prv);
+
+    std::vector<std::unique_ptr<Descriptor>> mp_pub = parse_pub->GetMultipathExpansion();
+    std::vector<const Descriptor*> pub_rels;
+    for (size_t i = 1; i < mp_pub.size(); ++i) {
+        pub_rels.push_back(mp_pub.at(i).get());
+    }
+    std::unique_ptr<Descriptor> recon_pub = mp_pub.at(0)->ReconstructMultipath(pub_rels);
+    BOOST_CHECK_MESSAGE(recon_pub, "Failed multipath reconstruction of " + pub);
+    std::string recon_pub_str = recon_pub->ToString();
+    BOOST_CHECK_MESSAGE(EqualDescriptor(pub, recon_pub_str), "Expected: " + pub + " got: " + recon_pub_str);
+    std::string recon_pub_privs;
+    BOOST_CHECK_MESSAGE(recon_pub->ToPrivateString(prov, recon_pub_privs), "Failed reconstructed to private string: " + recon_pub_str);
+    BOOST_CHECK_MESSAGE(EqualDescriptor(prv, recon_pub_privs), "Expected: " + prv + " got: " + recon_pub_privs);
+
+    std::vector<std::unique_ptr<Descriptor>> mp_prv = parse_prv->GetMultipathExpansion();
+    std::vector<const Descriptor*> prv_rels;
+    for (size_t i = 1; i < mp_prv.size(); ++i) {
+        prv_rels.push_back(mp_prv.at(i).get());
+    }
+    std::unique_ptr<Descriptor> recon_prv = mp_pub.at(0)->ReconstructMultipath(prv_rels);
+    BOOST_CHECK_MESSAGE(recon_prv, "Failed multipath reconstruction of " + prv);
+    std::string recon_prv_str = recon_prv->ToString();
+    BOOST_CHECK_MESSAGE(EqualDescriptor(pub, recon_prv_str), "Expected: " + pub + " got: " + recon_prv_str);
+    std::string recon_prv_privs;
+    BOOST_CHECK_MESSAGE(recon_prv->ToPrivateString(prov, recon_prv_privs), "Failed reconstrcted to private string: " + recon_prv_str);
+    BOOST_CHECK_MESSAGE(EqualDescriptor(prv, recon_prv_privs), "Expected: " + prv + " got: " + recon_prv_privs);
+
+    // Reconstruct from expanded strings
+    std::vector<std::unique_ptr<Descriptor>> parsed_exp_pub;
+    parsed_exp_pub.reserve(expanded_pubs.size());
+    for (const auto& s : expanded_pubs) {
+        auto d = Parse(s, prov, error);
+        BOOST_CHECK_MESSAGE(d, "Failed to parse " + s);
+        parsed_exp_pub.emplace_back(std::move(d));
+    }
+    std::vector<const Descriptor*> exp_pub_rels;
+    for (size_t i = 1; i < mp_pub.size(); ++i) {
+        exp_pub_rels.push_back(parsed_exp_pub.at(i).get());
+    }
+
+    std::unique_ptr<Descriptor> exp_recon_pub = parsed_exp_pub.at(0)->ReconstructMultipath(exp_pub_rels);
+    BOOST_CHECK_MESSAGE(exp_recon_pub, "Failed multipath reconstruction from expansion of " + pub);
+    std::string exp_recon_pub_str = exp_recon_pub->ToString();
+    BOOST_CHECK_MESSAGE(EqualDescriptor(pub, exp_recon_pub_str), "Expected: " + pub + " got: " + exp_recon_pub_str);
+    std::string exp_recon_pub_privs;
+    BOOST_CHECK_MESSAGE(recon_pub->ToPrivateString(prov, exp_recon_pub_privs), "Failed reconstructed to private string: " + exp_recon_pub_str);
+    BOOST_CHECK_MESSAGE(EqualDescriptor(prv, recon_pub_privs), "Expected: " + prv + " got: " + exp_recon_pub_privs);
+
+}
+
+void CheckFailedMultipathReconstruction(const std::vector<std::string>& strs)
+{
+    std::vector<std::unique_ptr<Descriptor>> descs;
+    for (const auto& s : strs) {
+        FlatSigningProvider prov;
+        std::string error;
+        auto d =Parse(s, prov, error);
+        BOOST_CHECK_MESSAGE(d, "Failed to parse " + s + ", error: " + error);
+        descs.emplace_back(std::move(d));
+    }
+    std::vector<const Descriptor*> rels;
+    for (size_t i = 1; i < descs.size(); ++i) {
+        rels.push_back(descs.at(i).get());
+    }
+    std::unique_ptr<Descriptor> recon = descs.at(0)->ReconstructMultipath(rels);
+    BOOST_CHECK_MESSAGE(!recon, "Unexpected multipath reconstruction for: " + util::Join(strs, ", "));
 }
 
 void CheckInferDescriptor(const std::string& script_hex, const std::string& expected_desc, const std::vector<std::string>& hex_scripts, const std::vector<std::pair<std::string, std::string>>& origin_pubkeys)
@@ -1006,6 +1078,83 @@ BOOST_AUTO_TEST_CASE(descriptor_test)
     CheckUnparsable("wpkh(xprv9s21ZrQH143K31xYSDQpPDxsXRTUcvj2iNHm5NUtrGiGG5e2DtALGdso3pGz6ssrdK4PFmM8NSpSBHNqPqm55Qn3LqFtT2emdEXVYsCzC2U/<;1>/*)", "wpkh(xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB/<;1>/*)", "wpkh(): Key path value '' is not valid");
     CheckUnparsable("wpkh(xprv9s21ZrQH143K31xYSDQpPDxsXRTUcvj2iNHm5NUtrGiGG5e2DtALGdso3pGz6ssrdK4PFmM8NSpSBHNqPqm55Qn3LqFtT2emdEXVYsCzC2U/<0;1;>/*)", "wpkh(xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB/<0;1;>/*)", "wpkh(): Key path value '' is not valid");
     CheckUnparsable("wpkh(xprv9s21ZrQH143K31xYSDQpPDxsXRTUcvj2iNHm5NUtrGiGG5e2DtALGdso3pGz6ssrdK4PFmM8NSpSBHNqPqm55Qn3LqFtT2emdEXVYsCzC2U/<1;1>/*)", "wpkh(xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB/<1;1>/*)", "wpkh(): Duplicated key path value 1 in multipath specifier");
+    // Invalid multipath reconstruction
+    CheckFailedMultipathReconstruction({
+        "pk(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0)",
+        "wpkh(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/1)",
+    });
+    CheckFailedMultipathReconstruction({
+        "pkh(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0)",
+        "wpkh(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/1)",
+    });
+    CheckFailedMultipathReconstruction({
+        "tr(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0)",
+        "wpkh(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/1)",
+    });
+    CheckFailedMultipathReconstruction({
+        "sh(pk(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0))",
+        "wpkh(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/1)",
+    });
+    CheckFailedMultipathReconstruction({
+        "wsh(pk(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0))",
+        "sh(pk(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/1))",
+    });
+    CheckFailedMultipathReconstruction({
+        "sh(wpkh(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0))",
+        "wpkh(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/1)",
+    });
+    CheckFailedMultipathReconstruction({
+        "wsh(multi(1,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0))",
+        "wpkh(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/1)",
+    });
+    CheckFailedMultipathReconstruction({
+        "wsh(multi(1,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0))",
+        "wsh(sortedmulti(1,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/1))",
+    });
+    CheckFailedMultipathReconstruction({
+        "wsh(multi(1,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0))",
+        "tr(03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd,multi_a(1,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/1))",
+    });
+    CheckFailedMultipathReconstruction({
+        "wsh(multi(1,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0,03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd))",
+        "wsh(multi(2,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/1,03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd))",
+    });
+    CheckFailedMultipathReconstruction({
+        "tr(03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd,multi_a(1,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0,03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd))",
+        "tr(03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd,multi_a(2,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/1,03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd))",
+    });
+    CheckFailedMultipathReconstruction({
+        "tr(03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd,pk(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0))",
+        "tr(a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd,pk(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/2))",
+    });
+    CheckFailedMultipathReconstruction({
+        "rawtr(musig(xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y)/1)",
+        "rawtr(musig(xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/1,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y)/2)",
+    });
+    CheckFailedMultipathReconstruction({
+        "tr(musig(xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y)/1)",
+        "tr(musig(xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/1,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y)/2)",
+    });
+    CheckFailedMultipathReconstruction({
+        "tr(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0/1/2)",
+        "tr(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0/2/3)",
+    });
+    CheckFailedMultipathReconstruction({
+        "tr([ffffffff/1]xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0/1/2)",
+        "tr([ffffffff/2]xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0/1/2)",
+    });
+    CheckFailedMultipathReconstruction({
+        "tr(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0/1/*)",
+        "tr(xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/0/2/*h)",
+    });
+    CheckFailedMultipathReconstruction({
+        "tr(musig(xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y)/1/*)",
+        "tr(musig(xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/1,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y)/1)",
+    });
+    CheckFailedMultipathReconstruction({
+        "tr(musig(xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0/*,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/1))",
+        "tr(musig(xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/9/*h,xpub68NZiKmJWnxxS6aaHmn81bvJeTESw724CRDs6HbuccFQN9Ku14VQrADWgqbhhTHBaohPX4CjNLf9fq9MYo6oDaPPLPxSb7gwQN3ih19Zm4Y/1))",
+    });
 
     // Multisig constructions
     Check("multi(1,L4rK1yDtCWekvXuE6oXD9jCYfFNV2cWRpVuPLBcCU2z8TrisoyY1,5KYZdUEo39z3FPrtuX2QbbwGnNP5zTd7yyr2SC1j299sBCnWjss)", "multi(1,03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd,04a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd5b8dec5235a0fa8722476c7709c02559e3aa73aa03918ba2d492eea75abea235)", "multi(1,03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd,04a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd5b8dec5235a0fa8722476c7709c02559e3aa73aa03918ba2d492eea75abea235)", SIGNABLE, {{"512103a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd4104a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd5b8dec5235a0fa8722476c7709c02559e3aa73aa03918ba2d492eea75abea23552ae"}}, std::nullopt, /*op_compat_desc_hash=*/uint256{"b147e25eb4a9d3da4e86ed8e970d817563ae2cb9c71a756b11cfdeb4dc11b70c"});
