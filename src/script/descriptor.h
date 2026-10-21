@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -20,6 +21,7 @@
 #include <unordered_map>
 #include <vector>
 
+struct CExtKey;
 class CScript;
 class SigningProvider;
 struct FlatSigningProvider;
@@ -204,11 +206,22 @@ struct Descriptor {
     /** Semantic/safety warnings (includes subdescriptors). */
     virtual std::vector<std::string> Warnings() const = 0;
 
+    /** Get the multipath descriptor expansion for this descriptor */
+    virtual std::vector<std::unique_ptr<Descriptor>> GetMultipathExpansion() const = 0;
+
+    /** Given the additional multipath expansion descriptors, reconstruct a multipath descriptor */
+    virtual std::unique_ptr<Descriptor> ReconstructMultipath(const std::vector<const Descriptor*>& relatives) const = 0;
+
+    virtual bool IsMultipath() const = 0;
+
     /** Get the maximum key expression index. Used only for tests */
     virtual uint32_t GetMaxKeyExpr() const = 0;
 
     /** Get the number of key expressions in this descriptor. Used only for tests */
     virtual size_t GetKeyCount() const = 0;
+
+    /** Substitute all pubkeys with their corresponding private keys provided by the caller */
+    virtual void SubstituteMasterExtPubs(std::map<CExtPubKey, CExtKey> xprvs) = 0;
 };
 
 /** Validate the numeric bounds of a descriptor key-expression range
@@ -226,7 +239,7 @@ util::Expected<void, std::string> CheckDescriptorRangeBounds(int64_t low, int64_
  * If a parse error occurs, or the checksum is missing/invalid, or anything
  * else is wrong, an empty vector is returned.
  */
-std::vector<std::unique_ptr<Descriptor>> Parse(std::string_view descriptor, FlatSigningProvider& out, std::string& error, bool require_checksum = false);
+std::unique_ptr<Descriptor> Parse(std::string_view descriptor, FlatSigningProvider& out, std::string& error, bool require_checksum = false);
 
 /** Get the checksum for a `descriptor`.
  *

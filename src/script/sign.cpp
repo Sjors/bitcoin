@@ -23,6 +23,7 @@
 #include <script/verify_flags.h>
 #include <serialize.h>
 #include <uint256.h>
+#include <util/bip32.h>
 #include <util/check.h>
 #include <util/translation.h>
 #include <util/vector.h>
@@ -323,11 +324,11 @@ static bool SignMuSig2(const BaseSignatureCreator& creator, SignatureData& sigda
             }
             // Get the BIP32 derivation tweaks
             CExtPubKey extpub = CreateMuSig2SyntheticXpub(agg_pub);
-            for (const uint32_t i : agg_info.path) {
-                if (i >> 31) return false; // Hardened derivation is not possible from a public key
+            for (const auto& i : agg_info.path) {
+                if (i.IsHardened()) return false; // Hardened derivation is not possible from a public key
                 auto& [t, xonly] = tweaks.emplace_back();
                 xonly = false;
-                if (!extpub.Derive(extpub, i, &t)) {
+                if (!extpub.Derive(extpub, i.ChildNumber(), &t)) {
                     return false;
                 }
             }
@@ -564,9 +565,13 @@ static bool SignTaproot(const SigningProvider& provider, const BaseSignatureCrea
 {
     TaprootSpendData spenddata;
     TaprootBuilder builder;
+    const bool taproot_keypath_only{creator.Options().taproot_keypath_only};
 
     // Gather information about this output.
     if (provider.GetTaprootSpendData(output, spenddata)) {
+        // Avoid merging newly provided script path data. Existing taproot
+        // script path fields in sigdata (e.g. from a PSBT) are left intact.
+        if (taproot_keypath_only) spenddata.scripts.clear();
         sigdata.tr_spenddata.Merge(spenddata);
     }
     if (provider.GetTaprootBuilder(output, builder)) {
@@ -617,6 +622,10 @@ static bool SignTaproot(const SigningProvider& provider, const BaseSignatureCrea
             return true;
         }
     }
+
+    // Key path signing failed. In keypath-only mode, stop here instead of
+    // attempting a script path signature.
+    if (taproot_keypath_only) return false;
 
     // Try script path spending.
     std::vector<std::vector<unsigned char>> smallest_result_stack;
