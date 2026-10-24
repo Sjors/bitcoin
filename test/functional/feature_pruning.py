@@ -128,6 +128,10 @@ class PruneTest(BitcoinTestFramework):
             extra_args=['-prune=550', '-txindex'],
         )
         self.nodes[0].assert_start_raises_init_error(
+            expected_msg='Error: Prune mode is incompatible with -wtxindex.',
+            extra_args=['-prune=550', '-wtxindex'],
+        )
+        self.nodes[0].assert_start_raises_init_error(
             expected_msg='Error: Prune mode is incompatible with -reindex-chainstate. Use full -reindex instead.',
             extra_args=['-prune=550', '-reindex-chainstate'],
         )
