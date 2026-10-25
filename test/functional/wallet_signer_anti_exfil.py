@@ -5,7 +5,7 @@
 """Exercise Core-managed interactive Taproot anti-exfil signing and failures."""
 
 from wallet_signer import WalletSignerTest
-from test_framework.psbt import PSBT, PSBT_IN_SIGHASH_TYPE
+from test_framework.psbt import PSBT, PSBT_IN_SIGHASH_TYPE, PSBT_IN_TAP_KEY_SIG
 from test_framework.script import SIGHASH_ALL
 from test_framework.util import assert_equal, assert_raises_rpc_error
 
@@ -45,6 +45,20 @@ class WalletSignerAntiExfilTest(WalletSignerTest):
                     psbt_in.map[PSBT_IN_SIGHASH_TYPE] = SIGHASH_ALL.to_bytes(4, "little")
                 funded["psbt"] = explicit_all.to_base64()
             kwargs = {} if hash_type is None else {"sighashtype": hash_type}
+            # Signing without finalization leaves key signatures for later
+            # ScriptPubKeyMans and repeated walletprocesspsbt calls to retain.
+            partial = hww.walletprocesspsbt(funded["psbt"], finalize=False, **kwargs)
+            assert not partial["complete"]
+            for psbt_in in PSBT.from_base64(partial["psbt"]).i:
+                assert_equal(len(psbt_in.map[PSBT_IN_TAP_KEY_SIG]), signature_length)
+            self.set_mock_sign_mode(self.nodes[1], "ae_unsupported")
+            unchanged = hww.walletprocesspsbt(partial["psbt"], finalize=False, **kwargs)
+            assert_equal(unchanged["psbt"], partial["psbt"])
+            self.clear_mock_sign_mode(self.nodes[1])
+            finalized = hww.finalizepsbt(partial["psbt"])
+            assert finalized["complete"]
+            assert hww.testmempoolaccept([finalized["hex"]])[0]["allowed"]
+
             result = hww.walletprocesspsbt(funded["psbt"], **kwargs)
             assert result["complete"]
             assert hww.testmempoolaccept([result["hex"]])[0]["allowed"]

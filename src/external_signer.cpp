@@ -373,10 +373,10 @@ bool ExternalSigner::SignTransactionAntiExfil(PartiallySignedTransaction& psbtx,
         if (!input.sequence) input.sequence = tx->vin[i].nSequence;
         targets.push_back(std::move(target));
     }
-    if (targets.empty()) {
-        error = "Anti-exfil found no unsigned Taproot inputs for this signer";
-        return false;
-    }
+    // Another ScriptPubKeyMan, or an earlier unfinalized signing call, may
+    // already have supplied every key signature. Do not start a new session
+    // or fail simply because there is nothing left for this signer to do.
+    if (targets.empty()) return true;
 
     PartiallySignedTransaction round_one{request};
     if (!SignTransactionRound(round_one, error, /*check_anti_exfil=*/true)) return false;
