@@ -16,6 +16,9 @@
 #include <util/strencodings.h>
 
 #include <algorithm>
+#include <array>
+#include <optional>
+#include <span>
 #include <cassert>
 
 using namespace util::hex_literals;
@@ -231,6 +234,30 @@ bool XOnlyPubKey::IsFullyValid() const
 {
     secp256k1_xonly_pubkey pubkey;
     return secp256k1_xonly_pubkey_parse(secp256k1_context_static, &pubkey, m_keydata.data());
+}
+
+std::optional<std::array<unsigned char, 32>> CreateAntiExfilCommitment(std::span<const unsigned char> entropy)
+{
+    if (entropy.size() != 32 || !secp256k1_ec_seckey_verify(secp256k1_context_static, entropy.data())) return std::nullopt;
+    HashWriter hasher{TaggedHash("BIP-EXFIL/host")};
+    hasher.write(std::as_bytes(entropy));
+    const uint256 hash = hasher.GetSHA256();
+    std::array<unsigned char, 32> commitment;
+    std::copy(hash.begin(), hash.end(), commitment.begin());
+    return commitment;
+}
+
+bool XOnlyPubKey::VerifySchnorrAntiExfil(const uint256& msg, std::span<const unsigned char> sigbytes, std::span<const unsigned char> entropy, std::span<const unsigned char> signer_nonce) const
+{
+    if (sigbytes.size() != 64 || entropy.size() != 32 || signer_nonce.size() != 33) return false;
+    if (!secp256k1_ec_seckey_verify(secp256k1_context_static, entropy.data())) return false;
+    secp256k1_pubkey nonce;
+    if (!secp256k1_ec_pubkey_parse(secp256k1_context_static, &nonce, signer_nonce.data(), signer_nonce.size())) return false;
+    if (!secp256k1_ec_pubkey_tweak_add(secp256k1_context_static, &nonce, entropy.data())) return false;
+    std::array<unsigned char, 33> combined;
+    size_t size = combined.size();
+    if (!secp256k1_ec_pubkey_serialize(secp256k1_context_static, combined.data(), &size, &nonce, SECP256K1_EC_COMPRESSED)) return false;
+    return std::equal(combined.begin() + 1, combined.end(), sigbytes.begin()) && VerifySchnorr(msg, sigbytes);
 }
 
 bool XOnlyPubKey::VerifySchnorr(const uint256& msg, std::span<const unsigned char> sigbytes) const

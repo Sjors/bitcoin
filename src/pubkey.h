@@ -232,6 +232,9 @@ public:
     [[nodiscard]] bool Derive(CPubKey& pubkeyChild, ChainCode &ccChild, unsigned int nChild, const ChainCode& cc, uint256* bip32_tweak_out = nullptr) const;
 };
 
+/** Commit to a valid 32-byte host scalar for the interactive anti-exfil protocol. */
+std::optional<std::array<unsigned char, 32>> CreateAntiExfilCommitment(std::span<const unsigned char> entropy);
+
 class XOnlyPubKey
 {
 private:
@@ -269,6 +272,9 @@ public:
      * sigbytes must be exactly 64 bytes.
      */
     bool VerifySchnorr(const uint256& msg, std::span<const unsigned char> sigbytes) const;
+
+    /** Verify a BIP340 signature and its interactive anti-exfil nonce proof. */
+    bool VerifySchnorrAntiExfil(const uint256& msg, std::span<const unsigned char> sigbytes, std::span<const unsigned char> entropy, std::span<const unsigned char> signer_nonce) const;
 
     /** Compute the Taproot tweak as specified in BIP341, with *this as internal
      * key:

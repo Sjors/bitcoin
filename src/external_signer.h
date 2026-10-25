@@ -5,7 +5,6 @@
 #ifndef BITCOIN_EXTERNAL_SIGNER_H
 #define BITCOIN_EXTERNAL_SIGNER_H
 
-#include <common/system.h>
 #include <univalue.h>
 
 #include <string>
@@ -25,6 +24,8 @@ private:
     std::string m_chain;
 
     std::vector<std::string> NetworkArg() const;
+    bool SignTransactionRound(PartiallySignedTransaction& psbtx, std::string& error, bool check_anti_exfil = false);
+    bool SignTransactionAntiExfil(PartiallySignedTransaction& psbtx, std::string& error);
 
 public:
     //! @param[in] command      the command which handles interaction with the external signer
@@ -63,7 +64,7 @@ public:
     //! Calls `<command> --stdin --fingerprint <fingerprint> --chain <chain>` and passes the
     //! `signtx` command and PSBT via stdin.
     //! @param[in,out] psbt  PartiallySignedTransaction to be signed
-    bool SignTransaction(PartiallySignedTransaction& psbt, std::string& error);
+    bool SignTransaction(PartiallySignedTransaction& psbt, std::string& error, bool require_anti_exfil = false);
 };
 
 #endif // BITCOIN_EXTERNAL_SIGNER_H
