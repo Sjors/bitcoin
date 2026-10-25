@@ -125,11 +125,25 @@ static std::optional<int32_t> FindUnsafeSighashType(const PartiallySignedTransac
 }
 
 namespace {
+bool HasAntiExfilFields(const auto& fields)
+{
+    return std::ranges::any_of(fields, [](const auto& field) { return field.identifier == std::vector<unsigned char>{'a', 'e'}; });
+}
+
 bool CheckAntiExfilResponse(const PartiallySignedTransaction& request, const PartiallySignedTransaction& response, std::string& error);
 } // namespace
 
 bool ExternalSigner::SignTransaction(PartiallySignedTransaction& psbtx, std::string& error, bool require_anti_exfil)
 {
+    // Only the coordinator may create a transcript. Forwarding caller-provided
+    // fields through ordinary signing could silently downgrade an explicit
+    // anti-exfil request if the signer ignores the proprietary fields.
+    if (HasAntiExfilFields(psbtx.m_proprietary) ||
+        std::ranges::any_of(psbtx.inputs, [](const auto& input) { return HasAntiExfilFields(input.m_proprietary); }) ||
+        std::ranges::any_of(psbtx.outputs, [](const auto& output) { return HasAntiExfilFields(output.m_proprietary); })) {
+        error = "Caller-supplied anti-exfil fields are not supported";
+        return false;
+    }
     return require_anti_exfil ? SignTransactionAntiExfil(psbtx, error) : SignTransactionRound(psbtx, error);
 }
 
@@ -246,10 +260,7 @@ bool CheckAntiExfilResponse(const PartiallySignedTransaction& request, const Par
         error = "Anti-exfil signer changed the unsigned transaction";
         return false;
     }
-    const auto has_ae = [](const auto& fields) {
-        return std::ranges::any_of(fields, [](const auto& field) { return field.identifier == std::vector<unsigned char>{'a', 'e'}; });
-    };
-    if (has_ae(response.m_proprietary) || std::ranges::any_of(response.outputs, [&](const auto& output) { return has_ae(output.m_proprietary); })) {
+    if (HasAntiExfilFields(response.m_proprietary) || std::ranges::any_of(response.outputs, [](const auto& output) { return HasAntiExfilFields(output.m_proprietary); })) {
         error = "Anti-exfil fields are only permitted in input maps";
         return false;
     }
@@ -344,12 +355,6 @@ bool ExternalSigner::SignTransactionAntiExfil(PartiallySignedTransaction& psbtx,
     std::vector<AntiExfilRequest> targets;
     for (size_t i = 0; i < request.inputs.size(); ++i) {
         auto& input = request.inputs[i];
-        for (const auto& field : input.m_proprietary) {
-            if (field.identifier == std::vector<unsigned char>{'a', 'e'}) {
-                error = "Anti-exfil request already contains a transcript";
-                return false;
-            }
-        }
         const bool ours = std::ranges::any_of(input.m_tap_bip32_paths, [&](const auto& entry) {
             return std::ranges::equal(fingerprint, entry.second.second.fingerprint);
         });

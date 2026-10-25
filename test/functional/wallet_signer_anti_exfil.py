@@ -9,6 +9,7 @@ from pathlib import Path
 
 from wallet_signer import WalletSignerTest
 from test_framework.authproxy import JSONRPCException
+from test_framework.crypto import anti_exfil as ae
 from test_framework.psbt import PSBT, PSBT_IN_SIGHASH_TYPE, PSBT_IN_TAP_KEY_SIG
 from test_framework.script import SIGHASH_ALL
 from test_framework.util import assert_equal, assert_raises_rpc_error
@@ -24,7 +25,7 @@ class WalletSignerAntiExfilTest(WalletSignerTest):
         self.restart_node(1, [
             f"-signer={self.mock_signer_path()}",
             "-keypool=10",
-            "-signerantiexfil",
+            "-signerantiexfil=0",
         ])
         self.connect_nodes(0, 1)
         self.nodes[1].loadwallet("hww")
@@ -34,6 +35,30 @@ class WalletSignerAntiExfilTest(WalletSignerTest):
         ])
         self.generate(self.nodes[0], 1, sync_fun=self.sync_except_mock)
         dest = self.nodes[0].getnewaddress()
+
+        self.log.info("Reject caller-provided anti-exfil fields with managed signing disabled or enabled")
+        script = bytes.fromhex(self.nodes[0].gettxout(inputs[0]["txid"], inputs[0]["vout"])["scriptPubKey"]["hex"])
+        assert_equal(script[:2], b"\x51\x20")
+        field = b"\xfc\x02ae\x00" + script[2:]
+        commitment = ae.host_commit((5).to_bytes(32, "big"))
+        for require_anti_exfil in (False, True):
+            if require_anti_exfil:
+                self.restart_node(1, [f"-signer={self.mock_signer_path()}", "-keypool=10", "-signerantiexfil"])
+                self.connect_nodes(0, 1)
+                self.nodes[1].loadwallet("hww")
+                hww = self.nodes[1].get_wallet_rpc("hww")
+            self.set_mock_sign_mode(self.nodes[1], "ae_early_signature")
+            try:
+                for version in (0, 2):
+                    caller = hww.walletcreatefundedpsbt(inputs[:1], [{dest: 0.5}], options={"add_inputs": False}, psbt_version=version)["psbt"]
+                    for location in ("global", "input", "output"):
+                        request = PSBT.from_base64(caller)
+                        section = {"global": request.g, "input": request.i[0], "output": request.o[0]}[location]
+                        section.map[field] = commitment
+                        with self.nodes[1].assert_debug_log(["Caller-supplied anti-exfil fields are not supported"]):
+                            assert_raises_rpc_error(-25, "External signer failed to sign", hww.walletprocesspsbt, request.to_base64())
+            finally:
+                self.clear_mock_sign_mode(self.nodes[1])
 
         self.log.info("Test two-round signing of two inputs with DEFAULT and ALL")
         for psbt_version, hash_type, signature_length in [(0, None, 64), (0, "ALL", 65), (2, None, 64), (2, "ALL", 65)]:
