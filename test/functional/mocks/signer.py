@@ -10,6 +10,8 @@ import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
+from signer_anti_exfil import PREFIX, sign_psbt
+
 from test_framework.authproxy import AuthServiceProxy, JSONRPCException
 from test_framework.psbt import (
     PSBT,
@@ -132,6 +134,9 @@ def signtx(args):
         return sys.stdout.write(json.dumps({"error": "Unexpected fingerprint", "fingerprint": args.fingerprint}))
 
     mode = get_mock_sign_mode()
+    request = PSBT.from_base64(args.psbt)
+    if any(isinstance(key, bytes) and key.startswith(PREFIX) for psbt_in in request.i for key in psbt_in.map):
+        return sys.stdout.write(json.dumps(sign_psbt(args.psbt, mode, tprv)))
     psbt = args.psbt
     if mode in ("change_amount", "change_script", "remove_output", "change_sequence"):
         psbt = tamper(psbt, mode)
