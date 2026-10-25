@@ -152,17 +152,32 @@ bool ExternalSigner::SignTransactionRound(PartiallySignedTransaction& psbtx, std
     };
 
     if (!std::any_of(psbtx.inputs.begin(), psbtx.inputs.end(), matches_signer_fingerprint)) {
-        error = "Signer fingerprint " + m_fingerprint + " does not match any of the inputs:\n" + EncodeBase64(ssTx.str());
+        error = check_anti_exfil ? "Anti-exfil signer fingerprint does not match any input" : "Signer fingerprint " + m_fingerprint + " does not match any of the inputs:\n" + EncodeBase64(ssTx.str());
         return false;
     }
 
     const std::vector<std::string> command = Cat(m_command, Cat({"--stdin", "--fingerprint", m_fingerprint}, NetworkArg()));
     const std::string stdinStr = "signtx " + EncodeBase64(ssTx.str());
 
-    const UniValue signer_result = RunCommandParseJSON(command, stdinStr);
+    UniValue signer_result;
+    try {
+        signer_result = RunCommandParseJSON(command, stdinStr);
+    } catch (const std::exception&) {
+        if (!check_anti_exfil) throw;
+        // Process errors include untrusted stdout/stderr, which may contain
+        // nonce transcripts. Do not copy them into RPC errors or debug logs.
+        error = "Anti-exfil signer process failed or returned invalid JSON";
+        return false;
+    }
 
     if (signer_result.find_value("error").isStr()) {
-        error = signer_result.find_value("error").get_str();
+        if (check_anti_exfil) {
+            // Preserve HWI's unavailable-action category without its free-form text.
+            const auto& code = signer_result.find_value("code");
+            error = code.isNum() && code.getValStr() == "-9" ? "Signer does not support anti-exfil signing" : "Anti-exfil signer reported an error";
+        } else {
+            error = signer_result.find_value("error").get_str();
+        }
         return false;
     }
 
@@ -173,12 +188,12 @@ bool ExternalSigner::SignTransactionRound(PartiallySignedTransaction& psbtx, std
 
     util::Result<PartiallySignedTransaction> signer_psbtx = DecodeBase64PSBT(signer_result.find_value("psbt").get_str());
     if (!signer_psbtx) {
-        error = strprintf("TX decode failed %s", util::ErrorString(signer_psbtx).original);
+        error = check_anti_exfil ? "Anti-exfil signer returned an invalid PSBT" : strprintf("TX decode failed %s", util::ErrorString(signer_psbtx).original);
         return false;
     }
 
     if (signer_psbtx->GetVersion() != psbtx.GetVersion()) {
-        error = strprintf("Signer returned PSBT version %u, expected %u", signer_psbtx->GetVersion(), psbtx.GetVersion());
+        error = check_anti_exfil ? "Anti-exfil signer returned an unexpected PSBT version" : strprintf("Signer returned PSBT version %u, expected %u", signer_psbtx->GetVersion(), psbtx.GetVersion());
         return false;
     }
 
@@ -405,10 +420,10 @@ bool ExternalSigner::SignTransactionAntiExfil(PartiallySignedTransaction& psbtx,
             error = "Anti-exfil interrupted after nonce commitment; do not repeatedly retry with fresh randomness: " + error;
             return false;
         }
-    } catch (const std::exception& exception) {
-        // Process failures and malformed JSON also occur after the signer has
-        // learned the opening. Preserve the selective-abort warning for them.
-        error = "Anti-exfil interrupted after nonce commitment; do not repeatedly retry with fresh randomness: " + std::string{exception.what()};
+    } catch (const std::exception&) {
+        // Keep the selective-abort warning without exposing untrusted error
+        // text, which may contain the nonce transcript.
+        error = "Anti-exfil interrupted after nonce commitment; signer processing failed; do not repeatedly retry with fresh randomness";
         return false;
     }
     // Only copy verified signatures back. Do not persist host entropy or any

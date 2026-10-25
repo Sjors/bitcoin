@@ -4,7 +4,11 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Exercise Core-managed interactive Taproot anti-exfil signing and failures."""
 
+import json
+from pathlib import Path
+
 from wallet_signer import WalletSignerTest
+from test_framework.authproxy import JSONRPCException
 from test_framework.psbt import PSBT, PSBT_IN_SIGHASH_TYPE, PSBT_IN_TAP_KEY_SIG
 from test_framework.script import SIGHASH_ALL
 from test_framework.util import assert_equal, assert_raises_rpc_error
@@ -112,6 +116,30 @@ class WalletSignerAntiExfilTest(WalletSignerTest):
                     hww.walletprocesspsbt,
                     funded["psbt"],
                 )
+        self.clear_mock_sign_mode(self.nodes[1])
+
+        self.log.info("Do not expose signer nonce transcripts through RPC errors or debug logs")
+        for phase in ("round1", "round2"):
+            for channel in ("stdout", "stderr", "error", "psbt"):
+                self.set_mock_sign_mode(self.nodes[1], f"ae_log_{phase}_{channel}")
+                log_start = self.nodes[1].debug_log_size(encoding="utf-8")
+                try:
+                    hww.walletprocesspsbt(funded["psbt"])
+                except JSONRPCException as error:
+                    assert_equal(error.error["code"], -25)
+                    rpc_error = error.error["message"]
+                else:
+                    raise AssertionError("Signer transcript failure was accepted")
+                transcript = json.loads((Path(self.nodes[1].cwd) / "mock_anti_exfil_transcript").read_text(encoding="utf8"))
+                with self.nodes[1].debug_log_path.open(encoding="utf8") as log:
+                    log.seek(log_start)
+                    new_log = log.read()
+                for value in transcript.values():
+                    if value is not None:
+                        assert value not in rpc_error
+                        assert value not in new_log
+                if phase == "round2":
+                    assert "interrupted after nonce commitment" in new_log
         self.clear_mock_sign_mode(self.nodes[1])
 
         self.log.info("Broadcast and confirm after returning to an honest signer")

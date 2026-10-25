@@ -3,8 +3,12 @@
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 """Test-only interactive signer using independent reference arithmetic."""
 
+import base64
 import hashlib
 import hmac
+import json
+from pathlib import Path
+import sys
 from io import BytesIO
 
 from test_framework.address import base58_to_byte
@@ -102,7 +106,7 @@ def unsigned_transaction(psbt):
 def sign_psbt(encoded, mode, tprv):
     psbt = PSBT.from_base64(encoded)
     if mode == "ae_unsupported":
-        return {"error": "Device does not support anti-exfil"}
+        return {"error": "Device does not support anti-exfil", "code": -9}
     tx = unsigned_transaction(psbt)
     utxos = []
     for index, psbt_input in enumerate(psbt.i):
@@ -124,6 +128,29 @@ def sign_psbt(encoded, mode, tprv):
             assert ae.b32(ae.normalized_key(secret)[1][0]) == public_key
             nonce = ae.signer_commit(secret, message, commitment)
             entropy = psbt_input.map.get(PREFIX + b"\x02" + public_key)
+            phase = "round1" if entropy is None else "round2"
+            if mode in (f"ae_log_{phase}_stdout", f"ae_log_{phase}_stderr", f"ae_log_{phase}_error", f"ae_log_{phase}_psbt"):
+                transcript = {
+                    "marker": "ANTI_EXFIL_TRANSCRIPT_MUST_STAY_PRIVATE",
+                    "nonce": nonce.hex(),
+                    "entropy": entropy.hex() if entropy is not None else None,
+                }
+                payload = json.dumps(transcript)
+                Path("mock_anti_exfil_transcript").write_text(payload, encoding="utf8")
+                if mode.endswith("_stdout"):
+                    sys.stdout.write("invalid-json:" + payload)
+                    raise SystemExit(0)
+                if mode.endswith("_stderr"):
+                    sys.stderr.write(payload)
+                    raise SystemExit(2)
+                if mode.endswith("_psbt"):
+                    # A duplicate unknown key makes the parser's diagnostic
+                    # include attacker-controlled key bytes on ordinary paths.
+                    key = b"\x80" + nonce + (entropy or b"")
+                    field = bytes([len(key)]) + key + b"\x01\x00"
+                    malformed = b"psbt\xff" + field + field + b"\x00"
+                    return {"psbt": base64.b64encode(malformed).decode("ascii")}
+                return {"error": payload}
             if entropy is None:
                 if mode != "ae_missing_nonce":
                     psbt_input.map[PREFIX + b"\x01" + public_key] = nonce
