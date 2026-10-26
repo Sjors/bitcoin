@@ -64,6 +64,7 @@ Subdirectory       | File(s)               | Description
 `chainstate/`      | LevelDB database      | Blockchain state (a compact representation of all currently unspent transaction outputs (UTXOs) and metadata about the transactions they are from)
 `fees/`            | `block_policy_estimates.dat` and `mempool_policy_estimator.dat`    | Stores block policy and mempool policy estimator data
 `indexes/txindex/` | LevelDB database      | Transaction index; *optional*, used if `-txindex=1`
+`indexes/wtxindex/` | LevelDB database     | Witness transaction index; *optional*, used if `-wtxindex=1`
 `indexes/txospenderindex/` | LevelDB database      | Transaction spender index; *optional*, used if `-txospenderindex=1`
 `indexes/blockfilter/basic/db/` | LevelDB database      | Blockfilter index LevelDB database for the basic filtertype; *optional*, used if `-blockfilterindex=basic`
 `indexes/blockfilter/basic/`    | `fltrNNNNN.dat`<sup>[\[2\]](#note2)</sup> | Blockfilter index filters for the basic filtertype; *optional*, used if `-blockfilterindex=basic`
