@@ -15,6 +15,7 @@
 #include <primitives/transaction_identifier.h>
 #include <serialize.h>
 #include <support/allocators/pool.h>
+#include <sync.h>
 #include <uint256.h>
 #include <util/check.h>
 #include <util/log.h>
@@ -23,6 +24,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <future>
@@ -431,6 +433,51 @@ public:
     size_t EstimateSize() const override { return base->EstimateSize(); }
 };
 
+/** Bounded, thread-safe cache of read-only coin observations.
+ *
+ * Misses use PeekCoin(), leaving the underlying cache unchanged. GetCoin()
+ * retains observations when space permits; PeekCoin() never adds entries.
+ * Simulated spends and created outputs belong in a separate CCoinsViewCache.
+ * The caller must keep the base view stable during reads, and call Reset()
+ * before reusing observations after a change to the represented chainstate.
+ */
+class CoinsViewPrefetch final : public CCoinsViewBacked
+{
+    using Map = std::unordered_map<COutPoint, std::optional<Coin>, SaltedCoinsCacheHasher>;
+    mutable Mutex m_mutex;
+    mutable Map m_coins GUARDED_BY(m_mutex);
+    mutable size_t m_memory_usage GUARDED_BY(m_mutex){0};
+    const size_t m_max_memory;
+    const size_t m_max_entries;
+
+    template <typename T>
+    bool Remember(const COutPoint& outpoint, T&& coin) const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
+    {
+        LOCK(m_mutex);
+        if (m_coins.contains(outpoint)) return true;
+        const size_t usage{memusage::MallocUsage(sizeof(memusage::unordered_node<Map::value_type>)) +
+                           (coin ? coin->DynamicMemoryUsage() : 0)};
+        if (m_coins.size() == m_max_entries || usage > m_max_memory - m_memory_usage) return false;
+        m_coins.emplace(outpoint, std::forward<T>(coin));
+        m_memory_usage += usage;
+        return true;
+    }
+
+public:
+    CoinsViewPrefetch(CCoinsView* base_view, size_t max_memory, size_t max_entries);
+    std::optional<Coin> GetCoin(const COutPoint& outpoint) const override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    std::optional<Coin> PeekCoin(const COutPoint& outpoint) const override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    bool HaveCoin(const COutPoint& outpoint) const override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex) { return GetCoin(outpoint).has_value(); }
+    /** Retain a non-caching base lookup, returning false when the budget is full. */
+    bool PrefetchCoin(const COutPoint& outpoint) const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    /** Discard observations and replace the base. No reads may be in flight. */
+    void Reset(CCoinsView& new_base) EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    size_t GetCacheSize() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    size_t DynamicMemoryUsage() const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    void BatchWrite(CoinsViewCacheCursor&, const uint256&) override { NONFATAL_UNREACHABLE(); }
+    void SetBackend(CCoinsView&) = delete;
+};
+
 
 /** CCoinsView that adds a memory cache for transactions to another CCoinsView */
 class CCoinsViewCache : public CCoinsViewBacked
@@ -759,6 +806,8 @@ public:
         : CCoinsViewCache{in_base, deterministic}, m_thread_pool{std::move(thread_pool)}
     {
     }
+
+    const util::NotNullSharedPtr<ThreadPool>& GetThreadPool() const noexcept { return m_thread_pool; }
 
     ~CoinsViewOverlay() noexcept override { StopFetching(); }
 

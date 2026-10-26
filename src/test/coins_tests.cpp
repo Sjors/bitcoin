@@ -18,12 +18,15 @@
 #include <util/check.h>
 #include <util/strencodings.h>
 
+#include <boost/test/unit_test.hpp>
+
+#include <algorithm>
+#include <atomic>
 #include <map>
 #include <string>
+#include <thread>
 #include <variant>
 #include <vector>
-
-#include <boost/test/unit_test.hpp>
 
 using namespace util::hex_literals;
 
@@ -283,6 +286,99 @@ BOOST_FIXTURE_TEST_CASE(coins_cache_base_simulation_test, CacheTest)
 {
     CCoinsViewTest base{m_rng};
     SimulationTest(&base, false);
+}
+
+BOOST_AUTO_TEST_CASE(prefetch_view_retains_reads_and_isolates_writes)
+{
+    CCoinsViewTest root{m_rng};
+    const COutPoint outpoint{Txid::FromUint256(m_rng.rand256()), 0};
+    const COutPoint missing{Txid::FromUint256(m_rng.rand256()), 0};
+    const Coin coin{CTxOut{1, CScript{} << OP_TRUE}, 1, false};
+    {
+        CCoinsViewCache writer{&root};
+        writer.SetBestBlock(uint256::ONE);
+        writer.AddCoin(outpoint, Coin{coin}, false);
+        writer.Flush();
+    }
+    CCoinsViewCache main_cache{&root};
+    struct CountingView : CCoinsViewBacked {
+        mutable unsigned reads{0};
+        using CCoinsViewBacked::CCoinsViewBacked;
+        std::optional<Coin> PeekCoin(const COutPoint& out) const override
+        {
+            ++reads;
+            return base->PeekCoin(out);
+        }
+    } counted{&main_cache};
+    CoinsViewPrefetch prefetched{&counted, 4 * 1024, 8};
+
+    BOOST_CHECK(prefetched.PeekCoin(outpoint));
+    BOOST_CHECK_EQUAL(prefetched.GetCacheSize(), 0);
+    BOOST_CHECK(prefetched.PrefetchCoin(outpoint));
+    BOOST_CHECK_EQUAL(counted.reads, 2);
+    BOOST_CHECK_EQUAL(*prefetched.GetCoin(outpoint), coin);
+    BOOST_CHECK(!prefetched.GetCoin(missing));
+    BOOST_CHECK(!prefetched.GetCoin(missing));
+    BOOST_CHECK_EQUAL(counted.reads, 3);
+    BOOST_CHECK_EQUAL(main_cache.GetCacheSize(), 0);
+
+    {
+        CCoinsViewCache validation{&prefetched};
+        BOOST_CHECK(validation.SpendCoin(outpoint));
+        validation.AddCoin(missing, Coin{coin}, false);
+        BOOST_CHECK(!validation.HaveCoin(outpoint));
+        BOOST_CHECK(validation.HaveCoin(missing));
+    }
+    BOOST_CHECK_EQUAL(*prefetched.GetCoin(outpoint), coin);
+    BOOST_CHECK(!prefetched.GetCoin(missing));
+    BOOST_CHECK_EQUAL(main_cache.GetCacheSize(), 0);
+    BOOST_CHECK_EQUAL(counted.reads, 3);
+
+    prefetched.Reset(CoinsViewEmpty::Get());
+    BOOST_CHECK_EQUAL(prefetched.GetCacheSize(), 0);
+    BOOST_CHECK(!prefetched.GetCoin(outpoint));
+}
+
+BOOST_AUTO_TEST_CASE(prefetch_view_limits_and_concurrent_reads)
+{
+    CCoinsViewTest root{m_rng};
+    CCoinsViewCache writer{&root};
+    writer.SetBestBlock(uint256::ONE);
+    std::vector<COutPoint> inputs;
+    CScript script;
+    script.resize(10'000);
+    std::fill(script.begin(), script.end(), OP_TRUE);
+    for (unsigned i{0}; i < 64; ++i) {
+        inputs.emplace_back(Txid::FromUint256(m_rng.rand256()), 0);
+        writer.AddCoin(inputs.back(), Coin{CTxOut{1, script}, 1, false}, false);
+    }
+    writer.Flush();
+    CCoinsViewCache main_cache{&root};
+    CoinsViewPrefetch prefetched{&main_cache, 32 * 1024, 64};
+    std::atomic<bool> correct{true};
+    std::vector<std::thread> readers;
+    for (unsigned i{0}; i < 4; ++i) {
+        readers.emplace_back([&] {
+            for (const auto& input : inputs) {
+                const auto coin{prefetched.GetCoin(input)};
+                if (!coin || coin->out.nValue != 1 || coin->out.scriptPubKey != script) correct = false;
+            }
+        });
+    }
+    for (auto& reader : readers)
+        reader.join();
+    BOOST_CHECK(correct);
+    BOOST_CHECK(prefetched.DynamicMemoryUsage() <= 32 * 1024);
+    BOOST_CHECK(prefetched.GetCacheSize() < inputs.size());
+    BOOST_CHECK(prefetched.GetCacheSize() > 0);
+    BOOST_CHECK_EQUAL(main_cache.GetCacheSize(), 0);
+
+    CoinsViewPrefetch two_entries{&main_cache, 32 * 1024, 2};
+    BOOST_CHECK(two_entries.PrefetchCoin(inputs[0]));
+    BOOST_CHECK(two_entries.PrefetchCoin(inputs[1]));
+    BOOST_CHECK(!two_entries.PrefetchCoin(inputs[2]));
+    BOOST_CHECK(two_entries.GetCoin(inputs[2])); // Unretained reads still work.
+    BOOST_CHECK_EQUAL(two_entries.GetCacheSize(), 2);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

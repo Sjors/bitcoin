@@ -4479,7 +4479,8 @@ BlockValidationState TestBlockValidity(
     Chainstate& chainstate,
     const CBlock& block,
     const bool check_pow,
-    const bool check_merkle_root)
+    const bool check_merkle_root,
+    CoinsViewPrefetch* prefetched_coins)
 {
     // Lock must be held throughout this function for two reasons:
     // 1. We don't want the tip to change during several of the validation steps
@@ -4534,7 +4535,9 @@ BlockValidationState TestBlockValidity(
     index_dummy.pprev = tip;
     index_dummy.nHeight = tip->nHeight + 1;
     index_dummy.phashBlock = &block_hash;
-    CCoinsViewCache view_dummy(&chainstate.CoinsTip());
+    // Collection-owned observations are read-only. All simulated spends and
+    // new outputs remain in this validation's temporary cache.
+    CCoinsViewCache view_dummy(prefetched_coins ? prefetched_coins : static_cast<CCoinsView*>(&chainstate.CoinsTip()));
 
     // Set fJustCheck to true in order to update, and not clear, validation caches.
     if(!chainstate.ConnectBlock(block, state, &index_dummy, view_dummy, /*fJustCheck=*/true)) {
