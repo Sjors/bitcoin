@@ -92,6 +92,15 @@ bool CoinsViewPrefetch::PrefetchCoin(const COutPoint& outpoint) const
     return Remember(outpoint, base->PeekCoin(outpoint));
 }
 
+bool CoinsViewPrefetch::GetCoinInCache(const COutPoint& outpoint, std::optional<Coin>& coin) const
+{
+    LOCK(m_mutex);
+    const auto it{m_coins.find(outpoint)};
+    if (it == m_coins.end()) return false;
+    coin = it->second;
+    return true;
+}
+
 void CoinsViewPrefetch::Reset(CCoinsView& new_base)
 {
     LOCK(m_mutex);
@@ -453,8 +462,21 @@ CCoinsViewCache::ResetGuard CoinsViewOverlay::StartFetching(const CBlock& block 
             }
             earlier_txids.emplace(tx->GetHash());
         }
-        // Only submit tasks if we have something to fetch.
-        if (m_inputs.size()) {
+        bool remaining{!m_inputs.empty()};
+        if (m_prefetched_view) {
+            remaining = false;
+            // The vector is complete before setting ready flags: InputToFetch
+            // elements may only move while they are still empty.
+            for (auto& input : m_inputs) {
+                if (m_prefetched_view->GetCoinInCache(input.outpoint, input.coin)) {
+                    Assert(!input.ready.test_and_set(std::memory_order_release));
+                } else {
+                    remaining = true;
+                }
+            }
+        }
+        // Known observations need no worker lookups; only fetch the remainder.
+        if (remaining) {
             std::vector<std::function<void()>> tasks(workers_count, [this] {
                 while (ProcessInput()) {}
             });

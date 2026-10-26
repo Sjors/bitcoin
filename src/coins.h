@@ -467,6 +467,8 @@ public:
     CoinsViewPrefetch(CCoinsView* base_view, size_t max_memory, size_t max_entries);
     std::optional<Coin> GetCoin(const COutPoint& outpoint) const override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
     std::optional<Coin> PeekCoin(const COutPoint& outpoint) const override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
+    /** Copy a retained observation, including absence; false means not retained. */
+    bool GetCoinInCache(const COutPoint& outpoint, std::optional<Coin>& coin) const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
     bool HaveCoin(const COutPoint& outpoint) const override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex) { return GetCoin(outpoint).has_value(); }
     /** Retain a non-caching base lookup, returning false when the budget is full. */
     bool PrefetchCoin(const COutPoint& outpoint) const EXCLUSIVE_LOCKS_REQUIRED(!m_mutex);
@@ -640,8 +642,8 @@ public:
 
 /**
  * CCoinsViewCache subclass that asynchronously fetches most block input prevouts in parallel during ConnectBlock
- * without mutating the base cache. This is achieved by fetching coins from the base view using PeekCoin() instead of
- * GetCoin(), so intermediate CCoinsViewCache layers are not filled.
+ * without filling the regular coins cache. Normally it reads with PeekCoin(), so intermediate CCoinsViewCache
+ * layers are not filled. A collection-owned CoinsViewPrefetch can instead retain reads in its bounded cache.
  *
  * Used during ConnectBlock() as an ephemeral, resettable top-level view that is flushed only on success, so invalid
  * blocks don't pollute the underlying cache.
@@ -658,11 +660,12 @@ public:
  * m_inputs vector at a time. Workers race to claim inputs, so they may fetch elements in any order. If the fetched
  * index is greater than or equal to the size of m_inputs, no more inputs can be fetched and false is returned.
  *
- * The worker claims the InputToFetch at this index, fetches the coin with base->PeekCoin() and moves it into the
+ * The worker claims the InputToFetch at this index, fetches the coin through ReadCoin() and moves it into the
  * InputToFetch object. The ready flag is then set with a release memory order. This allows the ready flag to be
  * used as a memory fence, guaranteeing the coin being written to the object will have happened before another
  * thread tests the flag with an acquire memory order.
- * This assumes all base->PeekCoin() paths are safe for concurrent readers.
+ * This assumes all base->PeekCoin() paths are safe for concurrent readers. CoinsViewPrefetch synchronizes its
+ * retained observations internally.
  *
  * The main thread is the only consumer of the fetched coins. FetchCoinFromBase is called when a coin is requested on
  * the main thread and is not already in the cache. It checks whether the next unconsumed entry in m_inputs has the
@@ -702,6 +705,14 @@ public:
 class CoinsViewOverlay : public CCoinsViewCache
 {
 private:
+    //! A bounded, thread-safe collection cache can retain remaining reads too.
+    CoinsViewPrefetch* m_prefetched_view{nullptr};
+
+    std::optional<Coin> ReadCoin(const COutPoint& outpoint) const
+    {
+        return m_prefetched_view ? m_prefetched_view->GetCoin(outpoint) : base->PeekCoin(outpoint);
+    }
+
     //! The latest input not yet being fetched. Workers atomically increment this when fetching.
     std::atomic_uint32_t m_input_head{0};
     //! The latest input not yet accessed by a consumer. Only the main thread increments this.
@@ -742,7 +753,8 @@ private:
         if (i >= m_inputs.size()) return false;
 
         auto& input{m_inputs[i]};
-        input.coin = base->PeekCoin(input.outpoint);
+        if (m_prefetched_view && input.ready.test(std::memory_order_relaxed)) return true;
+        input.coin = ReadCoin(input.outpoint);
         // Use release so writing coin above happens before the main thread acquires.
         Assert(!input.ready.test_and_set(std::memory_order_release));
         input.ready.notify_one();
@@ -754,7 +766,14 @@ private:
     void StopFetching() noexcept
     {
         if (m_futures.empty()) {
-            Assert(m_inputs.empty());
+            if (!m_inputs.empty()) {
+                // Retained observations can make every input ready before any
+                // worker tasks are submitted.
+                Assert(m_prefetched_view);
+                for (const auto& input : m_inputs) Assert(input.ready.test(std::memory_order_acquire));
+                m_inputs.clear();
+                m_input_tail = 0;
+            }
             Assert(m_input_head.load(std::memory_order_relaxed) == 0);
             Assert(m_input_tail == 0);
             return;
@@ -783,7 +802,7 @@ private:
         }
 
         // We will only get here for BIP30 checks, an invalid block, or if the threadpool has not been started.
-        return base->PeekCoin(outpoint);
+        return ReadCoin(outpoint);
     }
 
     /// May have zero workers when input fetching is disabled.
@@ -805,6 +824,16 @@ public:
                               bool deterministic = false) noexcept
         : CCoinsViewCache{in_base, deterministic}, m_thread_pool{std::move(thread_pool)}
     {
+    }
+
+    /** Use collection-owned observations, retaining bounded fallback reads.
+     *  Unlike an arbitrary base view, CoinsViewPrefetch supports concurrent
+     *  GetCoin() calls without filling the regular coins cache. */
+    CoinsViewOverlay(CoinsViewPrefetch& prefetched, util::NotNullSharedPtr<ThreadPool> thread_pool,
+                     bool deterministic = false) noexcept
+        : CoinsViewOverlay{&prefetched, std::move(thread_pool), deterministic}
+    {
+        m_prefetched_view = &prefetched;
     }
 
     const util::NotNullSharedPtr<ThreadPool>& GetThreadPool() const noexcept { return m_thread_pool; }
