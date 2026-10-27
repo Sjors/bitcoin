@@ -51,6 +51,76 @@ size_t CCoinsViewCache::DynamicMemoryUsage() const {
     return memusage::DynamicUsage(cacheCoins) + cachedCoinsUsage;
 }
 
+CoinsViewPrefetch::CoinsViewPrefetch(CCoinsView* base_view, size_t max_memory, size_t max_entries)
+    : CCoinsViewBacked{base_view}, m_max_memory{max_memory}, m_max_entries{max_entries}
+{
+    // A fixed bucket array makes admission accounting independent of rehashing.
+    if (max_entries) {
+        m_coins.reserve(max_entries);
+        m_memory_usage = memusage::DynamicUsage(m_coins);
+    }
+    CHECK_NONFATAL(m_memory_usage <= m_max_memory);
+}
+
+std::optional<Coin> CoinsViewPrefetch::GetCoin(const COutPoint& outpoint) const
+{
+    {
+        LOCK(m_mutex);
+        if (auto it{m_coins.find(outpoint)}; it != m_coins.end()) return it->second;
+    }
+    auto coin{base->PeekCoin(outpoint)};
+    Remember(outpoint, coin);
+    return coin;
+}
+
+std::optional<Coin> CoinsViewPrefetch::PeekCoin(const COutPoint& outpoint) const
+{
+    {
+        LOCK(m_mutex);
+        if (auto it{m_coins.find(outpoint)}; it != m_coins.end()) return it->second;
+    }
+    return base->PeekCoin(outpoint);
+}
+
+bool CoinsViewPrefetch::PrefetchCoin(const COutPoint& outpoint) const
+{
+    {
+        LOCK(m_mutex);
+        if (m_coins.contains(outpoint)) return true;
+        if (m_coins.size() == m_max_entries) return false;
+    }
+    return Remember(outpoint, base->PeekCoin(outpoint));
+}
+
+bool CoinsViewPrefetch::GetCoinInCache(const COutPoint& outpoint, std::optional<Coin>& coin) const
+{
+    LOCK(m_mutex);
+    const auto it{m_coins.find(outpoint)};
+    if (it == m_coins.end()) return false;
+    coin = it->second;
+    return true;
+}
+
+void CoinsViewPrefetch::Reset(CCoinsView& new_base)
+{
+    LOCK(m_mutex);
+    m_coins.clear();
+    m_memory_usage = m_max_entries ? memusage::DynamicUsage(m_coins) : 0;
+    CCoinsViewBacked::SetBackend(new_base);
+}
+
+size_t CoinsViewPrefetch::GetCacheSize() const
+{
+    LOCK(m_mutex);
+    return m_coins.size();
+}
+
+size_t CoinsViewPrefetch::DynamicMemoryUsage() const
+{
+    LOCK(m_mutex);
+    return m_memory_usage;
+}
+
 std::optional<Coin> CCoinsViewCache::FetchCoinFromBase(const COutPoint& outpoint) const
 {
     return base->GetCoin(outpoint);
@@ -392,8 +462,21 @@ CCoinsViewCache::ResetGuard CoinsViewOverlay::StartFetching(const CBlock& block 
             }
             earlier_txids.emplace(tx->GetHash());
         }
-        // Only submit tasks if we have something to fetch.
-        if (m_inputs.size()) {
+        bool remaining{!m_inputs.empty()};
+        if (m_prefetched_view) {
+            remaining = false;
+            // The vector is complete before setting ready flags: InputToFetch
+            // elements may only move while they are still empty.
+            for (auto& input : m_inputs) {
+                if (m_prefetched_view->GetCoinInCache(input.outpoint, input.coin)) {
+                    Assert(!input.ready.test_and_set(std::memory_order_release));
+                } else {
+                    remaining = true;
+                }
+            }
+        }
+        // Known observations need no worker lookups; only fetch the remainder.
+        if (remaining) {
             std::vector<std::function<void()>> tasks(workers_count, [this] {
                 while (ProcessInput()) {}
             });

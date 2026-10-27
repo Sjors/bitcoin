@@ -399,6 +399,8 @@ bool CheckBlock(const CBlock& block, BlockValidationState& state, const Consensu
  * @param[in]   check_pow   perform proof-of-work check, nBits in the header
  *                          is always checked
  * @param[in]   check_merkle_root check the merkle root
+ * @param[in]   prefetched_coins optional bounded read cache for the current tip;
+ *              validation writes remain in a temporary view above this cache
  *
  * @return Valid or Invalid state. This doesn't currently return an Error state,
  *         and shouldn't unless there is something wrong with the existing
@@ -411,7 +413,8 @@ BlockValidationState TestBlockValidity(
     Chainstate& chainstate,
     const CBlock& block,
     bool check_pow,
-    bool check_merkle_root) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+    bool check_merkle_root,
+    CoinsViewPrefetch* prefetched_coins = nullptr) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /** Check that the proof of work on each blockheader matches the value in nBits */
 bool HasValidProofOfWork(std::span<const CBlockHeader> headers, const Consensus::Params& consensusParams);
@@ -696,6 +699,14 @@ public:
         AssertLockHeld(::cs_main);
         Assert(m_coins_views);
         return *Assert(m_coins_views->m_cacheview);
+    }
+
+    //! @returns A reference to the reusable overlay view passed to ConnectBlock().
+    CoinsViewOverlay& ConnectBlockView() EXCLUSIVE_LOCKS_REQUIRED(::cs_main)
+    {
+        AssertLockHeld(::cs_main);
+        Assert(m_coins_views);
+        return *Assert(m_coins_views->m_connect_block_view);
     }
 
     //! @returns A reference to the on-disk UTXO set database.

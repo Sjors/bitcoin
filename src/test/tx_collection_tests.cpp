@@ -4,6 +4,7 @@
 
 #include <arith_uint256.h>
 #include <chain.h>
+#include <coins.h>
 #include <consensus/amount.h>
 #include <consensus/consensus.h>
 #include <consensus/validation.h>
@@ -21,15 +22,59 @@
 #include <tinyformat.h>
 #include <txmempool.h>
 #include <uint256.h>
+#include <util/byte_units.h>
+#include <util/signalinterrupt.h>
+#include <util/threadpool.h>
 #include <validation.h>
 
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
+
+namespace {
+/** Count disk-facing reads of one input while preserving normal error handling. */
+class CountedCoinsView : public CCoinsViewBacked
+{
+    Chainstate& m_chainstate;
+    const COutPoint m_input;
+
+public:
+    mutable std::atomic<unsigned> input_reads{0};
+    mutable std::atomic<unsigned> caching_reads{0};
+    CountedCoinsView(Chainstate& chainstate, const COutPoint& input) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
+        : CCoinsViewBacked{&chainstate.CoinsErrorCatcher()}, m_chainstate{chainstate}, m_input{input}
+    {
+        chainstate.CoinsTip().SetBackend(*this);
+    }
+    ~CountedCoinsView()
+    {
+        LOCK(cs_main);
+        m_chainstate.CoinsTip().SetBackend(*base);
+    }
+    std::optional<Coin> GetCoin(const COutPoint& outpoint) const override
+    {
+        ++caching_reads;
+        return base->GetCoin(outpoint);
+    }
+    std::optional<Coin> PeekCoin(const COutPoint& outpoint) const override
+    {
+        if (outpoint == m_input) ++input_reads;
+        return base->PeekCoin(outpoint);
+    }
+};
+} // namespace
 
 BOOST_FIXTURE_TEST_SUITE(tx_collection_tests, RegTestingSetup)
 
@@ -216,6 +261,276 @@ BOOST_FIXTURE_TEST_CASE(supplied_coinbase, TxCollectionTemplateSetup)
     bad_commitment.vout[commitment_index].scriptPubKey[6] ^= 1;
     BOOST_CHECK(!m_collection->MakeTemplate(m_tip, MakeTransactionRef(bad_commitment), reason, debug));
     BOOST_CHECK_EQUAL(reason, "bad-witness-merkle-match");
+}
+
+BOOST_FIXTURE_TEST_CASE(complete_collection_skips_speculative_prefetch, TestChain100Setup)
+{
+    const auto tx{MakeTransactionRef(CreateValidMempoolTransaction(m_coinbase_txns[0], 0, 1, coinbaseKey,
+                                                                   CScript() << OP_TRUE, 49 * COIN, false))};
+    auto& chainstate{m_node.chainman->ActiveChainstate()};
+    chainstate.ForceFlushStateToDisk();
+    TryAddToMempool(*m_node.mempool, TestMemPoolEntryHelper{}.Fee(COIN).FromTx(tx));
+    auto counted{WITH_LOCK(cs_main, return std::make_unique<CountedCoinsView>(chainstate, tx->vin[0].prevout))};
+    auto collection{m_node.block_template_manager->CreateTxCollection({tx->GetWitnessHash()})};
+    BOOST_CHECK(collection->UnknownTxPos().empty());
+    collection->WaitForPrefetch();
+    BOOST_CHECK_EQUAL(collection->GetPrefetchInfo().memory_usage, 0);
+    BOOST_CHECK_EQUAL(counted->input_reads.load(), 0);
+    const auto tip{WITH_LOCK(cs_main, return chainstate.m_chain.Tip()->GetBlockHash())};
+    std::string reason, debug;
+    BOOST_REQUIRE(collection->MakeTemplate(tip, {}, reason, debug));
+    BOOST_CHECK_EQUAL(counted->input_reads.load(), 1);
+    BOOST_CHECK_EQUAL(counted->caching_reads.load(), 0);
+    BOOST_CHECK_EQUAL(collection->GetPrefetchInfo().memory_usage, 0);
+    BOOST_CHECK_EQUAL(WITH_LOCK(cs_main, return chainstate.CoinsTip().GetCacheSize()), 0);
+}
+
+BOOST_FIXTURE_TEST_CASE(prefetched_inputs_are_reused_without_cache_growth, TestChain100Setup)
+{
+    mineBlocks(1); // Mature both coinbase inputs.
+    const auto tx{MakeTransactionRef(CreateValidMempoolTransaction(m_coinbase_txns[0], 0, 1, coinbaseKey,
+                                                                   CScript() << OP_TRUE, 49 * COIN, false))};
+    const auto missing{MakeTransactionRef(CreateValidMempoolTransaction(m_coinbase_txns[1], 0, 2, coinbaseKey,
+                                                                        CScript() << OP_TRUE, 49 * COIN, false))};
+    auto& chainstate{m_node.chainman->ActiveChainstate()};
+    chainstate.ForceFlushStateToDisk();
+    TryAddToMempool(*m_node.mempool, TestMemPoolEntryHelper{}.Fee(COIN).FromTx(tx));
+    auto counted{WITH_LOCK(cs_main, return std::make_unique<CountedCoinsView>(chainstate, tx->vin[0].prevout))};
+    auto collection{m_node.block_template_manager->CreateTxCollection({tx->GetWitnessHash(), missing->GetWitnessHash()})};
+    collection->WaitForPrefetch();
+    BOOST_CHECK_EQUAL(collection->GetPrefetchInfo().coins, 1);
+    BOOST_CHECK_EQUAL(counted->input_reads.load(), 1);
+    collection->AddMissingTxs({missing});
+    const auto tip{WITH_LOCK(cs_main, return chainstate.m_chain.Tip()->GetBlockHash())};
+    std::string reason, debug;
+    for (unsigned i{0}; i < 3; ++i) {
+        BOOST_REQUIRE(collection->MakeTemplate(tip, {}, reason, debug));
+        BOOST_CHECK_EQUAL(counted->input_reads.load(), 1);
+        BOOST_CHECK_EQUAL(counted->caching_reads.load(), 0);
+        BOOST_CHECK_EQUAL(WITH_LOCK(cs_main, return chainstate.CoinsTip().GetCacheSize()), 0);
+    }
+}
+
+BOOST_FIXTURE_TEST_CASE(prefetched_inputs_are_invalidated_on_tip_change, TestChain100Setup)
+{
+    const auto tx{MakeTransactionRef(CreateValidMempoolTransaction(m_coinbase_txns[0], 0, 1, coinbaseKey,
+                                                                   CScript() << OP_TRUE, 49 * COIN, false))};
+    auto collection{m_node.block_template_manager->CreateTxCollection({tx->GetWitnessHash()})};
+    collection->AddMissingTxs({tx});
+    collection->WaitForPrefetch();
+    BOOST_CHECK_EQUAL(collection->GetPrefetchInfo().coins, 1);
+    const auto conflicting{CreateValidMempoolTransaction(m_coinbase_txns[0], 0, 1, coinbaseKey,
+                                                         CScript() << OP_TRUE, 48 * COIN, false)};
+    CreateAndProcessBlock({conflicting}, CScript() << OP_TRUE);
+    const auto tip{WITH_LOCK(cs_main, return m_node.chainman->ActiveTip()->GetBlockHash())};
+    std::string reason, debug;
+    BOOST_CHECK(!collection->MakeTemplate(tip, {}, reason, debug));
+    BOOST_CHECK_EQUAL(reason, "bad-txns-inputs-missingorspent");
+}
+
+BOOST_AUTO_TEST_CASE(prefetch_is_bounded_across_collections)
+{
+    CMutableTransaction tx;
+    tx.vin.emplace_back(Txid::FromUint256(uint256{1}), 0);
+    tx.vout.emplace_back(1, CScript() << OP_TRUE);
+    const auto ref{MakeTransactionRef(tx)};
+    std::vector<std::unique_ptr<node::TxCollection>> collections;
+    unsigned enabled{0};
+    size_t usage{0};
+    for (unsigned i{0}; i < 9; ++i) {
+        auto collection{m_node.block_template_manager->CreateTxCollection({ref->GetWitnessHash()})};
+        collection->AddMissingTxs({ref});
+        collection->WaitForPrefetch();
+        const auto info{collection->GetPrefetchInfo()};
+        enabled += info.memory_usage > 0;
+        usage += info.memory_usage;
+        BOOST_CHECK(info.memory_usage <= 8_MiB);
+        collections.push_back(std::move(collection));
+    }
+    BOOST_CHECK_EQUAL(enabled, 8);
+    BOOST_CHECK(usage <= 64_MiB);
+    BOOST_CHECK_EQUAL(WITH_LOCK(cs_main, return m_node.chainman->ActiveChainstate().CoinsTip().GetCacheSize()), 0);
+}
+
+BOOST_FIXTURE_TEST_CASE(prefetch_reads_inputs_in_parallel, TestChain100Setup)
+{
+    class ConcurrentCoinsView : public CountedCoinsView
+    {
+        mutable Mutex m_mutex;
+        mutable std::condition_variable m_cv;
+        mutable unsigned m_started GUARDED_BY(m_mutex){0};
+
+    public:
+        using CountedCoinsView::CountedCoinsView;
+        mutable std::atomic<bool> overlapped{true};
+        std::optional<Coin> PeekCoin(const COutPoint& outpoint) const override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
+        {
+            {
+                WAIT_LOCK(m_mutex, lock);
+                ++m_started;
+                m_cv.notify_all();
+                // A timeout lets a serial implementation fail without hanging.
+                if (!m_cv.wait_for(lock, std::chrono::seconds{5}, [&]() EXCLUSIVE_LOCKS_REQUIRED(m_mutex) { return m_started >= 2; })) {
+                    overlapped = false;
+                }
+            }
+            return CountedCoinsView::PeekCoin(outpoint);
+        }
+    };
+    auto& chainstate{m_node.chainman->ActiveChainstate()};
+    chainstate.ForceFlushStateToDisk();
+    CMutableTransaction tx;
+    tx.vin.emplace_back(m_coinbase_txns[0]->GetHash(), 0);
+    tx.vin.emplace_back(m_coinbase_txns[1]->GetHash(), 0);
+    tx.vout.emplace_back(1, CScript() << OP_TRUE);
+    const auto ref{MakeTransactionRef(tx)};
+    auto counted{WITH_LOCK(cs_main, return std::make_unique<ConcurrentCoinsView>(chainstate, tx.vin[0].prevout))};
+    auto collection{m_node.block_template_manager->CreateTxCollection({ref->GetWitnessHash()})};
+    collection->AddMissingTxs({ref});
+    collection->WaitForPrefetch();
+    BOOST_CHECK(counted->overlapped.load());
+    BOOST_CHECK_EQUAL(collection->GetPrefetchInfo().coins, 2);
+    BOOST_CHECK_EQUAL(WITH_LOCK(cs_main, return chainstate.CoinsTip().GetCacheSize()), 0);
+}
+
+BOOST_FIXTURE_TEST_CASE(prefetch_respects_fetch_pool_availability, TestChain100Setup)
+{
+    auto& chainstate{m_node.chainman->ActiveChainstate()};
+    chainstate.ForceFlushStateToDisk();
+    const auto pool{WITH_LOCK(cs_main, return chainstate.ConnectBlockView().GetThreadPool())};
+    CMutableTransaction tx;
+    tx.vin.emplace_back(m_coinbase_txns[0]->GetHash(), 0);
+    tx.vin.emplace_back(m_coinbase_txns[1]->GetHash(), 0);
+    tx.vout.emplace_back(1, CScript() << OP_TRUE);
+    const auto ref{MakeTransactionRef(tx)};
+    for (const int workers : {0, 1, 2}) {
+        pool->Stop();
+        if (workers) pool->Start(workers);
+        // Keep workers registered, but reject submission of new tasks.
+        if (workers == 2) pool->Interrupt();
+        auto counted{WITH_LOCK(cs_main, return std::make_unique<CountedCoinsView>(chainstate, tx.vin[0].prevout))};
+        auto collection{m_node.block_template_manager->CreateTxCollection({ref->GetWitnessHash()})};
+        collection->AddMissingTxs({ref});
+        collection->WaitForPrefetch();
+        BOOST_CHECK_EQUAL(collection->GetPrefetchInfo().coins, workers == 1 ? 2 : 0);
+        BOOST_CHECK_EQUAL(counted->input_reads.load(), workers == 1 ? 1 : 0);
+        BOOST_CHECK_EQUAL(counted->caching_reads.load(), 0);
+        BOOST_CHECK_EQUAL(WITH_LOCK(cs_main, return chainstate.CoinsTip().GetCacheSize()), 0);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(prefetch_memory_limit_does_not_fill_coins_tip)
+{
+    auto& chainstate{m_node.chainman->ActiveChainstate()};
+    CMutableTransaction tx;
+    CScript script;
+    script.resize(10'000);
+    std::fill(script.begin(), script.end(), OP_TRUE);
+    {
+        LOCK(cs_main);
+        for (unsigned i{0}; i < 1000; ++i) {
+            const COutPoint input{Txid::FromUint256(ArithToUint256(arith_uint256{i + 1000})), 0};
+            tx.vin.emplace_back(input);
+            chainstate.CoinsTip().AddCoin(input, Coin{CTxOut{1, script}, 1, false}, false);
+        }
+    }
+    tx.vout.emplace_back(1, CScript() << OP_TRUE);
+    chainstate.ForceFlushStateToDisk();
+    const auto ref{MakeTransactionRef(tx)};
+    auto collection{m_node.block_template_manager->CreateTxCollection({ref->GetWitnessHash()})};
+    collection->AddMissingTxs({ref});
+    collection->WaitForPrefetch();
+    const auto info{collection->GetPrefetchInfo()};
+    BOOST_CHECK(info.coins > 0);
+    BOOST_CHECK(info.coins < 1000);
+    BOOST_CHECK(info.memory_usage <= 8_MiB);
+    BOOST_CHECK_EQUAL(WITH_LOCK(cs_main, return chainstate.CoinsTip().GetCacheSize()), 0);
+}
+
+BOOST_FIXTURE_TEST_CASE(validation_cancels_prefetch_waiting_for_cs_main, TestChain100Setup)
+{
+    const auto tx{MakeTransactionRef(CreateValidMempoolTransaction(m_coinbase_txns[0], 0, 1, coinbaseKey,
+                                                                   CScript() << OP_TRUE, 49 * COIN, false))};
+    auto& chainstate{m_node.chainman->ActiveChainstate()};
+    chainstate.ForceFlushStateToDisk();
+    auto counted{WITH_LOCK(cs_main, return std::make_unique<CountedCoinsView>(chainstate, tx->vin[0].prevout))};
+    std::unique_ptr<node::TxCollection> collection;
+    {
+        LOCK(cs_main);
+        collection = m_node.block_template_manager->CreateTxCollection({tx->GetWitnessHash()});
+        collection->AddMissingTxs({tx});
+        const auto tip{chainstate.m_chain.Tip()->GetBlockHash()};
+        std::string reason, debug;
+        for (unsigned i{0}; i < 3; ++i) {
+            BOOST_REQUIRE(collection->MakeTemplate(tip, {}, reason, debug));
+            BOOST_CHECK_EQUAL(counted->input_reads.load(), 1);
+            BOOST_CHECK_EQUAL(chainstate.CoinsTip().GetCacheSize(), 0);
+        }
+    }
+    collection.reset(); // Joins only after releasing cs_main.
+    BOOST_CHECK_EQUAL(counted->input_reads.load(), 1);
+}
+
+BOOST_AUTO_TEST_CASE(prefetch_stops_when_shutdown_resets_coin_views)
+{
+    CMutableTransaction tx;
+    tx.vin.emplace_back(Txid::FromUint256(uint256{1}), 0);
+    tx.vout.emplace_back(1, CScript() << OP_TRUE);
+    const auto ref{MakeTransactionRef(tx)};
+    std::unique_ptr<node::TxCollection> collection;
+    {
+        LOCK(cs_main);
+        collection = m_node.block_template_manager->CreateTxCollection({ref->GetWitnessHash()});
+        collection->AddMissingTxs({ref});
+        BOOST_REQUIRE(m_interrupt());
+        // Shutdown resets these views before disconnecting IPC clients. The
+        // worker is queued behind cs_main and must not access the absent view.
+        m_node.chainman->ActiveChainstate().ResetCoinsViews();
+    }
+    collection->WaitForPrefetch();
+    BOOST_CHECK_EQUAL(collection->GetPrefetchInfo().coins, 0);
+}
+
+BOOST_FIXTURE_TEST_CASE(prefetch_budget_exhaustion_preserves_validation, TestChain100Setup)
+{
+    const auto tx{MakeTransactionRef(CreateValidMempoolTransaction(m_coinbase_txns[0], 0, 1, coinbaseKey,
+                                                                   CScript() << OP_TRUE, 49 * COIN, false))};
+    auto& chainstate{m_node.chainman->ActiveChainstate()};
+    chainstate.ForceFlushStateToDisk();
+    auto counted{WITH_LOCK(cs_main, return std::make_unique<CountedCoinsView>(chainstate, tx->vin[0].prevout))};
+    std::vector<std::unique_ptr<node::TxCollection>> holders;
+    for (unsigned i{0}; i < 8; ++i) {
+        auto holder{m_node.block_template_manager->CreateTxCollection({tx->GetWitnessHash()})};
+        holder->AddMissingTxs({tx});
+        holder->WaitForPrefetch();
+        holders.push_back(std::move(holder));
+    }
+    auto collection{m_node.block_template_manager->CreateTxCollection({tx->GetWitnessHash()})};
+    collection->AddMissingTxs({tx});
+    BOOST_CHECK_EQUAL(collection->GetPrefetchInfo().memory_usage, 0);
+    const auto tip{WITH_LOCK(cs_main, return chainstate.m_chain.Tip()->GetBlockHash())};
+    std::string reason, debug;
+    BOOST_REQUIRE(collection->MakeTemplate(tip, {}, reason, debug));
+    BOOST_CHECK_EQUAL(counted->input_reads.load(), 9);
+    BOOST_CHECK_EQUAL(counted->caching_reads.load(), 0);
+    BOOST_CHECK_EQUAL(WITH_LOCK(cs_main, return chainstate.CoinsTip().GetCacheSize()), 0);
+}
+
+BOOST_AUTO_TEST_CASE(prefetch_queue_limits_oversized_collections)
+{
+    CMutableTransaction tx;
+    for (unsigned i{0}; i < 100'000; ++i) {
+        tx.vin.emplace_back(Txid::FromUint256(ArithToUint256(arith_uint256{i + 1})), 0);
+    }
+    tx.vout.emplace_back(1, CScript() << OP_TRUE);
+    const auto ref{MakeTransactionRef(tx)};
+    auto collection{m_node.block_template_manager->CreateTxCollection({ref->GetWitnessHash()})};
+    collection->AddMissingTxs({ref});
+    collection->WaitForPrefetch();
+    const auto info{collection->GetPrefetchInfo()};
+    BOOST_CHECK(info.coins > 0);
+    BOOST_CHECK(info.coins <= MAX_BLOCK_WEIGHT / (41 * WITNESS_SCALE_FACTOR));
+    BOOST_CHECK(info.memory_usage <= 8_MiB);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -14,6 +14,7 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -143,6 +144,39 @@ BOOST_AUTO_TEST_CASE(fetch_inputs_from_cache)
     BOOST_CHECK(view.SpendCoin(outpoint));
     view.Flush();
     BOOST_CHECK(!main_cache.PeekCoin(outpoint).has_value());
+}
+
+BOOST_AUTO_TEST_CASE(reuse_collection_observations)
+{
+    const auto block{CreateBlock()};
+    CCoinsViewDB db{{.path = "", .cache_bytes = 1_MiB, .memory_only = true}, {}};
+    PopulateView(block, db);
+    for (const bool parallel : {false, true}) {
+        CCoinsViewCache main_cache{&db};
+        struct CountedView : CCoinsViewBacked {
+            mutable std::atomic<unsigned> reads{0};
+            using CCoinsViewBacked::CCoinsViewBacked;
+            std::optional<Coin> PeekCoin(const COutPoint& outpoint) const override
+            {
+                ++reads;
+                return base->PeekCoin(outpoint);
+            }
+        } counted{&main_cache};
+        CoinsViewPrefetch retained{&counted, 1_MiB, 1000};
+        BOOST_CHECK(retained.PrefetchCoin(block.vtx[1]->vin[0].prevout));
+        util::NotNull pool{std::make_shared<ThreadPool>("retain")};
+        if (parallel) pool->Start(2);
+        unsigned first_reads{0};
+        for (unsigned i{0}; i < 2; ++i) {
+            CoinsViewOverlay view{retained, pool};
+            const auto guard{view.StartFetching(block)};
+            CheckCache(block, view);
+            if (!i) first_reads = counted.reads.load();
+            BOOST_CHECK_EQUAL(counted.reads.load(), first_reads);
+            BOOST_CHECK_EQUAL(main_cache.GetCacheSize(), 0);
+        }
+        BOOST_CHECK(first_reads > 1);
+    }
 }
 
 // Test for the case where a block spends coins that are spent in the cache, but
