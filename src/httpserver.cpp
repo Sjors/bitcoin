@@ -903,6 +903,15 @@ void HTTPServer::SocketHandlerConnected(const IOReadiness& io_readiness) const
         bool recv_ready = events.occurred & Sock::RecvEvent;
         bool err_ready = events.occurred & Sock::ErrorEvent;
 
+#ifndef USE_POLL
+        // select() can report out-of-band data as an exception, which
+        // ordinary recv() does not consume.
+        if (err_ready) {
+            client->HandleErrorEvent();
+            continue;
+        }
+#endif
+
         if (send_ready) {
             // Try to send as much data as is ready for this client.
             // If there's an error we can skip the receive phase for this client
@@ -912,7 +921,16 @@ void HTTPServer::SocketHandlerConnected(const IOReadiness& io_readiness) const
             }
         }
 
-        if (recv_ready || err_ready) {
+#ifdef USE_POLL
+        // poll() reports errors and hangups even if reading was not
+        // requested. Drain pending data only when reading is ready.
+        if (err_ready && !recv_ready) {
+            client->HandleErrorEvent();
+            continue;
+        }
+#endif
+
+        if (recv_ready) {
             client->Receive();
         }
         // Process as much received data as we can.
@@ -925,6 +943,12 @@ void HTTPServer::SocketHandlerConnected(const IOReadiness& io_readiness) const
             m_request_dispatcher(std::move(request));
         }
     }
+}
+
+void HTTPRemoteClient::HandleErrorEvent()
+{
+    LogDebug(BCLog::HTTP, "Socket error or exceptional condition from %s (id=%llu)", m_origin, m_id);
+    m_disconnect = true;
 }
 
 void HTTPRemoteClient::Receive()
