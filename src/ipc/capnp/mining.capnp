@@ -38,7 +38,7 @@ interface BlockTemplate $Proxy.wrap("interfaces::BlockTemplate") {
     getTxSigops @4 (context: Proxy.Context) -> (result: List(Int64));
     getCoinbaseTx @5 (context: Proxy.Context) -> (result: CoinbaseTx);
     getCoinbaseMerklePath @6 (context: Proxy.Context) -> (result: List(Data));
-    submitSolution @10 (context: Proxy.Context, version: UInt32, timestamp: UInt32, nonce: UInt32, coinbase :Data) -> (reason: Text, debug: Text, accepted: Bool);
+    submitSolution @10 (context: Proxy.Context, version: UInt32, timestamp: UInt32, nonce: UInt32, coinbase :Data) -> (reason: Text, debug: Text, accepted: Bool, result: Data);
     waitNext @8 (context: Proxy.Context, options: BlockWaitOptions) -> (result: BlockTemplate);
     interruptWait @9() -> ();
     getTotalFees @11 (context: Proxy.Context) -> (result: Int64);

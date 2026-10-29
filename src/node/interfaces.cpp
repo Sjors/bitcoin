@@ -80,6 +80,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -926,12 +927,9 @@ public:
         return TransactionMerklePath(m_block_template->block, 0);
     }
 
-    void submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CTransactionRef coinbase, std::string& reason, std::string& debug, bool& accepted) override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
+    CBlock submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CTransactionRef coinbase, std::string& reason, std::string& debug, bool& accepted) override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
     {
-        if (!coinbase) {
-            accepted = false;
-            return;
-        }
+        if (!coinbase) throw std::invalid_argument("Coinbase transaction must not be null");
         std::shared_ptr<const CBlock> block;
         {
             LOCK(m_mutex);
@@ -941,6 +939,7 @@ public:
         }
         // Release the template mutex before validation acquires other locks or invokes callbacks.
         accepted = block_template_manager().SubmitBlock(block, reason, debug);
+        return *block;
     }
 
     std::unique_ptr<BlockTemplate> waitNext(BlockWaitOptions options) override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
