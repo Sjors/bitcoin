@@ -82,9 +82,9 @@ public:
      *       is only one byte long, so the coinbase scriptSig needs at least
      *       one additional byte of data to avoid bad-cb-length.
      *
-     * @returns true if the block was accepted as a new block
+     * @param[out] accepted true if accepted as a new block
      */
-    virtual bool submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CTransactionRef coinbase, std::string& reason, std::string& debug) = 0;
+    virtual void submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CTransactionRef coinbase, std::string& reason, std::string& debug, bool& accepted) = 0;
 
     //! Deprecated older method preserved to return an explicit error for IPC
     //! clients using mining.capnp @7.

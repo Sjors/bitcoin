@@ -523,7 +523,7 @@ class IPCMiningTest(BitcoinTestFramework):
                 self.disconnect_nodes(1, 2)
 
                 self.log.debug("submitSolution should reject an empty coinbase")
-                submitted = (await template.submitSolution(ctx, 0, 0, 0, b"")).result
+                submitted = (await template.submitSolution(ctx, 0, 0, 0, b"")).accepted
                 assert_equal(submitted, False)
 
                 self.log.debug("Submit solution that can't be deserialized")
@@ -539,7 +539,7 @@ class IPCMiningTest(BitcoinTestFramework):
                 assert_equal(check.debug, "rejected nVersion=0x00000000 block")
                 self.log.debug("submitSolution should reject a bad-version block")
                 result = await template.submitSolution(ctx, block.nVersion, block.nTime, block.nNonce, coinbase.serialize())
-                assert_equal(result.result, False)
+                assert_equal(result.accepted, False)
                 assert_equal(result.reason, "bad-version(0x00000000)")
                 assert_equal(result.debug, "rejected nVersion=0x00000000 block")
                 self.log.debug("submitBlock should reject a bad-version block")
@@ -575,7 +575,7 @@ class IPCMiningTest(BitcoinTestFramework):
                 missing_witness_block.solve()
                 self.log.debug("submitSolution should reject a coinbase missing witness")
                 result = await template.submitSolution(ctx, block.nVersion, block.nTime, block.nNonce, coinbase.serialize_without_witness())
-                assert_equal(result.result, False)
+                assert_equal(result.accepted, False)
                 assert_equal(result.reason, "bad-witness-nonce-size")
                 assert_equal(result.debug, "CheckWitnessMalleation : invalid witness reserved value size")
 
@@ -597,7 +597,7 @@ class IPCMiningTest(BitcoinTestFramework):
 
                 self.log.debug("Submit again, with the witness")
                 result = await template.submitSolution(ctx, block.nVersion, block.nTime, block.nNonce, coinbase.serialize())
-                assert_equal(result.result, True)
+                assert_equal(result.accepted, True)
                 assert_equal(result.reason, "")
                 assert_equal(result.debug, "")
 
@@ -638,7 +638,7 @@ class IPCMiningTest(BitcoinTestFramework):
                 self.nodes[2].waitforblockheight(current_block_height + 2)
                 self.log.debug("submitSolution should reject the duplicate block")
                 result = await template2.submitSolution(ctx2, duplicate_block.nVersion, duplicate_block.nTime, duplicate_block.nNonce, duplicate_coinbase.serialize())
-                assert_equal(result.result, False)
+                assert_equal(result.accepted, False)
                 assert_equal(result.reason, "duplicate")
                 assert_equal(result.debug, "")
             self.sync_all()
@@ -679,7 +679,7 @@ class IPCMiningTest(BitcoinTestFramework):
                     solution_block.nNonce,
                     solution_coinbase.serialize(),
                 )
-                assert_equal(result.result, False)
+                assert_equal(result.accepted, False)
                 assert_equal(result.reason, "inconclusive")
                 assert_equal(result.debug, "")
 
@@ -793,7 +793,7 @@ class IPCMiningTest(BitcoinTestFramework):
                     block.hashMerkleRoot = block.calc_merkle_root()
                     block.solve()
                     result = await template.submitSolution(ctx, block.nVersion, block.nTime, block.nNonce, coinbase.serialize())
-                    assert_equal(result.result, True)
+                    assert_equal(result.accepted, True)
                     assert_equal(result.reason, "")
                     assert_equal(result.debug, "")
                     assert_equal(node.getblockcount(), height)

@@ -926,9 +926,12 @@ public:
         return TransactionMerklePath(m_block_template->block, 0);
     }
 
-    bool submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CTransactionRef coinbase, std::string& reason, std::string& debug) override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
+    void submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CTransactionRef coinbase, std::string& reason, std::string& debug, bool& accepted) override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
     {
-        if (!coinbase) return false;
+        if (!coinbase) {
+            accepted = false;
+            return;
+        }
         std::shared_ptr<const CBlock> block;
         {
             LOCK(m_mutex);
@@ -937,7 +940,7 @@ public:
             block = std::make_shared<const CBlock>(m_block_template->block);
         }
         // Release the template mutex before validation acquires other locks or invokes callbacks.
-        return block_template_manager().SubmitBlock(block, reason, debug);
+        accepted = block_template_manager().SubmitBlock(block, reason, debug);
     }
 
     std::unique_ptr<BlockTemplate> waitNext(BlockWaitOptions options) override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)

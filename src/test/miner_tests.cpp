@@ -932,7 +932,9 @@ BOOST_AUTO_TEST_CASE(CreateNewBlock_validity)
         } else {
             reason = "stale reason";
             debug = "stale debug";
-            BOOST_REQUIRE(block_template->submitSolution(block.nVersion, block.nTime, block.nNonce, MakeTransactionRef(txCoinbase), reason, debug));
+            bool accepted{false};
+            block_template->submitSolution(block.nVersion, block.nTime, block.nNonce, MakeTransactionRef(txCoinbase), reason, debug, accepted);
+            BOOST_REQUIRE(accepted);
             BOOST_REQUIRE_EQUAL(reason, "");
             BOOST_REQUIRE_EQUAL(debug, "");
             BOOST_CHECK_THROW(block_template->submitSolutionOld7(block.nVersion, block.nTime, block.nNonce,
