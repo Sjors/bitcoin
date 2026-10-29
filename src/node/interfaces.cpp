@@ -79,7 +79,10 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <set>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -926,9 +929,9 @@ public:
         return TransactionMerklePath(m_block_template->block, 0);
     }
 
-    bool submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CTransactionRef coinbase, std::string& reason, std::string& debug) override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
+    CBlock submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CTransactionRef coinbase, std::string& reason, std::string& debug, bool& accepted) override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
     {
-        if (!coinbase) return false;
+        if (!coinbase) throw std::invalid_argument("Coinbase transaction must not be null");
         std::shared_ptr<const CBlock> block;
         {
             LOCK(m_mutex);
@@ -937,11 +940,40 @@ public:
             block = std::make_shared<const CBlock>(m_block_template->block);
         }
         // Release the template mutex before validation acquires other locks or invokes callbacks.
-        return block_template_manager().SubmitBlock(block, reason, debug);
+        uint64_t last_wait;
+        {
+            std::lock_guard lock{m_wait_mutex};
+            last_wait = m_next_wait;
+        }
+        accepted = block_template_manager().SubmitBlock(block, reason, debug);
+        if (accepted) {
+            // Only wait for calls already pending before this submission. New
+            // long polls must not postpone this reply indefinitely. No chain or
+            // mempool lock is held while the successor template is constructed.
+            std::unique_lock lock{m_wait_mutex};
+            m_wait_cv.wait(lock, [&] { return m_pending_waits.empty() || *m_pending_waits.begin() > last_wait; });
+        }
+        return *block;
     }
 
     std::unique_ptr<BlockTemplate> waitNext(BlockWaitOptions options) override EXCLUSIVE_LOCKS_REQUIRED(!m_mutex)
     {
+        struct PendingWait {
+            BlockTemplateImpl& owner;
+            uint64_t id;
+            ~PendingWait()
+            {
+                std::lock_guard lock{owner.m_wait_mutex};
+                owner.m_pending_waits.erase(id);
+                owner.m_wait_cv.notify_all();
+            }
+        };
+        const auto pending = [&] {
+            std::lock_guard lock{m_wait_mutex};
+            const auto id = ++m_next_wait;
+            m_pending_waits.insert(id);
+            return PendingWait{*this, id};
+        }();
         auto new_template = block_template_manager().WaitAndCreateNewBlock(
             getBlockHeader().hashPrevBlock, getTotalFees(), options, m_create_options, m_interrupt_wait);
         if (new_template) return std::make_unique<BlockTemplateImpl>(m_create_options, std::move(new_template), m_node);
@@ -958,6 +990,12 @@ private:
     const BlockCreateOptions m_create_options;
     const std::unique_ptr<CBlockTemplate> m_block_template GUARDED_BY(m_mutex);
 
+    // Tickets distinguish the waiters present at submission from later long
+    // polls. Removal on every exit (including exceptions) releases submitters.
+    std::mutex m_wait_mutex;
+    std::condition_variable m_wait_cv;
+    uint64_t m_next_wait{0};
+    std::set<uint64_t> m_pending_waits;
     bool m_interrupt_wait{false};
     node::BlockTemplateManager& block_template_manager() { return *Assert(m_node.block_template_manager); }
     const NodeContext& m_node;

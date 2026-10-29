@@ -72,6 +72,7 @@ public:
      * @param[in] coinbase complete coinbase transaction (including witness)
      * @param[out] reason failure reason (BIP22)
      * @param[out] debug  more detailed rejection reason
+     * @param[out] accepted true if accepted as a new block
      *
      * @note Unlike the submitblock RPC, this method does not call
      *       UpdateUncommittedBlockStructures to add a missing coinbase witness
@@ -82,9 +83,17 @@ public:
      *       is only one byte long, so the coinbase scriptSig needs at least
      *       one additional byte of data to avoid bad-cb-length.
      *
-     * @returns true if the block was accepted as a new block
+     * @returns the submitted block, including on rejection
+     * @throws std::invalid_argument if coinbase is null
+     *
+     * The block is returned regardless of the validation result, so callers
+     * can preserve rejected blocks for investigation.
+     * On successful submission, wait for waitNext() calls already pending on
+     * this template to finish constructing their successors before returning
+     * the large block. Rejections and submissions without pending waits do not
+     * wait. This does not acknowledge client receipt of the new template.
      */
-    virtual bool submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CTransactionRef coinbase, std::string& reason, std::string& debug) = 0;
+    virtual CBlock submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CTransactionRef coinbase, std::string& reason, std::string& debug, bool& accepted) = 0;
 
     //! Deprecated older method preserved to return an explicit error for IPC
     //! clients using mining.capnp @7.
