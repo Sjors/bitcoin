@@ -287,7 +287,10 @@ void Sock::SendComplete(std::span<const unsigned char> data,
         // Wait for a short while (or the socket to become ready for sending) before retrying
         // if nothing was sent.
         const auto wait_time = std::min(deadline - now, std::chrono::milliseconds{MAX_WAIT_FOR_IO});
-        (void)Wait(wait_time, SendEvent);
+        Event occurred{0};
+        if (Wait(wait_time, SendEvent, &occurred) && (occurred & ErrorEvent)) {
+            throw std::runtime_error("Socket exceptional condition while sending");
+        }
     }
 }
 

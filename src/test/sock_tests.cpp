@@ -12,6 +12,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <cassert>
+#include <cerrno>
 #include <thread>
 
 using namespace std::chrono_literals;
@@ -153,6 +154,42 @@ BOOST_AUTO_TEST_CASE(wait)
     BOOST_REQUIRE_EQUAL(socks.sender.Send("a", 1, 0), 1);
 
     waiter.join();
+}
+
+BOOST_AUTO_TEST_CASE(send_complete_stops_on_error_event)
+{
+    struct ErrorSock : Sock {
+        using Sock::operator=;
+        ErrorSock() : Sock{INVALID_SOCKET} {}
+
+        mutable int wait_calls{0};
+
+        ssize_t Send(const void*, size_t, int) const override
+        {
+#ifdef WIN32
+            WSASetLastError(WSAEWOULDBLOCK);
+#else
+            errno = WSAEWOULDBLOCK;
+#endif
+            return -1;
+        }
+
+        bool Wait(std::chrono::milliseconds, Event requested, Event* occurred) const override
+        {
+            BOOST_CHECK_EQUAL(requested, SendEvent);
+            assert(occurred != nullptr);
+            ++wait_calls;
+            *occurred = ErrorEvent;
+            return true;
+        }
+    } sock;
+
+    CThreadInterrupt interrupt;
+    BOOST_CHECK_EXCEPTION(
+        sock.SendComplete("x", 100ms, interrupt),
+        std::runtime_error,
+        HasReason("Socket exceptional condition while sending"));
+    BOOST_CHECK_EQUAL(sock.wait_calls, 1);
 }
 
 BOOST_AUTO_TEST_CASE(recv_until_terminator_limit)
