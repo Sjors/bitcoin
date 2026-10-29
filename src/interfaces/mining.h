@@ -88,6 +88,10 @@ public:
      *
      * The block is returned regardless of the validation result, so callers
      * can preserve rejected blocks for investigation.
+     * On successful submission, wait for waitNext() calls already pending on
+     * this template to finish constructing their successors before returning
+     * the large block. Rejections and submissions without pending waits do not
+     * wait. This does not acknowledge client receipt of the new template.
      */
     virtual CBlock submitSolution(uint32_t version, uint32_t timestamp, uint32_t nonce, CTransactionRef coinbase, std::string& reason, std::string& debug, bool& accepted) = 0;
 
