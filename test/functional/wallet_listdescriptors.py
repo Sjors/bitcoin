@@ -82,6 +82,28 @@ class ListDescriptorsTest(BitcoinTestFramework):
         descriptor_strings = [descriptor['desc'] for descriptor in result['descriptors']]
         assert_equal(descriptor_strings, sorted(descriptor_strings))
 
+        self.log.info('Test multipath descriptors are recombined.')
+        node.createwallet(wallet_name='multipath', disable_private_keys=True, blank=True)
+        wallet = node.get_wallet_rpc('multipath')
+        xpubs = [ExtendedPrivateKey.generate().pubkey().to_string() for _ in range(2)]
+        multipath_desc = f'wsh(multi(2,{xpubs[0]}/<0;1>/*,{xpubs[1]}/<2;3>/*))'
+        result = wallet.importdescriptors([{
+            'desc': descsum_create(multipath_desc),
+            'timestamp': 'now',
+            'active': True,
+            'range': [0, 1],
+        }])
+        assert result[0]['success']
+
+        descriptors = wallet.listdescriptors()['descriptors']
+        assert_equal(len(descriptors), 2)
+        assert_equal({descriptor['internal'] for descriptor in descriptors}, {False, True})
+        assert_equal({descriptor['multipath_descriptor'] for descriptor in descriptors}, {descsum_create(multipath_desc)})
+        assert_equal(
+            {descriptor['desc'] for descriptor in descriptors},
+            set(node.getdescriptorinfo(multipath_desc)['multipath_expansion']),
+        )
+
         self.log.info('Test descriptors with hardened derivations are listed in importable form.')
         extended_key = ExtendedPrivateKey.generate()
         xprv = extended_key.to_string()
