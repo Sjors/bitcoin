@@ -20,12 +20,12 @@ ImportResult ImportDescriptor(CWallet& wallet, const ImportDescriptorRequest& re
     // Parse descriptor string
     FlatSigningProvider keys;
     std::string error;
-    auto parsed_descs = Parse(request.descriptor, keys, error, /*require_checksum=*/true);
-    if (parsed_descs.empty()) {
+    auto parsed = Parse(request.descriptor, keys, error, /*require_checksum=*/true);
+    if (!parsed) {
         return ImportResult(WalletErrorCode::InvalidDescriptor, error, warnings);
     }
 
-    if (request.internal.has_value() && parsed_descs.size() > 1) {
+    if (request.internal.has_value() && parsed->IsMultipath()) {
         return ImportResult(
             WalletErrorCode::InvalidDescriptor,
             "Cannot have multipath descriptor while also specifying 'internal'",
@@ -36,13 +36,13 @@ ImportResult ImportDescriptor(CWallet& wallet, const ImportDescriptorRequest& re
     // Range check
     bool is_ranged{false};
     int64_t range_start = 0, range_end = 1, next_index = 0;
-    if (!parsed_descs.at(0)->IsRange() && request.range.has_value()) {
+    if (!parsed->IsRange() && request.range.has_value()) {
         return ImportResult(
             WalletErrorCode::InvalidParameter,
             "Range should not be specified for an un-ranged descriptor",
             warnings
         );
-    } else if (parsed_descs.at(0)->IsRange()) {
+    } else if (parsed->IsRange()) {
         if (request.range.has_value()) {
             int64_t low = request.range->first;
             int64_t high = request.range->second;
@@ -75,7 +75,7 @@ ImportResult ImportDescriptor(CWallet& wallet, const ImportDescriptorRequest& re
     }
 
     // Active descriptors must be ranged
-    if (request.active && !parsed_descs.at(0)->IsRange()) {
+    if (request.active && !parsed->IsRange()) {
         return ImportResult(
             WalletErrorCode::InvalidParameter,
             "Active descriptors must be ranged",
@@ -84,7 +84,7 @@ ImportResult ImportDescriptor(CWallet& wallet, const ImportDescriptorRequest& re
     }
 
     // Multipath descriptors should not have a label
-    if (parsed_descs.size() > 1 && !request.label.empty()) {
+    if (parsed->IsMultipath() && !request.label.empty()) {
         return ImportResult(
             WalletErrorCode::InvalidParameter,
             "Multipath descriptors should not have a label",
@@ -112,7 +112,7 @@ ImportResult ImportDescriptor(CWallet& wallet, const ImportDescriptorRequest& re
     }
 
     // Combo descriptor check
-    if (request.active && !parsed_descs.at(0)->IsSingleType()) {
+    if (request.active && !parsed->IsSingleType()) {
         return ImportResult(
             WalletErrorCode::GenericError,
             "Combo descriptors cannot be set to active",
@@ -129,13 +129,40 @@ ImportResult ImportDescriptor(CWallet& wallet, const ImportDescriptorRequest& re
         );
     }
 
-    for (size_t j = 0; j < parsed_descs.size(); ++j) {
-        auto parsed_desc = std::move(parsed_descs[j]);
-        if (parsed_descs.size() == 2) {
+    auto wallet_keys = wallet.GetKnownKeys();
+    std::vector<uint256> mp_ids;
+    std::vector<std::reference_wrapper<DescriptorScriptPubKeyMan>> mp_spkms;
+    std::vector<std::unique_ptr<Descriptor>> mp_expansion = parsed->GetMultipathExpansion();
+    for (size_t j = 0; j < mp_expansion.size(); ++j) {
+        auto parsed_desc = std::move(mp_expansion[j]);
+        if (mp_expansion.size() == 2) {
             desc_internal = j == 1;
-        } else if (parsed_descs.size() > 2) {
+        } else if (mp_expansion.size() > 2) {
             CHECK_NONFATAL(!desc_internal);
         }
+
+        // Substitute any xpubs with xprvs if known to the wallet
+        parsed_desc->SubstituteMasterExtPubs(wallet_keys.first);
+
+        // Insert into keys any private keys that the wallet already knows
+        // This needs to be done after xpubs have been substituted
+        // Only do this for the first descriptor in the multipath expansion as all substitutions will be for the same key
+        if (j == 0) {
+            std::set<CExtPubKey> desc_xpubs;
+            std::set<CPubKey> desc_pubs;
+            parsed_desc->GetPubKeys(desc_pubs, desc_xpubs);
+            for (const CExtPubKey& xpub : desc_xpubs) {
+                const auto& it = wallet_keys.first.find(xpub);
+                if (it == wallet_keys.first.end()) continue;
+                keys.keys.emplace(it->first.pubkey.GetID(), it->second.key);
+            }
+            for (const CPubKey& pub : desc_pubs) {
+                const auto& it = wallet_keys.second.find(pub);
+                if (it == wallet_keys.second.end()) continue;
+                keys.keys.emplace(it->first.GetID(), it->second);
+            }
+        }
+
         // ExpandPrivate to whether the descriptor can be derived at the first index.
         FlatSigningProvider expand_keys;
         std::vector<CScript> scripts;
@@ -220,6 +247,14 @@ ImportResult ImportDescriptor(CWallet& wallet, const ImportDescriptorRequest& re
                 wallet.DeactivateScriptPubKeyMan(spk_manager.GetID(), *w_desc.descriptor->GetOutputType(), desc_internal);
             }
         }
+
+        mp_ids.push_back(spk_manager.GetID());
+        mp_spkms.emplace_back(spk_manager);
+    }
+
+    for (const auto& spkm : mp_spkms) {
+        spkm.get().SetMultipathRelatives(mp_ids);
+        spkm.get().WriteDescriptor();
     }
 
     ImportResult result;

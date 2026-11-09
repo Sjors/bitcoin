@@ -33,6 +33,7 @@ const std::string ACENTRY{"acentry"};
 const std::string ACTIVEEXTERNALSPK{"activeexternalspk"};
 const std::string ACTIVEINTERNALSPK{"activeinternalspk"};
 const std::string BESTBLOCK_NOMERKLE{"bestblock_nomerkle"};
+const std::string EXTERNAL_SIGNER_REGISTRATION{"external_signer_registration"};
 const std::string BESTBLOCK{"bestblock"};
 const std::string CRYPTED_KEY{"ckey"};
 const std::string CSCRIPT{"cscript"};
@@ -621,16 +622,18 @@ static DBErrors LoadLegacyWalletRecords(CWallet* pwallet, DatabaseBatch& batch, 
             bool internal = false;
             uint32_t index = 0;
             if (keyMeta.hdKeypath != "s" && keyMeta.hdKeypath != "m") {
-                std::vector<uint32_t> path;
+                KeyPath path;
                 if (keyMeta.has_key_origin) {
                     // We have a key origin, so pull it from its path vector
                     path = keyMeta.key_origin.path;
                 } else {
                     // No key origin, have to parse the string
-                    if (!ParseHDKeypath(keyMeta.hdKeypath, path)) {
+                    std::optional<KeyPath> parsed = ParseHDKeypath(keyMeta.hdKeypath);
+                    if (!parsed) {
                         strErr = "Error reading wallet database: keymeta with invalid HD keypath";
                         return DBErrors::NONCRITICAL_ERROR;
                     }
+                    path = *parsed;
                 }
 
                 // Extract the index and internal from the path
@@ -641,20 +644,20 @@ static DBErrors LoadLegacyWalletRecords(CWallet* pwallet, DatabaseBatch& batch, 
                     strErr = "Error reading wallet database: keymeta found with unexpected path";
                     return DBErrors::NONCRITICAL_ERROR;
                 }
-                if (path[0] != BIP32_HARDENED_FLAG) {
-                    strErr = strprintf("Unexpected path index of 0x%08x (expected 0x80000000) for the element at index 0", path[0]);
+                if (path[0].ChildNumber() != BIP32_HARDENED_FLAG) {
+                    strErr = strprintf("Unexpected path index of 0x%08x (expected 0x80000000) for the element at index 0", path[0].ChildNumber());
                     return DBErrors::NONCRITICAL_ERROR;
                 }
-                if (path[1] != BIP32_HARDENED_FLAG && path[1] != (1 | BIP32_HARDENED_FLAG)) {
-                    strErr = strprintf("Unexpected path index of 0x%08x (expected 0x80000000 or 0x80000001) for the element at index 1", path[1]);
+                if (path[1].ChildNumber() != BIP32_HARDENED_FLAG && path[1].ChildNumber() != (1 | BIP32_HARDENED_FLAG)) {
+                    strErr = strprintf("Unexpected path index of 0x%08x (expected 0x80000000 or 0x80000001) for the element at index 1", path[1].ChildNumber());
                     return DBErrors::NONCRITICAL_ERROR;
                 }
-                if ((path[2] & BIP32_HARDENED_FLAG) == 0) {
-                    strErr = strprintf("Unexpected path index of 0x%08x (expected to be greater than or equal to 0x80000000)", path[2]);
+                if ((path[2].ChildNumber() & BIP32_HARDENED_FLAG) == 0) {
+                    strErr = strprintf("Unexpected path index of 0x%08x (expected to be greater than or equal to 0x80000000)", path[2].ChildNumber());
                     return DBErrors::NONCRITICAL_ERROR;
                 }
-                internal = path[1] == (1 | BIP32_HARDENED_FLAG);
-                index = path[2] & ~BIP32_HARDENED_FLAG;
+                internal = path[1].ChildNumber() == (1 | BIP32_HARDENED_FLAG);
+                index = path[2].ChildNumber() & ~BIP32_HARDENED_FLAG;
             }
 
             // Insert a new CHDChain, or get the one that already exists
@@ -939,6 +942,29 @@ static DBErrors LoadDescriptorWalletRecords(CWallet* pwallet, DatabaseBatch& bat
     return desc_res.m_result;
 }
 
+static DBErrors LoadExternalSignerRegistrationRecords(CWallet* pwallet, DatabaseBatch& batch) EXCLUSIVE_LOCKS_REQUIRED(pwallet->cs_wallet)
+{
+    AssertLockHeld(pwallet->cs_wallet);
+
+    LoadResult res = LoadRecords(pwallet, batch, DBKeys::EXTERNAL_SIGNER_REGISTRATION,
+        [] (CWallet* pwallet, DataStream& key, DataStream& value, std::string& err) EXCLUSIVE_LOCKS_REQUIRED(pwallet->cs_wallet) {
+        std::string fingerprint;
+        std::string registration;
+        key >> fingerprint;
+        value >> registration;
+        pwallet->LoadExternalSignerRegistration(fingerprint, registration);
+        return DBErrors::LOAD_OK;
+    });
+
+    if (res.m_result <= DBErrors::NONCRITICAL_ERROR) {
+        // Only log if there are no critical errors
+        pwallet->WalletLogPrintf("Loaded external signer descriptor registrations: %u", res.m_records);
+    }
+
+    return res.m_result;
+}
+
+
 static DBErrors LoadAddressBookRecords(CWallet* pwallet, DatabaseBatch& batch) EXCLUSIVE_LOCKS_REQUIRED(pwallet->cs_wallet)
 {
     AssertLockHeld(pwallet->cs_wallet);
@@ -1193,6 +1219,9 @@ DBErrors WalletBatch::LoadWallet(CWallet* pwallet)
         // when in reality the wallet is simply too new.
         if (result == DBErrors::UNKNOWN_DESCRIPTOR) return result;
 
+        // Load external signer descriptor registrations
+        result = std::max(LoadExternalSignerRegistrationRecords(pwallet, *m_batch), result);
+
         // Load address book
         result = std::max(LoadAddressBookRecords(pwallet, *m_batch), result);
 
@@ -1346,6 +1375,11 @@ bool WalletBatch::WriteLastOpenedFeatures()
 bool WalletBatch::WriteLastDecryptedFeatures()
 {
     return WriteIC(DBKeys::LAST_DECRYPTED_FEATURES, WALLET_CLIENT_FEATURES);
+}
+
+bool WalletBatch::WriteExternalSignerRegistration(const std::string& fingerprint, const std::string& registration)
+{
+    return WriteIC(std::make_pair(DBKeys::EXTERNAL_SIGNER_REGISTRATION, fingerprint), registration);
 }
 
 bool WalletBatch::EraseRecords(const std::unordered_set<std::string>& types)
