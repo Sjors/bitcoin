@@ -1565,6 +1565,14 @@ void DescriptorScriptPubKeyMan::WriteDescriptor()
     }
 }
 
+void DescriptorScriptPubKeyMan::WriteDescriptor(WalletBatch& batch)
+{
+    LOCK(cs_desc_man);
+    if (!batch.WriteDescriptor(GetID(), m_wallet_descriptor)) {
+        throw std::runtime_error(std::string(__func__) + ": writing descriptor failed");
+    }
+}
+
 WalletDescriptor DescriptorScriptPubKeyMan::GetWalletDescriptor() const
 {
     return m_wallet_descriptor;
@@ -1607,6 +1615,58 @@ bool DescriptorScriptPubKeyMan::GetDescriptorString(std::string& out, const bool
     }
 
     return m_wallet_descriptor.descriptor->ToNormalizedString(provider, out, &m_wallet_descriptor.cache);
+}
+
+std::optional<std::string> DescriptorScriptPubKeyMan::GetMultipathString(const bool priv) const
+{
+    std::string out;
+    FlatSigningProvider provider;
+    DescriptorCache cache;
+    std::vector<uint256> mp_rel_ids;
+    // Snapshot local state so relative descriptor locks can be acquired separately.
+    {
+        LOCK(cs_desc_man);
+        provider.keys = GetKeys();
+        cache = m_wallet_descriptor.cache;
+        mp_rel_ids = m_wallet_descriptor.GetMultipathRelativesIDs();
+    }
+
+    if (mp_rel_ids.size() > 1) {
+        const auto mp_base_spkm = dynamic_cast<DescriptorScriptPubKeyMan*>(m_storage.GetScriptPubKeyMan(mp_rel_ids.at(0)));
+        if (!Assume(mp_base_spkm)) {
+            return std::nullopt;
+        }
+        std::shared_ptr<const Descriptor> mp_base;
+        {
+            LOCK(mp_base_spkm->cs_desc_man);
+            mp_base = mp_base_spkm->GetWalletDescriptor().descriptor;
+        }
+        std::vector<std::shared_ptr<const Descriptor>> relatives;
+        relatives.reserve(mp_rel_ids.size() - 1);
+        std::vector<const Descriptor*> rels;
+        rels.reserve(mp_rel_ids.size() - 1);
+        for (size_t i = 1; i < mp_rel_ids.size(); ++i) {
+            const auto rel_spkm = dynamic_cast<DescriptorScriptPubKeyMan*>(m_storage.GetScriptPubKeyMan(mp_rel_ids.at(i)));
+            if (!Assume(rel_spkm)) {
+                return std::nullopt;
+            }
+            {
+                LOCK(rel_spkm->cs_desc_man);
+                relatives.emplace_back(rel_spkm->GetWalletDescriptor().descriptor);
+            }
+            rels.emplace_back(relatives.back().get());
+        }
+        std::unique_ptr<Descriptor> mp = mp_base->ReconstructMultipath(rels);
+        if (!Assume(mp)) {
+            return std::nullopt;
+        }
+        if (priv && mp->ToPrivateString(provider, out)) {
+            return out;
+        } else if (mp->ToNormalizedString(provider, out, &cache)) {
+            return out;
+        }
+    }
+    return std::nullopt;
 }
 
 void DescriptorScriptPubKeyMan::UpgradeDescriptorCache()
@@ -1697,5 +1757,11 @@ bool DescriptorScriptPubKeyMan::CanUpdateToWalletDescriptor(const WalletDescript
     }
 
     return true;
+}
+
+void DescriptorScriptPubKeyMan::SetMultipathRelatives(const std::vector<uint256>& ids)
+{
+    LOCK(cs_desc_man);
+    m_wallet_descriptor.SetMultipathRelatives(ids);
 }
 } // namespace wallet
