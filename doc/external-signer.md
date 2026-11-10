@@ -148,6 +148,10 @@ A future extension could add an optional return field `reachable`, in case `<cmd
 
 This command reads request `<base64-encoded psbt>` and MUST return a JSON object. On success, it MUST contain `{"psbt": "<base64-encoded psbt>"}` updated to include any new signatures. On failure, it SHOULD contain `{"error": "<message>"}`. Presence of a key `error` with value `null` is not considered an error.
 
+The returned PSBT MUST use the same PSBT version as the request.
+
+The returned PSBT MUST NOT contain finalized inputs (`PSBT_IN_FINAL_SCRIPTSIG` or `PSBT_IN_FINAL_SCRIPTWITNESS`). Signatures MUST remain in the partial signature or Taproot signature fields so Bitcoin Core can check their sighash types.
+
 PSBT SHOULD include BIP32 derivations. The command SHOULD fail if none of the BIP32 derivations match a key owned by the device.
 
 The command SHOULD fail if the user cancels.
@@ -224,3 +228,30 @@ It then imports descriptors for all supported address types, in a BIP44/49/84/86
 The `walletdisplayaddress` RPC obtains the inferred descriptor for the provided address. It then calls `<cmd> --fingerprint 00000000 --chain <name> displayaddress --desc <descriptor>`.
 
 For external-signer wallets, spending uses `send` or `sendall`, and fee-bumping uses `bumpfee`. Bitcoin Core builds a PSBT, adds key origin information, checks whether any input key origin fingerprint matches the signer, calls `<cmd> --stdin --fingerprint 00000000 --chain <name>`, and sends `signtx <psbt>` over stdin. If signatures are sufficient, it finalizes the transaction and, for broadcasting RPCs, broadcasts it. If signing cannot complete, the call fails with an error. For manual fee-bumping, use `psbtbumpfee` to obtain a PSBT for signing.
+
+
+## Interactive Taproot anti-exfil (experimental)
+
+`-signerantiexfil` requires the single-signer BIP-EXFIL protocol for unsigned
+Taproot key-path inputs. The signer must support this protocol; unsupported
+signers fail closed. Existing signing without this option is unchanged.
+
+Core invokes `signtx` twice. Per-input proprietary keys have prefix
+`fc026165`, one subtype byte, and the 32-byte Taproot output key. Subtype 0
+carries the host commitment (32 bytes), subtype 1 the original compressed public
+nonce (33 bytes), and subtype 2 the host entropy (32 bytes). The first request
+contains only subtype 0; its reply adds subtype 1 and no signatures. The second
+request adds subtype 2; its reply adds the normal Taproot key-path signature.
+
+Core independently computes the original Taproot sighash and verifies each
+signature and nonce proof before accepting any signatures. It retains the
+original transaction and removes the transcript from the resulting PSBT.
+Only DEFAULT and ALL are supported; script-path and multiparty signing are not.
+
+There is no automatic retry after a failed exchange. A failure after commitment
+is reported explicitly: repeated fresh attempts can permit selective-abort
+exfiltration. This initial implementation does not persist interrupted transcripts
+across RPC calls or restarts. Applications must not automatically resubmit failed
+signing RPCs with fresh randomness, and must not publish intermediate transcripts.
+The domain tags and proprietary fields are provisional and must change together
+if the draft protocol changes.

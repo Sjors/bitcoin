@@ -395,4 +395,26 @@ BOOST_AUTO_TEST_CASE(key_schnorr_tweak_smoke_test)
     secp256k1_context_destroy(secp256k1_context_sign);
 }
 
+BOOST_AUTO_TEST_CASE(schnorr_anti_exfil)
+{
+    const auto pubkey_bytes = ParseHex("79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798");
+    const XOnlyPubKey pubkey{pubkey_bytes};
+    const uint256 message{};
+    auto entropy = ParseHex("0000000000000000000000000000000000000000000000000000000000000001");
+    const auto expected = ParseHex("2547d8aa53b5e89d2bbe2a4d1853cfbae1d98105b57f03e6cf555c141776780a");
+    const auto nonce = ParseHex("0327ce12dc839961dcfdec901a3110809c0890aeb8a3527549ea7e54b5c0f93dac");
+    auto signature = ParseHex("7fe10d622cf4a75e39715e7fea452228788e27e766faad12a7e4525e779d23bbb94bc96ae14de5c4be23683bf284d8399d8b92943736b443086c356016626141");
+    const auto commitment = CreateAntiExfilCommitment(entropy);
+    BOOST_REQUIRE(commitment);
+    BOOST_CHECK_EQUAL_COLLECTIONS(commitment->begin(), commitment->end(), expected.begin(), expected.end());
+    BOOST_CHECK(pubkey.VerifySchnorrAntiExfil(message, signature, entropy, nonce));
+    entropy.back() ^= 1;
+    BOOST_CHECK(!pubkey.VerifySchnorrAntiExfil(message, signature, entropy, nonce));
+    entropy.back() ^= 1;
+    signature.back() ^= 1;
+    BOOST_CHECK(!pubkey.VerifySchnorrAntiExfil(message, signature, entropy, nonce));
+    BOOST_CHECK(!CreateAntiExfilCommitment(std::vector<unsigned char>(32)));
+    BOOST_CHECK(!CreateAntiExfilCommitment(std::vector<unsigned char>(31)));
+}
+
 BOOST_AUTO_TEST_SUITE_END()
