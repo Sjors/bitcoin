@@ -4,7 +4,6 @@
 // file COPYING or https://opensource.org/licenses/mit-license.php.
 
 #include <univalue.h>
-
 #include <univalue/test/fail1.json.h>
 #include <univalue/test/fail10.json.h>
 #include <univalue/test/fail11.json.h>
@@ -66,6 +65,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <vector>
 
 static std::string rtrim(std::string s)
 {
@@ -177,6 +177,40 @@ void unescape_unicode_test()
     testResult = val.read("[\"\\ud834\\udd61\"]");
     assert(testResult);
     assert(val[0].get_str() == "\xf0\x9d\x85\xa1");
+    // The offset for supplementary characters must carry into the next plane.
+    assert(val.read("[\"\\ud840\\udc00\"]"));
+    assert(val[0].get_str() == "\xf0\xa0\x80\x80"); // U+20000
+    assert(val.read("[\"\\udbff\\udfff\"]"));
+    assert(val[0].get_str() == "\xf4\x8f\xbf\xbf"); // U+10FFFF
+}
+
+void utf8_test()
+{
+    UniValue val;
+    for (const std::string text : {"ascii", "\xc2\x80", "\xed\x9f\xbf", "\xee\x80\x80",
+                                   "\xf0\x90\x80\x80", "\xf4\x8f\xbf\xbf"}) {
+        assert(val.read("\"" + text + "\""));
+        assert(val.get_str() == text);
+        assert(val.read("{\"" + text + "\":0}"));
+        assert(val.getKeys()[0] == text);
+    }
+
+    // Invalid UTF-8 must be rejected, not normalized into valid characters.
+    for (const std::string text : {"\xc0\x80", "\xe0\x80\x80", "\xf0\x80\x80\x80",
+                                   "\xed\xa0\x80", "\xed\xa0\x80\xed\xb0\x80",
+                                   "\xf4\x90\x80\x80", "\xf8\x88\x80\x80\x80",
+                                   "\x80", "\xc2", "\xe2\x28\xa1"}) {
+        assert(!val.read("\"" + text + "\""));
+        assert(!val.read("{\"" + text + "\":0}"));
+    }
+
+    // Escapes cannot complete a raw UTF-8 sequence or an interrupted surrogate pair.
+    for (const std::string text : {"\xc2\\u0080", "\xc2\\n", "\\ud800x\\udc00",
+                                   "\\ud800\\n\\udc00", "\\ud800\\u0041\\udc00",
+                                   "\\ud800\xc2\xa2\\udc00", "\xed\xa0\x80\\udc00",
+                                   "\\ud800\xed\xb0\x80"}) {
+        assert(!val.read("\"" + text + "\""));
+    }
 }
 
 void no_nul_test()
@@ -193,6 +227,7 @@ int main(int argc, char* argv[])
     }
 
     unescape_unicode_test();
+    utf8_test();
     no_nul_test();
 
     return 0;
