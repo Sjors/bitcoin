@@ -1,0 +1,86 @@
+# Run tcp_urgent_queue_probe.py on GitHub-hosted runners, to see whether
+# unread TCP urgent data accumulates on Windows versions we have no machine
+# for. Context: https://github.com/bitcoin/bitcoin/pull/36716
+#
+# This branch is an orphan: it holds only this workflow and the probe, so
+# pushing it runs nothing else.
+
+name: TCP urgent data probe
+
+on:
+  push:
+    branches:
+      - '2026/11/tcp-urgent-probe-ci'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    # The Linux and macOS jobs are controls for the probe itself.
+    continue-on-error: ${{ matrix.control }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 'Windows Server 2022 (build 20348)'
+            runner: windows-2022
+            python: python
+            control: false
+          - name: 'Windows Server 2025 (build 26100)'
+            runner: windows-2025
+            python: python
+            control: false
+          - name: 'Windows 11 ARM64'
+            runner: windows-11-arm
+            python: python
+            control: false
+          - name: 'Linux (control)'
+            runner: ubuntu-24.04
+            python: python3
+            control: true
+          - name: 'macOS (control)'
+            runner: macos-15
+            python: python3
+            control: true
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Operating system
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmd //c ver
+            reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion" //v DisplayVersion
+            reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion" //v UBR
+          else
+            uname -a
+          fi
+          ${{ matrix.python }} --version
+
+      - name: Probe
+        shell: bash
+        env:
+          PYTHONUNBUFFERED: '1'
+          PYTHONUTF8: '1'
+        run: |
+          # Loopback only. Stop the flood early if the nonpaged pool grows,
+          # well before a runner could run out of kernel memory.
+          ${{ matrix.python }} tcp_urgent_queue_probe.py --max-growth-mib 256 2>&1 | tee probe.log
+          {
+            echo '### ${{ matrix.name }}'
+            echo '```'
+            sed -n '/^Receiver:/,$p' probe.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Green only for a clear "no".
+          tail -n 1 probe.log | grep -q '^RESULT: NO'
