@@ -56,17 +56,6 @@ A fast sender can merge several urgent bytes into one TCP segment. Only the
 last byte of a segment is then urgent and the rest arrives as ordinary data.
 The sink counts those separately; use --delay-us if too many are merged.
 
-Tested on 2026-11-18 with these receivers:
-
-  * Windows 11 Home 26H2, build 26300.9711 (Python 3.12), over loopback and
-    from a macOS sender in the same LAN: NO. This Windows queues up to 16
-    unread urgent bytes per connection and aborts the connection when the
-    17th arrives; aborting 12500 connections that way showed no leak.
-    Older Windows versions were not tested.
-  * macOS 27.2.1 (Python 3.10), over loopback: NO, a single byte buffer.
-
-Not tested on Linux in this form.
-
 Only loopback and private (RFC 1918, link-local, unique-local) targets are
 accepted. Needs only the Python 3 standard library.
 """
@@ -142,8 +131,11 @@ def describe_os():
                 def value(name):
                     return winreg.QueryValueEx(key, name)[0]
 
+                release = platform.release()
                 edition = {"Core": "Home", "Professional": "Pro"}.get(value("EditionID"), value("EditionID"))
-                return (f"Windows {platform.release()} {edition} {value('DisplayVersion')}, "
+                if release.endswith("Server"):
+                    release, edition = f"Server {release[:-len('Server')]}", edition.replace("Server", "", 1)
+                return (f"Windows {release} {edition} {value('DisplayVersion')}, "
                         f"build {value('CurrentBuild')}.{value('UBR')}")
         except OSError:
             pass
