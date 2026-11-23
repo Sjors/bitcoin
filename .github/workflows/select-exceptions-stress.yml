@@ -1,0 +1,214 @@
+# Stress test backports of https://github.com/bitcoin/bitcoin/pull/36716 on
+# Windows.
+#
+# The backports are not branches: patches/<branch>.patch holds each one as a
+# single diff against the release branch commit listed in the matrix below.
+# For each release branch the build job checks out bitcoin/bitcoin at that
+# commit, applies the patch and cross-builds bitcoind.exe and test_bitcoin.exe
+# twice: with the whole patch (the "backport" build), and with src/ outside
+# src/test reverted (the "base" build). The base build is a control: the
+# unfixed code with the new tests.
+#
+# Windows runners then run, per build:
+#
+# - the sock_tests unit tests, which include the test for the bug.
+# - stress/socket_checks.py: CPU use while TCP urgent data is pending, and how
+#   quickly a refused outbound connection is noticed.
+# - the socket functional tests, repeatedly and in parallel (backport build
+#   only; the base build gets one pass).
+#
+# The base jobs are allowed to fail: they show what the checks and tests do
+# without the change.
+#
+# This branch holds only this workflow, its scripts and the patches: its
+# commit removes every other file, so pushing it runs nothing else.
+
+name: Select exceptions backport stress
+
+on:
+  push:
+    branches:
+      - '2026/11/select-exceptions-win-stress'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ITERATIONS: 25
+  PYTHONUTF8: 1
+
+jobs:
+  build:
+    name: 'Build ${{ matrix.branch }} ${{ matrix.variant }}'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ['29.x', '30.x', '31.x', '32.x']
+        variant: [backport, base]
+        include:
+          # The release branch commit each patch applies to.
+          - branch: '29.x'
+            base: 16ca532c8212d691daed14940da0f71f84f7b3fc
+          - branch: '30.x'
+            base: 1fcaeef6f8ada44c922db3b522a0d183fde33c4a
+          - branch: '31.x'
+            base: 5588c7604022bd8700294b269de5987809ea45ff
+          - branch: '32.x'
+            base: 99618d123cc8717e93b0488c182e14827e806fc0
+
+    steps:
+      - name: Check out the release branch
+        uses: actions/checkout@v6
+        with:
+          repository: bitcoin/bitcoin
+          ref: ${{ matrix.base }}
+
+      - name: Check out this workflow branch
+        uses: actions/checkout@v6
+        with:
+          path: stress-ci
+
+      - name: Apply the backport
+        run: |
+          git apply "stress-ci/patches/${{ matrix.branch }}.patch"
+          git status --short
+
+      - name: Revert src/ to the release branch, keeping the new tests
+        if: matrix.variant == 'base'
+        run: |
+          git checkout HEAD -- src ':(exclude)src/test'
+          git status --short
+
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            g++-mingw-w64-x86-64-posix cmake ninja-build pkgconf bison curl make patch xz-utils python3
+
+      - name: Cache depends
+        uses: actions/cache@v5
+        with:
+          path: |
+            depends/built
+            depends/sources
+          key: depends-mingw-${{ matrix.branch }}-${{ hashFiles('depends/packages/*', 'depends/*.mk', 'depends/Makefile') }}
+
+      - name: Build depends
+        run: |
+          make -C depends -j"$(nproc)" HOST=x86_64-w64-mingw32 \
+            NO_QT=1 NO_WALLET=1 NO_ZMQ=1 NO_USDT=1 NO_IPC=1 LOG=1
+
+      - name: Build bitcoind.exe and test_bitcoin.exe
+        run: |
+          cmake -B build -G Ninja --toolchain depends/x86_64-w64-mingw32/toolchain.cmake \
+            -DBUILD_DAEMON=ON -DBUILD_CLI=ON -DBUILD_TESTS=ON -DBUILD_BENCH=OFF \
+            -DBUILD_FUZZ_BINARY=OFF -DBUILD_GUI=OFF -DBUILD_TX=OFF -DBUILD_UTIL=OFF \
+            -DBUILD_WALLET_TOOL=OFF -DBUILD_KERNEL_LIB=OFF -DBUILD_UTIL_CHAINSTATE=OFF \
+            -DENABLE_WALLET=OFF -DENABLE_EXTERNAL_SIGNER=OFF -DWITH_ZMQ=OFF -DENABLE_IPC=OFF
+          cmake --build build -j"$(nproc)" --target bitcoind bitcoin-cli test_bitcoin
+          x86_64-w64-mingw32-strip build/bin/*.exe
+          ls -la build/bin
+          cat build/test/config.ini
+
+      # The tests travel with the binaries, so the Windows jobs need no
+      # checkout of bitcoin/bitcoin.
+      - name: Upload binaries and tests
+        uses: actions/upload-artifact@v7
+        with:
+          name: 'build-${{ matrix.branch }}-${{ matrix.variant }}'
+          path: |
+            build/bin/*.exe
+            build/test/config.ini
+            test/functional
+            share/rpcauth
+          if-no-files-found: error
+
+  test:
+    name: '${{ matrix.branch }} ${{ matrix.variant }}, ${{ matrix.runner }}'
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    # The base build is a control: it is expected to fail the checks.
+    continue-on-error: ${{ matrix.variant == 'base' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: ['29.x', '30.x', '31.x', '32.x']
+        variant: [backport, base]
+        runner: [windows-2022, windows-2025]
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      LABEL: '${{ matrix.branch }} ${{ matrix.variant }}, ${{ matrix.runner }}'
+      FUNCTIONAL_DIR: '${{ github.workspace }}/bitcoin/test/functional'
+
+    steps:
+      - name: Check out this workflow branch
+        uses: actions/checkout@v6
+        with:
+          path: stress-ci
+
+      - name: Download binaries and tests
+        uses: actions/download-artifact@v8
+        with:
+          name: 'build-${{ matrix.branch }}-${{ matrix.variant }}'
+          path: bitcoin
+
+      - name: Operating system
+        shell: pwsh
+        run: |
+          Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' |
+            Select-Object ProductName, DisplayVersion, CurrentBuild, UBR | Format-List
+
+      - name: Prepare
+        run: |
+          py -3 stress-ci/stress/run_stress.py prepare --srcdir bitcoin --builddir bitcoin/build
+          bitcoin/build/bin/bitcoind.exe -version
+
+      - name: Unit tests (sock_tests)
+        run: |
+          bitcoin/build/bin/test_bitcoin.exe --run_test=sock_tests --log_level=test_suite
+
+      - name: Socket checks
+        if: ${{ !cancelled() }}
+        run: |
+          py -3 stress-ci/stress/socket_checks.py \
+            --configfile="$PWD/bitcoin/build/test/config.ini" --tmpdir="$RUNNER_TEMP/socket-checks" \
+            --timeout-factor=10 --label="$LABEL" ${{ matrix.variant == 'base' && '--report-only' || '' }}
+
+      - name: Socket tests, repeated
+        if: ${{ !cancelled() }}
+        run: |
+          py -3 stress-ci/stress/run_stress.py run --srcdir bitcoin --builddir bitcoin/build \
+            --workdir "$RUNNER_TEMP/stress" --label "$LABEL" \
+            --iterations ${{ matrix.variant == 'base' && 1 || env.ITERATIONS }} \
+            p2p_socket_errors.py interface_http.py
+
+      - name: Related tests, a few times
+        if: ${{ !cancelled() && matrix.variant == 'backport' }}
+        run: |
+          py -3 stress-ci/stress/run_stress.py run --srcdir bitcoin --builddir bitcoin/build \
+            --workdir "$RUNNER_TEMP/related" --label "$LABEL, related" --iterations 3 \
+            interface_rpc.py interface_rest.py feature_proxy.py p2p_disconnect_ban.py \
+            p2p_timeouts.py p2p_invalid_messages.py p2p_addr_relay.py rpc_net.py
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: 'logs-${{ matrix.branch }}-${{ matrix.variant }}-${{ matrix.runner }}'
+          path: |
+            ${{ runner.temp }}/stress
+            ${{ runner.temp }}/related
+            ${{ runner.temp }}/socket-checks
+          if-no-files-found: ignore

@@ -1,0 +1,323 @@
+diff --git a/src/net.cpp b/src/net.cpp
+index 3b9c22c597..cfb473ad97 100644
+--- a/src/net.cpp
++++ b/src/net.cpp
+@@ -2137,26 +2137,41 @@ void CConnman::SocketHandlerConnected(const std::vector<CNode*>& nodes,
+             return;
+ 
+         //
+         // Receive
+         //
++        bool recvRequested = false;
+         bool recvSet = false;
+         bool sendSet = false;
+         bool errorSet = false;
+         {
+             LOCK(pnode->m_sock_mutex);
+             if (!pnode->m_sock) {
+                 continue;
+             }
+             const auto it = events_per_sock.find(pnode->m_sock);
+             if (it != events_per_sock.end()) {
++                recvRequested = it->second.requested & Sock::RECV;
+                 recvSet = it->second.occurred & Sock::RECV;
+                 sendSet = it->second.occurred & Sock::SEND;
+                 errorSet = it->second.occurred & Sock::ERR;
+             }
+         }
+ 
++        // Only poll() reports errors here: select() does not monitor exceptions
++        // on established connections. poll() always reports POLLERR/POLLHUP,
++        // whichever events we requested.
++        // If we requested POLLIN, then recv() below can read buffered data
++        // before it detects the disconnect, unless a failed send disconnects
++        // first. If receiving is paused, we did not request POLLIN, so
++        // disconnect now: sending on a broken connection would fail anyway.
++        if (errorSet && !recvRequested) {
++            LogDebug(BCLog::NET, "socket error or hangup, %s\n", pnode->DisconnectMsg(fLogIPs));
++            pnode->CloseSocketDisconnect();
++            continue;
++        }
++
+         if (sendSet) {
+             // Send data
+             auto [bytes_sent, data_left] = WITH_LOCK(pnode->cs_vSend, return SocketSendData(*pnode));
+             if (bytes_sent) {
+                 RecordBytesSent(bytes_sent);
+diff --git a/src/netbase.cpp b/src/netbase.cpp
+index d3d5404827..d7812582c5 100644
+--- a/src/netbase.cpp
++++ b/src/netbase.cpp
+@@ -576,11 +576,11 @@ static bool ConnectToSocket(const Sock& sock, struct sockaddr* sockaddr, socklen
+         if (nErr == WSAEINPROGRESS || nErr == WSAEWOULDBLOCK || nErr == WSAEINVAL)
+         {
+             // Connection didn't actually fail, but is being established
+             // asynchronously. Thus, use async I/O api (select/poll)
+             // synchronously to check for successful connection with a timeout.
+-            const Sock::Event requested = Sock::RECV | Sock::SEND;
++            const Sock::Event requested = Sock::RECV | Sock::SEND | Sock::ERR;
+             Sock::Event occurred;
+             if (!sock.Wait(std::chrono::milliseconds{nConnectTimeout}, requested, &occurred)) {
+                 LogPrintf("wait for connect to %s failed: %s\n",
+                           dest_str,
+                           NetworkErrorString(WSAGetLastError()));
+diff --git a/src/test/sock_tests.cpp b/src/test/sock_tests.cpp
+index 5dd73dc101..eb4b938fcf 100644
+--- a/src/test/sock_tests.cpp
++++ b/src/test/sock_tests.cpp
+@@ -54,10 +54,41 @@ BOOST_AUTO_TEST_CASE(move_constructor)
+     BOOST_CHECK(*sock2 == s);
+     delete sock2;
+     BOOST_CHECK(SocketIsClosed(s));
+ }
+ 
++// This test sets up its own sockets and sits above the socket pair tests.
++// That keeps it easy to backport: older branches build those for POSIX only.
++BOOST_AUTO_TEST_CASE(wait_ignores_urgent_data)
++{
++    sockaddr_in addr{};
++    addr.sin_family = AF_INET;
++    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++    socklen_t addr_len{sizeof(addr)};
++
++    const Sock listener{CreateSocket()};
++    BOOST_REQUIRE_EQUAL(listener.Bind(reinterpret_cast<sockaddr*>(&addr), addr_len), 0);
++    BOOST_REQUIRE_EQUAL(listener.Listen(1), 0);
++    BOOST_REQUIRE_EQUAL(listener.GetSockName(reinterpret_cast<sockaddr*>(&addr), &addr_len), 0);
++
++    const Sock sender{CreateSocket()};
++    BOOST_REQUIRE_EQUAL(sender.Connect(reinterpret_cast<sockaddr*>(&addr), addr_len), 0);
++
++    const auto receiver{listener.Accept(nullptr, nullptr)};
++    BOOST_REQUIRE(receiver);
++
++    BOOST_REQUIRE_EQUAL(sender.Send("U", 1, MSG_OOB), 1);
++    BOOST_REQUIRE_EQUAL(sender.Send("x", 1, 0), 1);
++
++    // Wait for the regular byte sent after the urgent byte. Once it is
++    // readable, the urgent byte has arrived too. Readiness is level-triggered,
++    // so if the urgent byte is ever reported as an error, it is by now.
++    Sock::Event occurred;
++    BOOST_REQUIRE(receiver->Wait(1min, Sock::RECV, &occurred));
++    BOOST_CHECK(occurred == Sock::RECV);
++}
++
+ BOOST_AUTO_TEST_CASE(move_assignment)
+ {
+     const SOCKET s1 = CreateSocket();
+     const SOCKET s2 = CreateSocket();
+     Sock* sock1 = new Sock(s1);
+diff --git a/src/util/sock.cpp b/src/util/sock.cpp
+index 6d73a09be5..fbf09f5fba 100644
+--- a/src/util/sock.cpp
++++ b/src/util/sock.cpp
+@@ -208,16 +208,22 @@ bool Sock::WaitMany(std::chrono::milliseconds timeout, EventsPerSock& events_per
+             return false;
+         }
+         const auto& s = sock->m_socket;
+         if (events.requested & RECV) {
+             FD_SET(s, &recv);
+-            FD_SET(s, &err);
+         }
+         if (events.requested & SEND) {
+             FD_SET(s, &send);
+         }
+-        if (events.requested & (RECV | SEND)) {
++        if (events.requested & ERR) {
++            // Windows reports a failed non-blocking connect() in the exception
++            // set and nowhere else. On an established connection the set also
++            // reports TCP urgent data, which recv() does not return, so
++            // Wait() could keep returning with nothing to read.
++            FD_SET(s, &err);
++        }
++        if (events.requested & (RECV | SEND | ERR)) {
+             socket_max = std::max(socket_max, s);
+         }
+     }
+ 
+     timeval tv = MillisToTimeval(timeout);
+diff --git a/src/util/sock.h b/src/util/sock.h
+index 65e7ffc165..fd9fbad019 100644
+--- a/src/util/sock.h
++++ b/src/util/sock.h
+@@ -146,22 +146,29 @@ public:
+      * If passed to `Wait()`, then it will wait for readiness to send to the socket.
+      */
+     static constexpr Event SEND = 0b010;
+ 
+     /**
+-     * Ignored if passed to `Wait()`, but could be set in the occurred events if an
+-     * exceptional condition has occurred on the socket or if it has been disconnected.
++     * Could be set in the occurred events. On Linux this happens when the
++     * socket has an error or has been disconnected, whichever events were
++     * requested. On other platforms (Windows, macOS, BSDs) this only happens
++     * when it was passed to `Wait()` and an exceptional condition has occurred
++     * on the socket.
++     *
++     * Only pass it to `Wait()` while waiting for a non-blocking connect() to
++     * complete: Windows does not report a failed connect otherwise.
+      */
+     static constexpr Event ERR = 0b100;
+ 
+     /**
+      * Wait for readiness for input (recv) or output (send).
+      * @param[in] timeout Wait this much for at least one of the requested events to occur.
+-     * @param[in] requested Wait for those events, bitwise-or of `RECV` and `SEND`.
++     * @param[in] requested Wait for those events, bitwise-or of `RECV` and `SEND`,
++     * optionally with `ERR`.
+      * @param[out] occurred If not nullptr and the function returns `true`, then this
+-     * indicates which of the requested events occurred (`ERR` will be added, even if
+-     * not requested, if an exceptional event occurs on the socket).
++     * indicates which of the requested events occurred. On Linux, `ERR` may be
++     * added without being requested.
+      * A timeout is indicated by return value of `true` and `occurred` being set to 0.
+      * @return true on success (or timeout, if `occurred` of 0 is returned), false otherwise
+      */
+     [[nodiscard]] virtual bool Wait(std::chrono::milliseconds timeout,
+                                     Event requested,
+diff --git a/test/functional/p2p_socket_errors.py b/test/functional/p2p_socket_errors.py
+new file mode 100755
+index 0000000000..f57a804c76
+--- /dev/null
++++ b/test/functional/p2p_socket_errors.py
+@@ -0,0 +1,124 @@
++#!/usr/bin/env python3
++# Copyright (c) 2026 The Bitcoin Core developers
++# Distributed under the MIT software license, see the accompanying
++# file COPYING or http://www.opensource.org/licenses/mit-license.php.
++"""Test P2P handling of TCP urgent data and resets while sending."""
++
++import os
++import platform
++import socket
++import struct
++
++from test_framework.messages import (
++    CInv,
++    MAGIC_BYTES,
++    MSG_BLOCK,
++    MSG_WITNESS_FLAG,
++    msg_getdata,
++    msg_ping,
++    msg_version,
++)
++from test_framework.p2p import NetworkThread, P2PInterface, P2P_VERSION
++from test_framework.test_framework import BitcoinTestFramework
++from test_framework.util import assert_equal, assert_greater_than, mine_large_block, p2p_port
++from test_framework.wallet import MiniWallet
++
++
++def reset_on_close(sock):
++    """Make a subsequent close send a TCP reset and discard unsent data."""
++    # Windows struct linger holds two unsigned shorts; Unix uses two ints.
++    linger = struct.pack("HH" if os.name == "nt" else "ii", 1, 0)
++    sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, linger)
++
++
++class SocketErrorsTest(BitcoinTestFramework):
++    def set_test_params(self):
++        self.num_nodes = 1
++        self.extra_args = [["-maxsendbuffer=1", "-maxreceivebuffer=1", "-datacarriersize=100000"]]
++
++    def run_test(self):
++        self.message_builder = P2PInterface()
++        self.message_builder.magic_bytes = MAGIC_BYTES[self.chain]
++        self.version = msg_version()
++        self.version.nVersion = P2P_VERSION
++        self.check_urgent_bytes()
++        self.check_reset_while_sending()
++
++    def check_probe(self, send_probe, expected_bytes):
++        node = self.nodes[0]
++        with socket.create_connection(("127.0.0.1", p2p_port(0)), timeout=10) as peer:
++            self.wait_until(lambda: len(node.getpeerinfo()) == 1)
++            send_probe(peer)
++            # The node ignores the urgent byte: the connection stays open,
++            # the ordinary version message is processed and the urgent byte
++            # is not counted as received.
++            def received_version():
++                peers = node.getpeerinfo()
++                assert_equal(len(peers), 1)
++                return peers[0]["version"] == self.version.nVersion
++
++            self.wait_until(received_version)
++            assert_equal(node.getpeerinfo()[0]["bytesrecv"], expected_bytes)
++        self.wait_until(lambda: len(node.getpeerinfo()) == 0)
++
++    def check_urgent_bytes(self):
++        self.log.info("Check handling of individual urgent bytes")
++        version = self.message_builder.build_message(self.version)
++        # Use a fresh connection for each byte so earlier urgent indications
++        # cannot be overwritten before they are observed by the node.
++        for byte in b"URG":
++            def send_probe(peer):
++                peer.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
++                assert_equal(peer.send(bytes([byte]), socket.MSG_OOB), 1)
++                peer.sendall(version)
++
++            self.check_probe(send_probe, len(version))
++
++    def wait_for_send_stall(self, node):
++        """Wait until sending blocks to the first peer stalls. Return its byte count."""
++        previous_bytes = 0
++
++        def stalled():
++            nonlocal previous_bytes
++            block_bytes, previous_bytes = previous_bytes, node.getpeerinfo()[0]["bytessent_per_msg"].get("block", 0)
++            return block_bytes > 0 and block_bytes == previous_bytes
++
++        self.wait_until(stalled, check_interval=1)
++        return previous_bytes
++
++    def check_reset_while_sending(self):
++        self.log.info("Check reset while the node has unsent block data")
++        node = self.nodes[0]
++        wallet = MiniWallet(node)
++        mine_large_block(self, wallet, node)
++        block_hash = node.getbestblockhash()
++        block_size = len(node.getblock(block_hash, 0)) // 2 + 24
++        peer = node.add_p2p_connection(P2PInterface(), supports_v2_p2p=False)
++        peer.sync_with_ping()
++        NetworkThread.network_event_loop.call_soon_threadsafe(peer._transport.pause_reading)
++        requests = 16
++        peer.send_message(msg_getdata([CInv(MSG_BLOCK | MSG_WITNESS_FLAG, int(block_hash, 16))] * requests))
++        sent_bytes = self.wait_for_send_stall(node)
++        assert_greater_than(requests * block_size, sent_bytes)
++        # Exceed the receive-queue limit while processing is blocked by the
++        # outgoing data. Wait until the node has read that first batch.
++        pings = peer.build_message(msg_ping(nonce=123)) * 100
++        received = node.getnettotals()["totalbytesrecv"] + len(pings)
++        peer.send_raw_message(pings)
++        self.wait_until(lambda: node.getnettotals()["totalbytesrecv"] == received)
++        # More input is now queued in the kernel while receiving is paused.
++        peer.send_raw_message(pings)
++        reset_on_close(peer._transport.get_extra_info("socket"))
++        # Linux is the only platform where the node uses poll(), unless it is
++        # a Windows binary running under Wine.
++        uses_poll = platform.system() == "Linux" and self.config["environment"]["EXEEXT"] != ".exe"
++        expected_msgs = ["socket error or hangup"] if uses_poll else []
++        with node.assert_debug_log(expected_msgs):
++            peer.peer_disconnect()
++            self.wait_until(lambda: len(node.getpeerinfo()) == 0, timeout=10)
++        assert_equal(node.getnettotals()["totalbytesrecv"], received)
++        node.disconnect_p2ps()
++
++
++if __name__ == '__main__':
++    SocketErrorsTest(__file__).main()
+diff --git a/test/functional/test_runner.py b/test/functional/test_runner.py
+index 000407b118..70c9eb591d 100755
+--- a/test/functional/test_runner.py
++++ b/test/functional/test_runner.py
+@@ -269,10 +269,11 @@ BASE_SCRIPTS = [
+     'p2p_invalid_block.py --v1transport',
+     'p2p_invalid_block.py --v2transport',
+     'p2p_invalid_tx.py --v1transport',
+     'p2p_invalid_tx.py --v2transport',
+     'p2p_v2_transport.py',
++    'p2p_socket_errors.py',
+     'p2p_v2_encrypted.py',
+     'p2p_v2_misbehaving.py',
+     'example_test.py',
+     'mempool_truc.py',
+     'wallet_txn_doublespend.py --legacy-wallet',
