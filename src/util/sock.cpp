@@ -216,12 +216,14 @@ bool Sock::WaitMany(std::chrono::milliseconds timeout, EventsPerSock& events_per
         const auto& s = sock->m_socket;
         if (events.requested & RecvEvent) {
             FD_SET(s, &recv);
-            FD_SET(s, &err);
         }
         if (events.requested & SendEvent) {
             FD_SET(s, &send);
         }
-        if (events.requested & (RecvEvent | SendEvent)) {
+        if (events.requested & ErrorEvent) {
+            FD_SET(s, &err);
+        }
+        if (events.requested & (RecvEvent | SendEvent | ErrorEvent)) {
             socket_max = std::max(socket_max, s);
         }
     }

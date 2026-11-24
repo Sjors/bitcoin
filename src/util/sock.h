@@ -156,8 +156,16 @@ public:
     static constexpr Event SendEvent = 0b010;
 
     /**
-     * Ignored if passed to `Wait()`, but could be set in the occurred events if an
-     * exceptional condition has occurred on the socket or if it has been disconnected.
+     * Could be set in the occurred events if an exceptional condition has
+     * occurred on the socket or if it has been disconnected. With `poll()`
+     * that happens whichever events were requested. With `select()` it only
+     * happens if this was passed to `Wait()`.
+     *
+     * Only pass it to `Wait()` while waiting for a non-blocking connect() to
+     * complete: Windows reports a failed connect in the `select()` exception
+     * set and nowhere else. On an established connection that set also
+     * reports TCP urgent data, which `recv()` does not return, so `Wait()`
+     * could keep returning with nothing to read.
      */
     static constexpr Event ErrorEvent = 0b100;
 
@@ -173,10 +181,11 @@ public:
      * Wait for readiness for input (recv) or output (send).
      * @param[in] timeout Wait this much for at least one of the requested events to occur.
      * Capped at `MAX_WAIT_TIMEOUT`.
-     * @param[in] requested Wait for those events, bitwise-or of `RecvEvent` and `SendEvent`.
+     * @param[in] requested Wait for those events, bitwise-or of `RecvEvent` and `SendEvent`,
+     * optionally with `ErrorEvent`.
      * @param[out] occurred If not nullptr and the function returns `true`, then this
-     * indicates which of the requested events occurred (`ErrorEvent` will be added, even if
-     * not requested, if an exceptional event occurs on the socket).
+     * indicates which of the requested events occurred. With `poll()`, `ErrorEvent` may be
+     * added without being requested.
      * A timeout is indicated by return value of `true` and `occurred` being set to 0.
      * @return true on success (or timeout, if `occurred` of 0 is returned), false otherwise
      */

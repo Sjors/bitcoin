@@ -8,6 +8,7 @@
 #include <test/util/setup_common.h>
 #include <util/sock.h>
 #include <util/threadinterrupt.h>
+#include <util/time.h>
 
 #include <boost/test/unit_test.hpp>
 
@@ -55,6 +56,46 @@ BOOST_AUTO_TEST_CASE(move_constructor)
     BOOST_CHECK(*sock2 == s);
     delete sock2;
     BOOST_CHECK(SocketIsClosed(s));
+}
+
+// This test sets up its own sockets and sits above the socket pair tests.
+// That keeps it easy to backport: older branches build those for POSIX only.
+BOOST_AUTO_TEST_CASE(wait_ignores_urgent_data)
+{
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t addr_len{sizeof(addr)};
+
+    const SOCKET listener_socket{CreateSocket()};
+    const Sock listener{listener_socket};
+    BOOST_REQUIRE_EQUAL(listener.Bind(reinterpret_cast<sockaddr*>(&addr), addr_len), 0);
+    BOOST_REQUIRE_EQUAL(listener.Listen(1), 0);
+    BOOST_REQUIRE_EQUAL(listener.GetSockName(reinterpret_cast<sockaddr*>(&addr), &addr_len), 0);
+
+    const Sock sender{CreateSocket()};
+    BOOST_REQUIRE_EQUAL(sender.Connect(reinterpret_cast<sockaddr*>(&addr), addr_len), 0);
+
+    // Accept without Sock::Accept(), to know the socket to pass to select().
+    const SOCKET receiver_socket = accept(listener_socket, nullptr, nullptr);
+    BOOST_REQUIRE(receiver_socket != INVALID_SOCKET);
+    const Sock receiver{receiver_socket};
+
+    BOOST_REQUIRE_EQUAL(sender.Send("U", 1, MSG_OOB), 1);
+
+    // Wait for the operating system to report the urgent byte as an
+    // exceptional condition on the receiving socket.
+    fd_set exceptions;
+    FD_ZERO(&exceptions);
+    FD_SET(receiver_socket, &exceptions);
+    timeval timeout{MillisToTimeval(1min)};
+    BOOST_REQUIRE_EQUAL(select(receiver_socket + 1, nullptr, nullptr, &exceptions, &timeout), 1);
+
+    // recv() does not return urgent data, so waiting to receive must not
+    // report it. Otherwise a caller that waits again would never block.
+    Sock::Event occurred;
+    BOOST_REQUIRE(receiver.Wait(100ms, Sock::RecvEvent, &occurred));
+    BOOST_CHECK(occurred == 0);
 }
 
 BOOST_AUTO_TEST_CASE(move_assignment)
