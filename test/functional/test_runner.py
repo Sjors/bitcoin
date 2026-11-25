@@ -194,6 +194,7 @@ BASE_SCRIPTS = [
     'tool_wallet.py',
     'tool_utils.py',
     'tool_signet_miner.py',
+    'tool_import_pruned.py',
     'wallet_txn_clone.py',
     'wallet_txn_clone.py --segwit',
     'rpc_getchaintips.py',
